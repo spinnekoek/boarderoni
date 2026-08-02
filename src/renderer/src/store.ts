@@ -13,6 +13,11 @@ interface DashboardStore {
   devices: DeviceInfo[]
   connect: (mode: Mode) => void
   updateWidgets: (widgets: Widget[]) => void
+  updateDashboardMeta: (
+    fields: Partial<Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundFit' | 'backgroundAnchor' | 'spacing'>>
+  ) => void
+  uploadBackgroundImage: (dataUrl: string) => void
+  clearBackgroundImage: () => void
   addWidget: (widget: Widget) => void
   removeWidget: (id: string) => void
   triggerWidget: (id: string) => void
@@ -82,6 +87,20 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     const dashboard = { ...get().dashboard, widgets }
     set({ dashboard })
     send({ type: 'dashboard:update', dashboard })
+  },
+
+  updateDashboardMeta: (fields) => {
+    const dashboard = { ...get().dashboard, ...fields }
+    set({ dashboard })
+    send({ type: 'dashboard:update', dashboard })
+  },
+
+  uploadBackgroundImage: (dataUrl) => {
+    send({ type: 'background-image:upload', dataUrl })
+  },
+
+  clearBackgroundImage: () => {
+    send({ type: 'background-image:clear' })
   },
 
   addWidget: (widget) => {

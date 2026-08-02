@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
+import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { CanvasWidget } from './CanvasWidget'
 import { DEFAULT_DEVICE_BOUNDS } from '@shared/constants'
 
@@ -25,6 +26,10 @@ interface PanState {
 
 export function Canvas(): React.JSX.Element {
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
+  const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
+  const backgroundImageVersion = useDashboardStore((s) => s.dashboard.backgroundImageVersion)
+  const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
+  const backgroundAnchor = useDashboardStore((s) => s.dashboard.backgroundAnchor)
   const devices = useDashboardStore((s) => s.devices)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
@@ -97,10 +102,11 @@ export function Canvas(): React.JSX.Element {
         style={
           snapToGrid
             ? {
+                backgroundColor,
                 backgroundSize: `${gridSize * camera.zoom}px ${gridSize * camera.zoom}px`,
                 backgroundPosition: `${camera.x}px ${camera.y}px`
               }
-            : { backgroundImage: 'none' }
+            : { backgroundColor, backgroundImage: 'none' }
         }
       >
         <div className="canvas-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
@@ -110,6 +116,17 @@ export function Canvas(): React.JSX.Element {
                 {d.width}×{d.height}
                 {devices.length === 0 ? ' (guide)' : ''}
               </span>
+              {backgroundImageVersion && (
+                <div className="canvas-device-bounds__clip">
+                  <div
+                    className="dashboard-wallpaper"
+                    style={{
+                      backgroundImage: `url(${backgroundImageUrl(backgroundImageVersion)})`,
+                      ...backgroundImageStyle(backgroundFit ?? 'cover', backgroundAnchor ?? 'center')
+                    }}
+                  />
+                </div>
+              )}
             </div>
           ))}
           {widgets.map((widget) => (

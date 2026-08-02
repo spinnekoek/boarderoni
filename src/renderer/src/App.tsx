@@ -5,6 +5,7 @@ import { ViewCanvas } from './components/ViewCanvas'
 import { Palette } from './components/Palette'
 import { PropertiesPanel } from './components/PropertiesPanel'
 import { Toolbar } from './components/Toolbar'
+import { ConfirmModal } from './components/ConfirmModal'
 
 function readMode(): 'edit' | 'view' {
   const params = new URLSearchParams(window.location.search)
@@ -42,6 +43,7 @@ export function App(): React.JSX.Element {
         <Canvas />
         <PropertiesPanel />
       </div>
+      <ConfirmModal />
     </div>
   )
 }

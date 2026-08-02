@@ -4,3 +4,9 @@ export const SERVER_PORT = 17334
 
 // Guide rectangle shown in the editor when no device is currently connected.
 export const DEFAULT_DEVICE_BOUNDS = { width: 1280, height: 800 }
+
+// Default inner padding (px) for a button widget when it hasn't set its own.
+export const DEFAULT_WIDGET_PADDING = 8
+
+// Default label font size (px) for a button widget when it hasn't set its own.
+export const DEFAULT_WIDGET_FONT_SIZE = 14

@@ -1,10 +1,7 @@
 import { useDashboardStore } from '../store'
 import { DEFAULT_FONT_ID } from '@shared/fonts'
+import { nextId } from '../id'
 import type { ButtonWidget } from '@shared/types'
-
-function nextId(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `w_${Date.now()}_${Math.random().toString(16).slice(2)}`
-}
 
 export function Palette(): React.JSX.Element {
   const addWidget = useDashboardStore((s) => s.addWidget)
@@ -18,8 +15,7 @@ export function Palette(): React.JSX.Element {
       y: 40,
       w: 160,
       h: 80,
-      label: 'New Button',
-      fontFamily: DEFAULT_FONT_ID,
+      labels: [{ id: nextId(), text: 'New Button', fontFamily: DEFAULT_FONT_ID, align: 'center', verticalAlign: 'center' }],
       action: { kind: 'keypress', keys: [] }
     }
     addWidget(widget)

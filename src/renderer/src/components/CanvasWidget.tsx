@@ -1,11 +1,11 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
+import { applySpacing } from '../layout'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
 import type { Widget } from '@shared/types'
 
 const DRAG_THRESHOLD = 3
-const MIN_SIZE = 20
 
 interface DragState {
   startX: number
@@ -27,12 +27,14 @@ export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number })
   const selectWidget = useDashboardStore((s) => s.selectWidget)
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
+  const spacing = useDashboardStore((s) => s.dashboard.spacing ?? 0)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
 
   const selected = widget.id === selectedWidgetId
   const dragState = useRef<DragState | null>(null)
   const resizeState = useRef<ResizeState | null>(null)
+  const [resizing, setResizing] = useState(false)
 
   function snap(value: number): number {
     return snapToGrid ? Math.round(value / gridSize) * gridSize : Math.round(value)
@@ -75,6 +77,7 @@ export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number })
   function handleResizePointerDown(e: React.PointerEvent): void {
     e.stopPropagation()
     resizeState.current = { startX: e.clientX, startY: e.clientY, origW: widget.w, origH: widget.h }
+    setResizing(true)
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
@@ -88,23 +91,40 @@ export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number })
     if (!resize) return
     const dx = (e.clientX - resize.startX) / zoom
     const dy = (e.clientY - resize.startY) / zoom
-    patch({ w: Math.max(MIN_SIZE, snap(resize.origW + dx)), h: Math.max(MIN_SIZE, snap(resize.origH + dy)) })
+
+    // Not tied to label content — text is allowed to overflow a widget
+    // that's smaller than it needs (see .deck-button__label). The floor here
+    // is purely about the grid: snapped widgets shouldn't shrink below one
+    // grid cell, but with snapping off there's no such constraint.
+    const minSize = snapToGrid ? gridSize : 1
+    const w = Math.max(minSize, snap(resize.origW + dx))
+    const h = Math.max(minSize, snap(resize.origH + dy))
+
+    patch({ w, h })
   }
 
   function handleResizePointerUp(e: React.PointerEvent): void {
     e.stopPropagation()
     resizeState.current = null
+    setResizing(false)
   }
+
+  const rendered = applySpacing(widget.x, widget.y, widget.w, widget.h, spacing)
 
   return (
     <div
       className={`canvas-widget${selected ? ' canvas-widget--selected' : ''}`}
-      style={{ left: widget.x, top: widget.y, width: widget.w, height: widget.h }}
+      style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
       <ButtonWidgetContent widget={widget} interactive={false} />
+      {resizing && (
+        <div className="canvas-widget__size-label" style={{ transform: `scale(${1 / zoom})` }}>
+          {Math.round(widget.w)} × {Math.round(widget.h)}
+        </div>
+      )}
       {selected && (
         <div
           className="canvas-widget__resize-handle"
