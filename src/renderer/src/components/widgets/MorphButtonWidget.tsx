@@ -11,6 +11,7 @@ export function MorphButtonWidgetContent({
   widget,
   state,
   interactive,
+  spacing,
   error,
   onTrigger,
   onPress,
@@ -22,6 +23,10 @@ export function MorphButtonWidgetContent({
   widget: MorphButtonWidget
   state: WidgetState
   interactive: boolean
+  // Grid spacing (dashboard.spacing), applied per cell/per side below — see
+  // the comment on cellElements for why this can't just shrink the whole
+  // bounding box the way a single ButtonWidget's box does.
+  spacing: number
   error?: string
   onTrigger?: () => void
   onPress?: () => void
@@ -46,21 +51,29 @@ export function MorphButtonWidgetContent({
   const totalCols = Math.max(...cols) - minCol + 1
   const totalRows = Math.max(...rows) - minRow + 1
 
-  // Percentage-based (not fixed cellW/cellH px) so the same grid-spacing
-  // inset applied to the widget's outer box (see layout.ts's applySpacing)
-  // shrinks the whole shape proportionally, exactly like a single
-  // ButtonWidget's box shrinks today — no per-cell gap introduced.
+  // Fixed pixel offsets (not percentages of the bounding box), each cell
+  // inset by the full `spacing` on whichever of its top/left sides face
+  // outward (no same-widget neighbor there) and none on sides that touch
+  // another cell of this widget. A percentage-of-bounding-box shrink would
+  // only give a multi-cell shape a spacing/totalCols-sized gap instead of a
+  // full one, and that fraction changes with cell count — inconsistent with
+  // a plain ButtonWidget's (and any differently-sized morph shape's) full
+  // shrink, which is exactly what produced the overlap/gap mismatch between
+  // two touching shapes at spacing > 0.
   const cellElements = widget.cells.map((cell) => {
     const hasUp = cellSet.has(`${cell.col},${cell.row - 1}`)
     const hasDown = cellSet.has(`${cell.col},${cell.row + 1}`)
     const hasLeft = cellSet.has(`${cell.col - 1},${cell.row}`)
     const hasRight = cellSet.has(`${cell.col + 1},${cell.row}`)
 
+    const insetLeft = hasLeft ? 0 : spacing
+    const insetTop = hasUp ? 0 : spacing
+
     const cellStyle: React.CSSProperties = {
-      left: `${((cell.col - minCol) / totalCols) * 100}%`,
-      top: `${((cell.row - minRow) / totalRows) * 100}%`,
-      width: `${(1 / totalCols) * 100}%`,
-      height: `${(1 / totalRows) * 100}%`,
+      left: (cell.col - minCol) * widget.cellW + insetLeft,
+      top: (cell.row - minRow) * widget.cellH + insetTop,
+      width: Math.max(0, widget.cellW - insetLeft),
+      height: Math.max(0, widget.cellH - insetTop),
       backgroundColor: bg,
       borderTop: hasUp ? 'none' : `1px solid ${border}`,
       borderBottom: hasDown ? 'none' : `1px solid ${border}`,
@@ -112,7 +125,7 @@ export function MorphButtonWidgetContent({
   const labelElements = renderWidgetLabels(state.labels, backgroundColor)
 
   return (
-    <div className="deck-morph">
+    <div className="deck-morph" style={{ width: totalCols * widget.cellW, height: totalRows * widget.cellH }}>
       {cellElements}
       <div className="deck-morph-labels">{labelElements}</div>
       {error && <span className="deck-button__error">{error}</span>}

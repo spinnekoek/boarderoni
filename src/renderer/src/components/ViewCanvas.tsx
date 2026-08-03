@@ -12,10 +12,12 @@ const SETTINGS_GESTURE_FINGER_COUNT = 5
 
 function ViewWidget({
   widget,
+  spacing,
   onTrigger,
   error
 }: {
   widget: Widget
+  spacing: number
   onTrigger: () => void
   error?: string
 }): React.JSX.Element {
@@ -38,7 +40,16 @@ function ViewWidget({
   // land on any real cell.
   if (widget.type === 'morph') {
     return (
-      <MorphButtonWidgetContent widget={widget} state={state} interactive onTrigger={onTrigger} onPress={press} onRelease={release} error={error} />
+      <MorphButtonWidgetContent
+        widget={widget}
+        state={state}
+        interactive
+        spacing={spacing}
+        onTrigger={onTrigger}
+        onPress={press}
+        onRelease={release}
+        error={error}
+      />
     )
   }
 
@@ -110,14 +121,18 @@ export function ViewCanvas(): React.JSX.Element {
       )}
       {widgets.map((widget) => {
         const footprint = widgetFootprint(widget)
-        const rendered = applySpacing(footprint.x, footprint.y, footprint.w, footprint.h, spacing)
+        // Morph widgets stay at their raw (unspaced) footprint — spacing is
+        // applied per cell inside MorphButtonWidgetContent instead (see its
+        // comment on cellElements).
+        const rendered =
+          widget.type === 'morph' ? footprint : applySpacing(footprint.x, footprint.y, footprint.w, footprint.h, spacing)
         return (
           <div
             key={widget.id}
             className={`view-canvas__widget${widget.type === 'morph' ? ' view-canvas__widget--morph' : ''}`}
             style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
           >
-            <ViewWidget widget={widget} onTrigger={() => triggerWidget(widget.id)} error={errors[widget.id]} />
+            <ViewWidget widget={widget} spacing={spacing} onTrigger={() => triggerWidget(widget.id)} error={errors[widget.id]} />
           </div>
         )
       })}

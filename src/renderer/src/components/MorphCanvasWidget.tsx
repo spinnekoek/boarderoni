@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useWidgetDrag } from '../useWidgetDrag'
-import { applySpacing, widgetFootprint } from '../layout'
+import { widgetFootprint } from '../layout'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
 import type { MorphButtonWidget, MorphCell } from '@shared/types'
 
@@ -134,19 +134,23 @@ export function MorphCanvasWidget({ widget, zoom }: { widget: MorphButtonWidget;
     setResizing(false)
   }
 
+  // Positioned at the raw (unspaced) footprint — MorphButtonWidgetContent
+  // applies spacing itself, per cell/per side, since a bounding-box-level
+  // shrink doesn't distribute correctly across multiple cells (see its
+  // comment on cellElements).
   const footprint = widgetFootprint(widget)
-  const rendered = applySpacing(footprint.x, footprint.y, footprint.w, footprint.h, spacing)
   const isSoleSelection = selected && selectedWidgetIds.length === 1
 
   return (
     <div
       className={`canvas-widget canvas-widget--morph${selected ? ' canvas-widget--selected' : ''}`}
-      style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
+      style={{ left: footprint.x, top: footprint.y, width: footprint.w, height: footprint.h }}
     >
       <MorphButtonWidgetContent
         widget={widget}
         state={previewState}
         interactive={false}
+        spacing={spacing}
         onCellPointerDown={handlePointerDown}
         onCellPointerMove={handlePointerMove}
         onCellPointerUp={handlePointerUp}
