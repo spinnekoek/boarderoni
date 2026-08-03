@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
-import { applySpacing } from '../layout'
+import { applySpacing, widgetFootprint } from '../layout'
 import { getEffectiveStates } from '@shared/states'
 import type { Widget } from '@shared/types'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
+import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
 import { DeviceSettingsModal } from './DeviceSettingsModal'
 
 const SETTINGS_GESTURE_FINGER_COUNT = 5
@@ -20,18 +21,34 @@ function ViewWidget({
 }): React.JSX.Element {
   const [pressed, setPressed] = useState(false)
   const [defaultState, clickedState] = getEffectiveStates(widget)
+  const state = pressed && clickedState ? clickedState : defaultState
+
+  function press(): void {
+    setPressed(true)
+  }
+
+  function release(): void {
+    setPressed(false)
+  }
+
+  // Morph cells own their own pointer handling (see MorphButtonWidgetContent)
+  // instead of a single full-bounding-box wrapper, since an irregular shape's
+  // bounding box includes area that isn't actually part of any cell (a U's
+  // notch) — a wrapper div there would show "pressed" for taps that don't
+  // land on any real cell.
+  if (widget.type === 'morph') {
+    return (
+      <MorphButtonWidgetContent widget={widget} state={state} interactive onTrigger={onTrigger} onPress={press} onRelease={release} error={error} />
+    )
+  }
 
   function handlePointerDown(e: React.PointerEvent): void {
-    setPressed(true)
+    press()
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
       // best-effort, see CanvasWidget's handlePointerDown
     }
-  }
-
-  function release(): void {
-    setPressed(false)
   }
 
   return (
@@ -42,7 +59,7 @@ function ViewWidget({
       onPointerCancel={release}
       onPointerLeave={release}
     >
-      <ButtonWidgetContent widget={widget} state={pressed && clickedState ? clickedState : defaultState} interactive onTrigger={onTrigger} error={error} />
+      <ButtonWidgetContent widget={widget} state={state} interactive onTrigger={onTrigger} error={error} />
     </div>
   )
 }
@@ -92,11 +109,12 @@ export function ViewCanvas(): React.JSX.Element {
         />
       )}
       {widgets.map((widget) => {
-        const rendered = applySpacing(widget.x, widget.y, widget.w, widget.h, spacing)
+        const footprint = widgetFootprint(widget)
+        const rendered = applySpacing(footprint.x, footprint.y, footprint.w, footprint.h, spacing)
         return (
           <div
             key={widget.id}
-            className="view-canvas__widget"
+            className={`view-canvas__widget${widget.type === 'morph' ? ' view-canvas__widget--morph' : ''}`}
             style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
           >
             <ViewWidget widget={widget} onTrigger={() => triggerWidget(widget.id)} error={errors[widget.id]} />

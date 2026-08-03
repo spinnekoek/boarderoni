@@ -3,6 +3,7 @@ import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { CanvasWidget } from './CanvasWidget'
+import { MorphCanvasWidget } from './MorphCanvasWidget'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
 
@@ -60,9 +61,14 @@ export function Canvas(): React.JSX.Element {
   }
 
   function handleBackgroundPointerUp(): void {
-    const moved = panState.current?.moved
+    // Only deselect for a pointerup this element's own pointerdown actually
+    // started (panState set) — otherwise an interactive child that stops
+    // propagation on pointerdown/click but not pointerup (e.g. the morph
+    // widget's + handles) would bubble its release here and get incorrectly
+    // treated as "clicked empty background."
+    const pan = panState.current
     panState.current = null
-    if (!moved) selectWidget(null)
+    if (pan && !pan.moved) selectWidget(null)
   }
 
   function handleWheel(e: React.WheelEvent): void {
@@ -131,9 +137,13 @@ export function Canvas(): React.JSX.Element {
               </div>
             )}
           </div>
-          {widgets.map((widget) => (
-            <CanvasWidget key={widget.id} widget={widget} zoom={camera.zoom} />
-          ))}
+          {widgets.map((widget) =>
+            widget.type === 'morph' ? (
+              <MorphCanvasWidget key={widget.id} widget={widget} zoom={camera.zoom} />
+            ) : (
+              <CanvasWidget key={widget.id} widget={widget} zoom={camera.zoom} />
+            )
+          )}
         </div>
       </div>
     </div>

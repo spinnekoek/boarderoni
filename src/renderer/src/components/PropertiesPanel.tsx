@@ -319,7 +319,10 @@ export function PropertiesPanel(): React.JSX.Element {
   }
 
   function patch(fields: Partial<Widget>): void {
-    updateWidgets(widgets.map((w) => (w.id === widget!.id ? { ...w, ...fields } : w)))
+    // fields' shape always matches widget's actual type at each call site
+    // (e.g. cellW only patched from the morph branch below) — TS can't
+    // verify that through a generic Widget union, hence the cast.
+    updateWidgets(widgets.map((w) => (w.id === widget!.id ? ({ ...w, ...fields } as Widget) : w)))
   }
 
   const stateIndex = widget.statesEnabled ? Math.min(activeStateIndex, widget.states.length - 1) : 0
@@ -558,25 +561,56 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Y</span>
             <input type="number" value={widget.y} onChange={(e) => patch({ y: Number(e.target.value) })} />
           </label>
-          <label className="properties__field">
-            <span>W</span>
-            <input
-              type="number"
-              min={minSize}
-              value={widget.w}
-              onChange={(e) => patch({ w: Math.max(minSize, Number(e.target.value)) })}
-            />
-          </label>
-          <label className="properties__field">
-            <span>H</span>
-            <input
-              type="number"
-              min={minSize}
-              value={widget.h}
-              onChange={(e) => patch({ h: Math.max(minSize, Number(e.target.value)) })}
-            />
-          </label>
+          {widget.type === 'button' ? (
+            <>
+              <label className="properties__field">
+                <span>W</span>
+                <input
+                  type="number"
+                  min={minSize}
+                  value={widget.w}
+                  onChange={(e) => patch({ w: Math.max(minSize, Number(e.target.value)) })}
+                />
+              </label>
+              <label className="properties__field">
+                <span>H</span>
+                <input
+                  type="number"
+                  min={minSize}
+                  value={widget.h}
+                  onChange={(e) => patch({ h: Math.max(minSize, Number(e.target.value)) })}
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label className="properties__field">
+                <span>Cell W</span>
+                <input
+                  type="number"
+                  min={minSize}
+                  value={widget.cellW}
+                  onChange={(e) => patch({ cellW: Math.max(minSize, Number(e.target.value)) })}
+                />
+              </label>
+              <label className="properties__field">
+                <span>Cell H</span>
+                <input
+                  type="number"
+                  min={minSize}
+                  value={widget.cellH}
+                  onChange={(e) => patch({ cellH: Math.max(minSize, Number(e.target.value)) })}
+                />
+              </label>
+            </>
+          )}
         </div>
+        {widget.type === 'morph' && (
+          <p className="properties__hint">
+            {widget.cells.length} cell{widget.cells.length === 1 ? '' : 's'} — select the widget on the canvas and use its + handles
+            to add more.
+          </p>
+        )}
       </details>
 
       <div className="properties__divider" />

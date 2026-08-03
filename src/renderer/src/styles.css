@@ -273,6 +273,16 @@ body {
   cursor: pointer;
 }
 
+/* A morph widget's box is its cells' bounding box, which can include empty
+   area (e.g. a U's notch) that isn't actually part of the shape — the box
+   itself must let clicks pass through so anything placed behind/inside it
+   stays reachable; only the actual cells (and the +/resize handles) opt
+   back into receiving pointer events below. */
+.canvas-widget--morph {
+  cursor: default;
+  pointer-events: none;
+}
+
 .canvas-widget--selected {
   outline: 2px solid #5b8def;
   outline-offset: 2px;
@@ -303,6 +313,31 @@ body {
   background: #5b8def;
   border-radius: 2px;
   cursor: nwse-resize;
+  pointer-events: auto;
+}
+
+.canvas-widget__morph-extend {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #5b8def;
+  color: #14161b;
+  border: 2px solid #14161b;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 11;
+  padding: 0;
+  pointer-events: auto;
+}
+
+.canvas-widget__morph-extend:hover {
+  filter: brightness(1.1);
 }
 
 .view-canvas {
@@ -315,6 +350,12 @@ body {
 
 .view-canvas__widget {
   position: absolute;
+}
+
+/* See .canvas-widget--morph — same reasoning, so a widget placed inside a
+   morph shape's notch is still tappable on the deployed client. */
+.view-canvas__widget--morph {
+  pointer-events: none;
 }
 
 .deck-button {
@@ -336,10 +377,6 @@ body {
     border-color 80ms ease;
 }
 
-button.deck-button:hover {
-  filter: brightness(1.15);
-}
-
 button.deck-button:focus,
 button.deck-button:focus-visible {
   outline: none;
@@ -357,6 +394,46 @@ button.deck-button:focus-visible {
   pointer-events: none;
   white-space: nowrap;
   overflow: visible;
+}
+
+.deck-morph {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.deck-morph-cell {
+  position: absolute;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  color: #e8e8ea;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+  outline: none;
+  transition:
+    background-color 80ms ease,
+    border-color 80ms ease;
+}
+
+button.deck-morph-cell:focus,
+button.deck-morph-cell:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.deck-morph-cell--static {
+  cursor: default;
+}
+
+.deck-morph-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 .deck-button__error {

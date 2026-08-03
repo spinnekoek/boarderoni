@@ -31,6 +31,10 @@ interface LegacyButtonWidget {
 }
 
 function migrateWidget(widget: Widget & LegacyButtonWidget): Widget {
+  // Morph widgets never existed in any of the legacy shapes below — they're
+  // always created with a states[] array from the start.
+  if (widget.type === 'morph') return widget
+
   if (!Array.isArray(widget.labels)) {
     const { label, fontFamily, fontSize, textColor, textOpacity, align, verticalAlign, padding, ...rest } = widget
     widget = {

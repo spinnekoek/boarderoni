@@ -66,7 +66,35 @@ export interface ButtonWidget {
   states: WidgetState[]
 }
 
-export type Widget = ButtonWidget
+// Grid-relative, NOT normalized to a 0-based origin — col/row 0 always maps
+// to the widget's own (x, y) regardless of which cells actually exist, so
+// extending a shape "up" or "left" (negative col/row) never requires
+// rewriting x/y or other cells to compensate. Must stay 4-connected (every
+// cell reachable from any other via shared edges) — that's what "acting as
+// one button" depends on.
+export interface MorphCell {
+  col: number
+  row: number
+}
+
+// A button whose hit area is a union of grid cells rather than one rectangle
+// — e.g. a U-shaped run of cells that still triggers one action and shows
+// one label/state, like several ButtonWidgets fused into one. cellW/cellH
+// size every cell uniformly; there's no per-cell size.
+export interface MorphButtonWidget {
+  id: string
+  type: 'morph'
+  x: number
+  y: number
+  cellW: number
+  cellH: number
+  cells: MorphCell[]
+  action: WidgetAction
+  statesEnabled?: boolean
+  states: WidgetState[]
+}
+
+export type Widget = ButtonWidget | MorphButtonWidget
 
 // 'cover'/'contain'/'stretch' scale the image proportionally or not, 'tile'
 // repeats it at native size, 'none' places it at native size unscaled — the

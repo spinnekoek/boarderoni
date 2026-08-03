@@ -1,6 +1,6 @@
 import { DEFAULT_WIDGET_COLOR, lighten } from './color'
 import { AUTO_CLICKED_LIGHTEN } from './constants'
-import type { ButtonWidget, WidgetState } from './types'
+import type { Widget, WidgetState } from './types'
 
 export function deriveClickedState(base: WidgetState, id: string): WidgetState {
   return {
@@ -20,7 +20,7 @@ export function deriveClickedState(base: WidgetState, id: string): WidgetState {
 // With states enabled, "clicked" is whichever stored state (if any) has
 // isClicked set — not a positional guess — so deleting it means nothing
 // plays on tap rather than some other state activating in its place.
-export function getEffectiveStates(widget: ButtonWidget): [WidgetState, WidgetState | null] {
+export function getEffectiveStates(widget: Widget): [WidgetState, WidgetState | null] {
   const base = widget.states[0]
   if (widget.statesEnabled) {
     return [base, widget.states.find((s) => s.isClicked) ?? null]

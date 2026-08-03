@@ -1,20 +1,10 @@
 import { useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
+import { useWidgetDrag } from '../useWidgetDrag'
 import { applySpacing } from '../layout'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
-import type { Widget } from '@shared/types'
-
-const DRAG_THRESHOLD = 3
-
-interface DragState {
-  startX: number
-  startY: number
-  origins: Map<string, { x: number; y: number }>
-  moved: boolean
-  additive: boolean
-  wasSelected: boolean
-}
+import type { ButtonWidget } from '@shared/types'
 
 interface ResizeState {
   startX: number
@@ -23,9 +13,8 @@ interface ResizeState {
   origH: number
 }
 
-export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number }): React.JSX.Element {
-  const selectedWidgetIds = useDashboardStore((s) => s.selectedWidgetIds)
-  const selectWidget = useDashboardStore((s) => s.selectWidget)
+export function CanvasWidget({ widget, zoom }: { widget: ButtonWidget; zoom: number }): React.JSX.Element {
+  const { selected, selectedWidgetIds, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
   const spacing = useDashboardStore((s) => s.dashboard.spacing ?? 0)
@@ -33,13 +22,11 @@ export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number })
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
 
-  const selected = selectedWidgetIds.includes(widget.id)
   // Follow whichever tab is active in the properties panel — but only while
   // this is the sole selected widget, so an unselected (or multi-selected)
   // widget always shows its resting Default look.
   const isSolePreviewTarget = selected && selectedWidgetIds.length === 1 && (widget.statesEnabled ?? false)
   const previewState = isSolePreviewTarget ? (widget.states[activeStateIndex] ?? widget.states[0]) : widget.states[0]
-  const dragState = useRef<DragState | null>(null)
   const resizeState = useRef<ResizeState | null>(null)
   const [resizing, setResizing] = useState(false)
 
@@ -47,67 +34,8 @@ export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number })
     return snapToGrid ? Math.round(value / gridSize) * gridSize : Math.round(value)
   }
 
-  function patch(fields: Partial<Widget>): void {
-    updateWidgets(widgets.map((w) => (w.id === widget.id ? { ...w, ...fields } : w)))
-  }
-
-  function handlePointerDown(e: React.PointerEvent): void {
-    e.stopPropagation()
-    const additive = e.shiftKey || e.ctrlKey || e.metaKey
-    const wasSelected = selectedWidgetIds.includes(widget.id)
-
-    // Changing selection here (rather than deferring to pointer-up) lets the
-    // drag below immediately pick up the right group of origins. If the
-    // widget is already part of the current selection we leave it alone so a
-    // drag moves the whole group; the click-vs-drag distinction is then
-    // resolved on pointer-up (collapse/toggle only when nothing moved).
-    if (!wasSelected) {
-      selectWidget(widget.id, additive ? { additive: true } : undefined)
-    }
-
-    const activeIds = useDashboardStore.getState().selectedWidgetIds
-    const liveWidgets = useDashboardStore.getState().dashboard.widgets
-    const origins = new Map(
-      activeIds.map((id) => {
-        const w = liveWidgets.find((ww) => ww.id === id)
-        return [id, { x: w?.x ?? 0, y: w?.y ?? 0 }]
-      })
-    )
-
-    dragState.current = { startX: e.clientX, startY: e.clientY, origins, moved: false, additive, wasSelected }
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId)
-    } catch {
-      // capture is best-effort (keeps drag tracking outside the element's
-      // bounds); a failure here shouldn't stop the drag from working
-    }
-  }
-
-  function handlePointerMove(e: React.PointerEvent): void {
-    e.stopPropagation()
-    const drag = dragState.current
-    if (!drag) return
-    const dx = (e.clientX - drag.startX) / zoom
-    const dy = (e.clientY - drag.startY) / zoom
-    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) drag.moved = true
-    if (drag.moved) {
-      const liveWidgets = useDashboardStore.getState().dashboard.widgets
-      updateWidgets(
-        liveWidgets.map((w) => {
-          const origin = drag.origins.get(w.id)
-          return origin ? { ...w, x: snap(origin.x + dx), y: snap(origin.y + dy) } : w
-        })
-      )
-    }
-  }
-
-  function handlePointerUp(e: React.PointerEvent): void {
-    e.stopPropagation()
-    const drag = dragState.current
-    dragState.current = null
-    if (drag && !drag.moved && drag.wasSelected) {
-      selectWidget(widget.id, drag.additive ? { additive: true } : undefined)
-    }
+  function patch(fields: Partial<ButtonWidget>): void {
+    updateWidgets(widgets.map((w) => (w.id === widget.id && w.type === 'button' ? { ...w, ...fields } : w)))
   }
 
   function handleResizePointerDown(e: React.PointerEvent): void {
@@ -117,7 +45,7 @@ export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number })
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
-      // best-effort, see handlePointerDown
+      // best-effort, see useWidgetDrag's handlePointerDown
     }
   }
 
