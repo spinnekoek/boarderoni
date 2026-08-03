@@ -6,10 +6,11 @@ import { nextId } from '../id'
 import { FONT_OPTIONS, resolveFont } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoBorderColor, pickLegibleTextColor } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
+import { deriveClickedState } from '@shared/states'
 import { ANCHOR_OPTIONS } from '../background'
 import { KeyCapture } from './KeyCapture'
 import { ColorPicker } from './ColorPicker'
-import type { BackgroundFit, HorizontalAlign, VerticalAlign, Widget, WidgetLabel } from '@shared/types'
+import type { BackgroundFit, HorizontalAlign, VerticalAlign, Widget, WidgetLabel, WidgetState } from '@shared/types'
 
 const HORIZONTAL_ALIGNS: { value: HorizontalAlign; label: string }[] = [
   { value: 'left', label: 'L' },
@@ -161,13 +162,16 @@ function LabelFields({
 export function PropertiesPanel(): React.JSX.Element {
   const dashboard = useDashboardStore((s) => s.dashboard)
   const widgets = dashboard.widgets
-  const selectedWidgetId = useDashboardStore((s) => s.selectedWidgetId)
+  const selectedWidgetIds = useDashboardStore((s) => s.selectedWidgetIds)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
   const updateDashboardMeta = useDashboardStore((s) => s.updateDashboardMeta)
   const uploadBackgroundImage = useDashboardStore((s) => s.uploadBackgroundImage)
   const clearBackgroundImage = useDashboardStore((s) => s.clearBackgroundImage)
   const removeWidget = useDashboardStore((s) => s.removeWidget)
+  const removeWidgets = useDashboardStore((s) => s.removeWidgets)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
+  const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
+  const setActiveStateIndex = useDashboardStore((s) => s.setActiveStateIndex)
   const confirm = useConfirmStore((s) => s.confirm)
 
   const propertiesWidth = useEditorSettings((s) => s.propertiesWidth)
@@ -175,8 +179,9 @@ export function PropertiesPanel(): React.JSX.Element {
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
   const resizeState = useRef<ResizeState | null>(null)
+  const dragStateIndex = useRef<number | null>(null)
 
-  const widget = widgets.find((w) => w.id === selectedWidgetId) ?? null
+  const widget = selectedWidgetIds.length === 1 ? widgets.find((w) => w.id === selectedWidgetIds[0]) ?? null : null
 
   function handleResizePointerDown(e: React.PointerEvent): void {
     resizeState.current = { startX: e.clientX, startWidth: propertiesWidth }
@@ -205,6 +210,27 @@ export function PropertiesPanel(): React.JSX.Element {
       onPointerUp={handleResizePointerUp}
     />
   )
+
+  if (selectedWidgetIds.length > 1) {
+    async function handleDeleteMany(): Promise<void> {
+      const ok = await confirm(`Delete ${selectedWidgetIds.length} widgets? This cannot be undone.`, { confirmLabel: 'Delete' })
+      if (ok) removeWidgets(selectedWidgetIds)
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <h2 className="properties__title">Properties</h2>
+        <p className="properties__hint">
+          {selectedWidgetIds.length} widgets selected — select just one to edit its properties.
+        </p>
+        <div className="properties__divider" />
+        <button className="properties__delete" onClick={handleDeleteMany}>
+          Delete {selectedWidgetIds.length} widgets
+        </button>
+      </aside>
+    )
+  }
 
   if (!widget) {
     function handleImageFile(e: React.ChangeEvent<HTMLInputElement>): void {
@@ -296,17 +322,90 @@ export function PropertiesPanel(): React.JSX.Element {
     updateWidgets(widgets.map((w) => (w.id === widget!.id ? { ...w, ...fields } : w)))
   }
 
+  const stateIndex = widget.statesEnabled ? Math.min(activeStateIndex, widget.states.length - 1) : 0
+  const activeState = widget.states[stateIndex] ?? widget.states[0]
+
+  function patchState(fields: Partial<WidgetState>): void {
+    patch({ states: widget!.states.map((s, i) => (i === stateIndex ? { ...s, ...fields } : s)) })
+  }
+
   function patchLabel(labelId: string, fields: Partial<WidgetLabel>): void {
-    patch({ labels: widget!.labels.map((l) => (l.id === labelId ? { ...l, ...fields } : l)) })
+    patchState({ labels: activeState.labels.map((l) => (l.id === labelId ? { ...l, ...fields } : l)) })
   }
 
   function addLabel(): void {
     const newLabel: WidgetLabel = { id: nextId(), text: 'New Label', align: 'center', verticalAlign: 'center' }
-    patch({ labels: [...widget!.labels, newLabel] })
+    patchState({ labels: [...activeState.labels, newLabel] })
   }
 
   function removeLabel(labelId: string): void {
-    patch({ labels: widget!.labels.filter((l) => l.id !== labelId) })
+    patchState({ labels: activeState.labels.filter((l) => l.id !== labelId) })
+  }
+
+  async function confirmRemoveLabel(labelId: string): Promise<void> {
+    const ok = await confirm('Remove this label? This cannot be undone.', { confirmLabel: 'Remove' })
+    if (ok) removeLabel(labelId)
+  }
+
+  function handleAddState(): void {
+    const newState: WidgetState = { id: nextId(), name: `State ${widget!.states.length + 1}`, labels: [] }
+    patch({ states: [...widget!.states, newState] })
+    setActiveStateIndex(widget!.states.length)
+  }
+
+  function renameState(index: number, name: string): void {
+    patch({ states: widget!.states.map((s, i) => (i === index ? { ...s, name } : s)) })
+  }
+
+  function handleToggleStatesEnabled(enabled: boolean): void {
+    // Seed a real "Clicked" state the first time states are turned on for
+    // this widget (still just a lone Default at that point) — subsequent
+    // toggles leave whatever states already exist untouched, including a
+    // deliberately-deleted Clicked.
+    if (enabled && widget!.states.length === 1) {
+      patch({ statesEnabled: true, states: [...widget!.states, deriveClickedState(widget!.states[0], nextId())] })
+    } else {
+      patch({ statesEnabled: enabled })
+    }
+  }
+
+  function handleDeleteState(index: number): void {
+    if (index === 0) return
+    const states = widget!.states.filter((_, i) => i !== index)
+    patch({ states })
+    setActiveStateIndex((current) => {
+      if (current === index) return Math.max(0, index - 1)
+      if (current > index) return current - 1
+      return current
+    })
+  }
+
+  async function confirmDeleteState(index: number): Promise<void> {
+    const ok = await confirm(`Delete the "${widget!.states[index].name}" state? This cannot be undone.`, { confirmLabel: 'Delete' })
+    if (ok) handleDeleteState(index)
+  }
+
+  function handleReorderState(dropIndex: number): void {
+    const dragIndex = dragStateIndex.current
+    dragStateIndex.current = null
+    if (dragIndex === null || dragIndex === 0 || dragIndex === dropIndex) return
+
+    const states = [...widget!.states]
+    const [moved] = states.splice(dragIndex, 1)
+    const target = Math.max(1, dropIndex > dragIndex ? dropIndex - 1 : dropIndex)
+    states.splice(target, 0, moved)
+    patch({ states })
+    setActiveStateIndex(target)
+  }
+
+  async function handleResetStates(): Promise<void> {
+    const ok = await confirm('Reset states back to just Default and Clicked? Custom states and per-state edits will be lost.', {
+      confirmLabel: 'Reset'
+    })
+    if (!ok) return
+    const base = widget!.states[0]
+    patch({ states: [base, deriveClickedState(base, nextId())] })
+    setActiveStateIndex(0)
   }
 
   async function handleDelete(): Promise<void> {
@@ -317,8 +416,8 @@ export function PropertiesPanel(): React.JSX.Element {
     }
   }
 
-  const effectiveColor = widget.color ?? DEFAULT_WIDGET_COLOR
-  const isAutoBorderColor = widget.borderColor == null
+  const effectiveColor = activeState.color ?? DEFAULT_WIDGET_COLOR
+  const isAutoBorderColor = activeState.borderColor == null
   const minSize = snapToGrid ? gridSize : 1
 
   return (
@@ -326,7 +425,70 @@ export function PropertiesPanel(): React.JSX.Element {
       {resizeHandle}
       <h2 className="properties__title">Properties</h2>
 
-      {widget.labels.map((label, index) => (
+      <label className="properties__checkbox">
+        <input
+          type="checkbox"
+          checked={widget.statesEnabled ?? false}
+          onChange={(e) => handleToggleStatesEnabled(e.target.checked)}
+        />
+        Enable states
+      </label>
+      <p className="properties__hint">
+        {widget.statesEnabled
+          ? 'Every state below is independent — labels, color, border, everything except keys and placement.'
+          : 'This widget has one look, and its clicked/pressed color is worked out automatically from it.'}
+      </p>
+
+      {widget.statesEnabled && (
+        <div className="state-tabs">
+          {widget.states.map((s, index) => (
+            <div
+              key={s.id}
+              className={`state-tab${index === stateIndex ? ' state-tab--active' : ''}${index === 0 ? ' state-tab--solo' : ''}`}
+              draggable={index !== 0}
+              onDragStart={() => (dragStateIndex.current = index)}
+              onDragOver={(e) => {
+                if (index !== 0) e.preventDefault()
+              }}
+              onDrop={() => handleReorderState(index)}
+              onClick={() => setActiveStateIndex(index)}
+            >
+              <span className="state-tab__name">{s.name}</span>
+              {index !== 0 && (
+                <button
+                  type="button"
+                  className="state-tab__remove"
+                  title="Delete state"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    confirmDeleteState(index)
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          <button type="button" className="state-tab state-tab--add" onClick={handleAddState} title="Add state">
+            +
+          </button>
+        </div>
+      )}
+
+      {widget.statesEnabled && (
+        <label className="properties__field">
+          <span>State name</span>
+          <input
+            value={activeState.name}
+            disabled={stateIndex === 0 || activeState.isClicked}
+            onChange={(e) => renameState(stateIndex, e.target.value)}
+          />
+        </label>
+      )}
+
+      <div className="properties__divider" />
+
+      {activeState.labels.map((label, index) => (
         <div key={label.id}>
           <details className="properties__advanced" open>
             <summary>Label {index + 1}</summary>
@@ -334,7 +496,7 @@ export function PropertiesPanel(): React.JSX.Element {
               label={label}
               backgroundColor={effectiveColor}
               onChange={(fields) => patchLabel(label.id, fields)}
-              onRemove={() => removeLabel(label.id)}
+              onRemove={() => confirmRemoveLabel(label.id)}
             />
           </details>
           <div className="properties__divider" />
@@ -348,9 +510,13 @@ export function PropertiesPanel(): React.JSX.Element {
 
       <label className="properties__field">
         <span>Color</span>
-        <ColorPicker value={effectiveColor} onChange={(color) => patch({ color })} />
+        <ColorPicker value={effectiveColor} onChange={(color) => patchState({ color })} />
       </label>
-      <OpacityField label="Background opacity" value={widget.backgroundOpacity ?? 1} onChange={(v) => patch({ backgroundOpacity: v })} />
+      <OpacityField
+        label="Background opacity"
+        value={activeState.backgroundOpacity ?? 1}
+        onChange={(v) => patchState({ backgroundOpacity: v })}
+      />
 
       <label className="properties__field">
         <span>Border color</span>
@@ -358,18 +524,18 @@ export function PropertiesPanel(): React.JSX.Element {
           <button
             type="button"
             className={`color-picker-row__auto${isAutoBorderColor ? ' color-picker-row__auto--active' : ''}`}
-            onClick={() => patch({ borderColor: undefined })}
+            onClick={() => patchState({ borderColor: undefined })}
           >
             Auto
           </button>
           <ColorPicker
-            value={widget.borderColor ?? pickAutoBorderColor(effectiveColor)}
-            onChange={(color) => patch({ borderColor: color })}
+            value={activeState.borderColor ?? pickAutoBorderColor(effectiveColor)}
+            onChange={(color) => patchState({ borderColor: color })}
             auto={isAutoBorderColor}
           />
         </div>
       </label>
-      <OpacityField label="Border opacity" value={widget.borderOpacity ?? 1} onChange={(v) => patch({ borderOpacity: v })} />
+      <OpacityField label="Border opacity" value={activeState.borderOpacity ?? 1} onChange={(v) => patchState({ borderOpacity: v })} />
 
       <div className="properties__divider" />
 
@@ -414,6 +580,10 @@ export function PropertiesPanel(): React.JSX.Element {
       </details>
 
       <div className="properties__divider" />
+
+      <button type="button" className="properties__file-button" onClick={handleResetStates}>
+        Reset states
+      </button>
 
       <button className="properties__delete" onClick={handleDelete}>
         Delete widget

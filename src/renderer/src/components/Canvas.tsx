@@ -3,7 +3,8 @@ import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { CanvasWidget } from './CanvasWidget'
-import { DEFAULT_DEVICE_BOUNDS } from '@shared/constants'
+import { DEVICE_PRESETS } from '../devicePresets'
+import { displayDeviceName } from '@shared/deviceName'
 
 interface Camera {
   x: number
@@ -34,6 +35,7 @@ export function Canvas(): React.JSX.Element {
   const selectWidget = useDashboardStore((s) => s.selectWidget)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
+  const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
 
   const [camera, setCamera] = useState<Camera>(INITIAL_CAMERA)
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -78,7 +80,11 @@ export function Canvas(): React.JSX.Element {
     })
   }
 
-  const deviceRects = devices.length > 0 ? devices : [{ id: 'default', ...DEFAULT_DEVICE_BOUNDS }]
+  const activePreset = DEVICE_PRESETS.find((d) => d.id === selectedDeviceId)
+  const activeConnected = devices.find((d) => d.id === selectedDeviceId)
+  const activeDevice = activePreset ?? activeConnected ?? DEVICE_PRESETS[0]
+  const activeDeviceLabel = activePreset?.label ?? (activeConnected ? displayDeviceName(activeConnected) : DEVICE_PRESETS[0].label)
+  const connectedCount = devices.filter((d) => d.connected).length
 
   return (
     <div className="canvas-viewport" ref={viewportRef} onWheel={handleWheel}>
@@ -88,9 +94,7 @@ export function Canvas(): React.JSX.Element {
           Reset view
         </button>
         <span className="canvas-toolbar__devices">
-          {devices.length === 0
-            ? 'No device connected — showing default guide bounds'
-            : `${devices.length} device${devices.length > 1 ? 's' : ''} connected`}
+          {connectedCount === 0 ? 'No devices connected' : `${connectedCount} device${connectedCount > 1 ? 's' : ''} connected`}
         </span>
         <span className="canvas-toolbar__hint">Scroll to zoom · drag empty space to pan</span>
       </div>
@@ -110,25 +114,23 @@ export function Canvas(): React.JSX.Element {
         }
       >
         <div className="canvas-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
-          {deviceRects.map((d) => (
-            <div key={d.id} className="canvas-device-bounds" style={{ width: d.width, height: d.height }}>
-              <span className="canvas-device-bounds__label">
-                {d.width}×{d.height}
-                {devices.length === 0 ? ' (guide)' : ''}
-              </span>
-              {backgroundImageVersion && (
-                <div className="canvas-device-bounds__clip">
-                  <div
-                    className="dashboard-wallpaper"
-                    style={{
-                      backgroundImage: `url(${backgroundImageUrl(backgroundImageVersion)})`,
-                      ...backgroundImageStyle(backgroundFit ?? 'cover', backgroundAnchor ?? 'center')
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
+          <div className="canvas-device-bounds" style={{ width: activeDevice.width, height: activeDevice.height }}>
+            <span className="canvas-device-bounds__label">
+              {activeDeviceLabel} — {activeDevice.width}×{activeDevice.height}
+              {activeConnected && !activeConnected.connected ? ' (disconnected)' : ''}
+            </span>
+            {backgroundImageVersion && (
+              <div className="canvas-device-bounds__clip">
+                <div
+                  className="dashboard-wallpaper"
+                  style={{
+                    backgroundImage: `url(${backgroundImageUrl(backgroundImageVersion)})`,
+                    ...backgroundImageStyle(backgroundFit ?? 'cover', backgroundAnchor ?? 'center')
+                  }}
+                />
+              </div>
+            )}
+          </div>
           {widgets.map((widget) => (
             <CanvasWidget key={widget.id} widget={widget} zoom={camera.zoom} />
           ))}

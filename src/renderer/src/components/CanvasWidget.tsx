@@ -10,9 +10,10 @@ const DRAG_THRESHOLD = 3
 interface DragState {
   startX: number
   startY: number
-  origX: number
-  origY: number
+  origins: Map<string, { x: number; y: number }>
   moved: boolean
+  additive: boolean
+  wasSelected: boolean
 }
 
 interface ResizeState {
@@ -23,15 +24,21 @@ interface ResizeState {
 }
 
 export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number }): React.JSX.Element {
-  const selectedWidgetId = useDashboardStore((s) => s.selectedWidgetId)
+  const selectedWidgetIds = useDashboardStore((s) => s.selectedWidgetIds)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
   const spacing = useDashboardStore((s) => s.dashboard.spacing ?? 0)
+  const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
 
-  const selected = widget.id === selectedWidgetId
+  const selected = selectedWidgetIds.includes(widget.id)
+  // Follow whichever tab is active in the properties panel — but only while
+  // this is the sole selected widget, so an unselected (or multi-selected)
+  // widget always shows its resting Default look.
+  const isSolePreviewTarget = selected && selectedWidgetIds.length === 1 && (widget.statesEnabled ?? false)
+  const previewState = isSolePreviewTarget ? (widget.states[activeStateIndex] ?? widget.states[0]) : widget.states[0]
   const dragState = useRef<DragState | null>(null)
   const resizeState = useRef<ResizeState | null>(null)
   const [resizing, setResizing] = useState(false)
@@ -46,7 +53,28 @@ export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number })
 
   function handlePointerDown(e: React.PointerEvent): void {
     e.stopPropagation()
-    dragState.current = { startX: e.clientX, startY: e.clientY, origX: widget.x, origY: widget.y, moved: false }
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey
+    const wasSelected = selectedWidgetIds.includes(widget.id)
+
+    // Changing selection here (rather than deferring to pointer-up) lets the
+    // drag below immediately pick up the right group of origins. If the
+    // widget is already part of the current selection we leave it alone so a
+    // drag moves the whole group; the click-vs-drag distinction is then
+    // resolved on pointer-up (collapse/toggle only when nothing moved).
+    if (!wasSelected) {
+      selectWidget(widget.id, additive ? { additive: true } : undefined)
+    }
+
+    const activeIds = useDashboardStore.getState().selectedWidgetIds
+    const liveWidgets = useDashboardStore.getState().dashboard.widgets
+    const origins = new Map(
+      activeIds.map((id) => {
+        const w = liveWidgets.find((ww) => ww.id === id)
+        return [id, { x: w?.x ?? 0, y: w?.y ?? 0 }]
+      })
+    )
+
+    dragState.current = { startX: e.clientX, startY: e.clientY, origins, moved: false, additive, wasSelected }
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
@@ -63,15 +91,23 @@ export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number })
     const dy = (e.clientY - drag.startY) / zoom
     if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) drag.moved = true
     if (drag.moved) {
-      patch({ x: snap(drag.origX + dx), y: snap(drag.origY + dy) })
+      const liveWidgets = useDashboardStore.getState().dashboard.widgets
+      updateWidgets(
+        liveWidgets.map((w) => {
+          const origin = drag.origins.get(w.id)
+          return origin ? { ...w, x: snap(origin.x + dx), y: snap(origin.y + dy) } : w
+        })
+      )
     }
   }
 
   function handlePointerUp(e: React.PointerEvent): void {
     e.stopPropagation()
-    const moved = dragState.current?.moved
+    const drag = dragState.current
     dragState.current = null
-    if (!moved) selectWidget(widget.id)
+    if (drag && !drag.moved && drag.wasSelected) {
+      selectWidget(widget.id, drag.additive ? { additive: true } : undefined)
+    }
   }
 
   function handleResizePointerDown(e: React.PointerEvent): void {
@@ -119,13 +155,13 @@ export function CanvasWidget({ widget, zoom }: { widget: Widget; zoom: number })
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
-      <ButtonWidgetContent widget={widget} interactive={false} />
+      <ButtonWidgetContent widget={widget} state={previewState} interactive={false} />
       {resizing && (
         <div className="canvas-widget__size-label" style={{ transform: `scale(${1 / zoom})` }}>
           {Math.round(widget.w)} × {Math.round(widget.h)}
         </div>
       )}
-      {selected && (
+      {selected && selectedWidgetIds.length === 1 && (
         <div
           className="canvas-widget__resize-handle"
           onPointerDown={handleResizePointerDown}

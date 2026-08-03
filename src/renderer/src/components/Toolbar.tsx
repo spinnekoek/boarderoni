@@ -1,17 +1,51 @@
 import { useEditorSettings } from '../settingsStore'
 import { useDashboardStore } from '../store'
+import { DEVICE_PRESETS } from '../devicePresets'
+import { displayDeviceName } from '@shared/deviceName'
 
 export function Toolbar(): React.JSX.Element {
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
   const setSnapToGrid = useEditorSettings((s) => s.setSnapToGrid)
   const setGridSize = useEditorSettings((s) => s.setGridSize)
+  const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
+  const setSelectedDeviceId = useEditorSettings((s) => s.setSelectedDeviceId)
 
   const spacing = useDashboardStore((s) => s.dashboard.spacing ?? 0)
   const updateDashboardMeta = useDashboardStore((s) => s.updateDashboardMeta)
+  const devices = useDashboardStore((s) => s.devices)
+
+  const selectedConnectedDevice = devices.find((d) => d.id === selectedDeviceId)
 
   return (
     <div className="toolbar">
+      <label className="toolbar__control">
+        <span>Device</span>
+        <select value={selectedDeviceId} onChange={(e) => setSelectedDeviceId(e.target.value)}>
+          <optgroup label="Presets">
+            {DEVICE_PRESETS.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.label}
+              </option>
+            ))}
+          </optgroup>
+          {devices.length > 0 && (
+            <optgroup label="Devices">
+              {devices.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {displayDeviceName(d)} — {d.width}×{d.height}
+                  {d.connected ? '' : ' (disconnected)'}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+        {selectedConnectedDevice && (
+          <span className={`app__status app__status--${selectedConnectedDevice.connected ? 'on' : 'off'}`}>
+            {selectedConnectedDevice.connected ? 'online' : 'offline'}
+          </span>
+        )}
+      </label>
       <label className="toolbar__control">
         <input type="checkbox" checked={snapToGrid} onChange={(e) => setSnapToGrid(e.target.checked)} />
         Snap to grid

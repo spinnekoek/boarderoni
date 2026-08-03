@@ -11,6 +11,9 @@ export default defineConfig({
   },
   renderer: {
     root: 'src/renderer',
+    server: {
+      host: true
+    },
     resolve: {
       alias: {
         '@shared': resolve(__dirname, 'src/shared'),

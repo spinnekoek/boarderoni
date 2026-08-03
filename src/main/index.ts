@@ -20,12 +20,20 @@ interface LegacyButtonWidget {
   align?: 'left' | 'center' | 'right'
   verticalAlign?: 'top' | 'center' | 'bottom'
   padding?: number
+  // Pre-states shape: labels/color/border/opacity lived flat on the widget
+  // itself, before they moved into ButtonWidget.states[].
+  labels?: Widget['states'][number]['labels']
+  color?: string
+  borderColor?: string
+  backgroundOpacity?: number
+  borderOpacity?: number
+  states?: Widget['states']
 }
 
 function migrateWidget(widget: Widget & LegacyButtonWidget): Widget {
   if (!Array.isArray(widget.labels)) {
     const { label, fontFamily, fontSize, textColor, textOpacity, align, verticalAlign, padding, ...rest } = widget
-    return {
+    widget = {
       ...rest,
       labels: [{ id: randomUUID(), text: label ?? '', fontFamily, fontSize, textColor, textOpacity, align, verticalAlign, padding }]
     }
@@ -33,10 +41,27 @@ function migrateWidget(widget: Widget & LegacyButtonWidget): Widget {
 
   if (widget.padding !== undefined) {
     const { padding, ...rest } = widget
-    return { ...rest, labels: widget.labels.map((l) => (l.padding === undefined ? { ...l, padding } : l)) }
+    widget = { ...rest, labels: widget.labels!.map((l) => (l.padding === undefined ? { ...l, padding } : l)) }
   }
 
-  return widget
+  if (!Array.isArray(widget.states)) {
+    const { labels, color, borderColor, backgroundOpacity, borderOpacity, ...rest } = widget
+    return {
+      ...rest,
+      statesEnabled: false,
+      states: [{ id: randomUUID(), name: 'Default', labels: labels ?? [], color, borderColor, backgroundOpacity, borderOpacity }]
+    }
+  }
+
+  // The first state's name is fixed as "Default" and the properties panel no
+  // longer lets it be renamed — but widgets saved before that restriction
+  // existed may still carry an old custom name, which would otherwise be
+  // stuck forever since there's no UI path to fix it anymore.
+  if (widget.states[0]?.name !== 'Default') {
+    widget = { ...widget, states: widget.states!.map((s, i) => (i === 0 ? { ...s, name: 'Default' } : s)) }
+  }
+
+  return widget as Widget
 }
 
 // Only `electron-vite dev` sets this — it's the one mode where the renderer
@@ -136,7 +161,37 @@ const httpServer = createServer((req, res) => {
 })
 
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
-const devices = new Map<WebSocket, DeviceInfo>()
+// Keyed by the view client's stable, self-reported deviceId (see id.ts's
+// getDeviceId on the renderer side) — not by WebSocket — so a device that
+// reconnects updates its existing entry instead of appearing as a new one.
+// Entries are never deleted, only flipped to connected: false, so the
+// editor's device dropdown selection survives a disconnect instead of
+// jumping to something else.
+const devices = new Map<string, DeviceInfo>()
+// Reverse lookup so a socket closing/dying knows which device entry to mark
+// offline.
+const socketDeviceId = new Map<WebSocket, string>()
+
+// A client that vanishes without a clean TCP close (network drop, app killed
+// in the background, WebView torn down) never fires the 'close' event on its
+// own, so without this it sits marked "connected" forever — this is the
+// standard `ws` heartbeat pattern for reaping those. Terminating still fires
+// 'close' below, which is what actually marks the device offline.
+type TrackedSocket = WebSocket & { isAlive?: boolean }
+const HEARTBEAT_INTERVAL_MS = 30_000
+
+const heartbeat = setInterval(() => {
+  for (const client of wss.clients as Set<TrackedSocket>) {
+    if (client.isAlive === false) {
+      client.terminate()
+      continue
+    }
+    client.isAlive = false
+    client.ping()
+  }
+}, HEARTBEAT_INTERVAL_MS)
+
+wss.on('close', () => clearInterval(heartbeat))
 
 function broadcast(message: ServerToClient, exclude?: WebSocket): void {
   const payload = JSON.stringify(message)
@@ -179,14 +234,24 @@ function sendError(ws: WebSocket, widgetId: string, message: string): void {
   ws.send(JSON.stringify(payload))
 }
 
-wss.on('connection', (ws) => {
-  const connectionId = randomUUID()
+wss.on('connection', (ws: TrackedSocket) => {
+  ws.isAlive = true
+  ws.on('pong', () => {
+    ws.isAlive = true
+  })
 
   ws.send(JSON.stringify({ type: 'dashboard:sync', dashboard } satisfies ServerToClient))
   ws.send(JSON.stringify({ type: 'devices:sync', devices: Array.from(devices.values()) } satisfies ServerToClient))
 
   ws.on('close', () => {
-    if (devices.delete(ws)) broadcastDevices()
+    const deviceId = socketDeviceId.get(ws)
+    socketDeviceId.delete(ws)
+    if (!deviceId) return
+    const existing = devices.get(deviceId)
+    if (existing) {
+      devices.set(deviceId, { ...existing, connected: false })
+      broadcastDevices()
+    }
   })
 
   ws.on('message', async (raw) => {
@@ -207,11 +272,31 @@ wss.on('connection', (ws) => {
         await triggerAction(message.widgetId, ws)
         break
       case 'hello':
-        if (message.role === 'view' && message.viewport) {
-          devices.set(ws, { id: connectionId, width: message.viewport.width, height: message.viewport.height })
+        if (message.role === 'view' && message.viewport && message.deviceId) {
+          socketDeviceId.set(ws, message.deviceId)
+          // Merge onto any existing entry — this also fires on every window
+          // resize (see store.ts's sendHello), so a plain overwrite would
+          // wipe out a previously-set customName each time.
+          const existing = devices.get(message.deviceId)
+          devices.set(message.deviceId, {
+            ...existing,
+            id: message.deviceId,
+            width: message.viewport.width,
+            height: message.viewport.height,
+            userAgent: message.userAgent,
+            connected: true
+          })
           broadcastDevices()
         }
         break
+      case 'device:rename': {
+        const existing = devices.get(message.deviceId)
+        if (existing) {
+          devices.set(message.deviceId, { ...existing, customName: message.name.trim() || undefined })
+          broadcastDevices()
+        }
+        break
+      }
       case 'background-image:upload': {
         const match = /^data:([\w/+.-]+);base64,(.+)$/.exec(message.dataUrl)
         if (!match) break

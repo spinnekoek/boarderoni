@@ -28,6 +28,29 @@ export interface WidgetLabel {
   padding?: number
 }
 
+// A named, independently-styled visual variant of a widget. "Default" (the
+// first entry, always present) is the idle look; "Clicked" (conventionally
+// the second entry) is shown while the button is held on the view client.
+// Anything past those two is inert for now — no runtime mechanism switches to
+// them yet, that's future state-machine work — but they're fully editable so
+// design work can get ahead of it.
+export interface WidgetState {
+  id: string
+  name: string
+  labels: WidgetLabel[]
+  color?: string
+  borderColor?: string
+  backgroundOpacity?: number
+  borderOpacity?: number
+  // Marks the one state that plays while the button is held on the view
+  // client (see getEffectiveStates in shared/states.ts) — a structural flag,
+  // not derived from `name`, so renaming some other state to "Clicked"
+  // doesn't make it activate on tap. Set only on the state created by
+  // enabling states the first time, or by "Reset states"; never on a
+  // manually-added state.
+  isClicked?: boolean
+}
+
 export interface ButtonWidget {
   id: string
   type: 'button'
@@ -35,12 +58,12 @@ export interface ButtonWidget {
   y: number
   w: number
   h: number
-  labels: WidgetLabel[]
-  color?: string
-  borderColor?: string
-  backgroundOpacity?: number
-  borderOpacity?: number
   action: WidgetAction
+  // Off (default): only "states[0]" is editable; a lightened version of its
+  // color stands in for "clicked" automatically. On: every state is exposed
+  // and independently configurable in the properties panel.
+  statesEnabled?: boolean
+  states: WidgetState[]
 }
 
 export type Widget = ButtonWidget
@@ -81,17 +104,40 @@ export interface Dashboard {
 }
 
 export interface DeviceInfo {
+  // Stable per-browser id the view client generates once and persists
+  // locally (see id.ts's getDeviceId) — NOT tied to any one WebSocket
+  // connection, so the same device is recognized across reconnects instead
+  // of showing up as a brand new entry every time.
   id: string
   width: number
   height: number
+  // Raw navigator.userAgent from the view client — real device names aren't
+  // exposed to web content, so this is the only material to work with. See
+  // friendlyDeviceName in shared/deviceName.ts for turning it into a label.
+  userAgent?: string
+  // False once its socket disconnects — the entry itself is kept (not
+  // removed) so a device picked in the editor's device dropdown stays picked
+  // while it reconnects, instead of the selection silently jumping away.
+  connected: boolean
+  // User-set name from the view client's device settings modal (5-finger
+  // tap). Takes priority over the userAgent-derived friendly name wherever a
+  // device is displayed — see displayDeviceName in shared/deviceName.ts.
+  customName?: string
 }
 
 export type ClientToServer =
-  | { type: 'hello'; role: 'edit' | 'view'; viewport?: { width: number; height: number } }
+  | {
+      type: 'hello'
+      role: 'edit' | 'view'
+      viewport?: { width: number; height: number }
+      userAgent?: string
+      deviceId?: string
+    }
   | { type: 'dashboard:update'; dashboard: Dashboard }
   | { type: 'action:trigger'; widgetId: string }
   | { type: 'background-image:upload'; dataUrl: string }
   | { type: 'background-image:clear' }
+  | { type: 'device:rename'; deviceId: string; name: string }
 
 export type ServerToClient =
   | { type: 'dashboard:sync'; dashboard: Dashboard }

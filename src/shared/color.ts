@@ -58,3 +58,12 @@ const AUTO_BORDER_DARKEN = 0.25
 export function pickAutoBorderColor(backgroundColor: string): string {
   return darken(backgroundColor, AUTO_BORDER_DARKEN)
 }
+
+// Lightens a hex color by a 0-1 fraction toward white — used to auto-derive
+// a "clicked" look from a widget's default color.
+export function lighten(hex: string, amount: number): string {
+  const rgb = hexToRgb(hex)
+  if (!rgb) return hex
+  const [r, g, b] = rgb.map((c) => Math.min(255, Math.round(c + (255 - c) * amount)))
+  return `#${[r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')}`
+}

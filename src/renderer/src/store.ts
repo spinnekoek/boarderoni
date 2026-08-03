@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { SERVER_PORT } from '@shared/constants'
 import { DEFAULT_DASHBOARD, type ClientToServer, type Dashboard, type DeviceInfo, type ServerToClient, type Widget } from '@shared/types'
+import { getDeviceId } from './id'
 
 type Mode = 'edit' | 'view'
 
@@ -9,7 +10,10 @@ interface DashboardStore {
   mode: Mode
   connected: boolean
   errors: Record<string, string>
-  selectedWidgetId: string | null
+  selectedWidgetIds: string[]
+  // Which of the selected widget's states the editor canvas previews (its
+  // properties panel tab) — reset to 0 (Default) on every selection change.
+  activeStateIndex: number
   devices: DeviceInfo[]
   connect: (mode: Mode) => void
   updateWidgets: (widgets: Widget[]) => void
@@ -20,8 +24,11 @@ interface DashboardStore {
   clearBackgroundImage: () => void
   addWidget: (widget: Widget) => void
   removeWidget: (id: string) => void
+  removeWidgets: (ids: string[]) => void
   triggerWidget: (id: string) => void
-  selectWidget: (id: string | null) => void
+  selectWidget: (id: string | null, options?: { additive?: boolean }) => void
+  setActiveStateIndex: (index: number | ((current: number) => number)) => void
+  renameDevice: (deviceId: string, name: string) => void
 }
 
 let socket: WebSocket | null = null
@@ -32,9 +39,19 @@ function send(message: ClientToServer): void {
   }
 }
 
+function isTextInputElement(el: Element | null): boolean {
+  return el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
+}
+
 function sendHello(mode: Mode): void {
   if (mode === 'view') {
-    send({ type: 'hello', role: mode, viewport: { width: window.innerWidth, height: window.innerHeight } })
+    send({
+      type: 'hello',
+      role: mode,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      userAgent: navigator.userAgent,
+      deviceId: getDeviceId()
+    })
   } else {
     send({ type: 'hello', role: mode })
   }
@@ -45,7 +62,8 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   mode: 'edit',
   connected: false,
   errors: {},
-  selectedWidgetId: null,
+  selectedWidgetIds: [],
+  activeStateIndex: 0,
   devices: [],
 
   connect: (mode) => {
@@ -79,7 +97,25 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     })
 
     if (mode === 'view') {
-      window.addEventListener('resize', () => sendHello(mode))
+      // Android shrinks window.innerHeight when the on-screen keyboard opens
+      // (e.g. focusing the device settings modal's name field), which would
+      // otherwise get reported as the device's real viewport and shrink its
+      // guide bounds on the desktop. Skip the resize while a text field is
+      // focused; focusout re-syncs once the keyboard has had a moment to
+      // close back down.
+      window.addEventListener('resize', () => {
+        if (isTextInputElement(document.activeElement)) return
+        sendHello(mode)
+      })
+      document.addEventListener(
+        'focusout',
+        (e) => {
+          if (isTextInputElement(e.target as Element | null)) {
+            setTimeout(() => sendHello(mode), 250)
+          }
+        },
+        true
+      )
     }
   },
 
@@ -109,14 +145,43 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   removeWidget: (id) => {
     get().updateWidgets(get().dashboard.widgets.filter((w) => w.id !== id))
-    if (get().selectedWidgetId === id) set({ selectedWidgetId: null })
+    set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => w !== id) }))
+  },
+
+  removeWidgets: (ids) => {
+    const idSet = new Set(ids)
+    get().updateWidgets(get().dashboard.widgets.filter((w) => !idSet.has(w.id)))
+    set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => !idSet.has(w)) }))
   },
 
   triggerWidget: (id) => {
     send({ type: 'action:trigger', widgetId: id })
   },
 
-  selectWidget: (id) => {
-    set({ selectedWidgetId: id })
+  selectWidget: (id, options) => {
+    if (id === null) {
+      set({ selectedWidgetIds: [], activeStateIndex: 0 })
+      return
+    }
+    if (options?.additive) {
+      set((s) => ({
+        selectedWidgetIds: s.selectedWidgetIds.includes(id)
+          ? s.selectedWidgetIds.filter((w) => w !== id)
+          : [...s.selectedWidgetIds, id],
+        activeStateIndex: 0
+      }))
+      return
+    }
+    set({ selectedWidgetIds: [id], activeStateIndex: 0 })
+  },
+
+  setActiveStateIndex: (indexOrUpdater) => {
+    set((s) => ({
+      activeStateIndex: typeof indexOrUpdater === 'function' ? indexOrUpdater(s.activeStateIndex) : indexOrUpdater
+    }))
+  },
+
+  renameDevice: (deviceId, name) => {
+    send({ type: 'device:rename', deviceId, name })
   }
 }))

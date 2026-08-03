@@ -1,7 +1,7 @@
 import { resolveFont } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoBorderColor, pickLegibleTextColor, withOpacity } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
-import type { ButtonWidget, WidgetLabel } from '@shared/types'
+import type { ButtonWidget, WidgetLabel, WidgetState } from '@shared/types'
 
 const JUSTIFY_CONTENT: Record<NonNullable<WidgetLabel['align']>, string> = {
   left: 'flex-start',
@@ -17,27 +17,29 @@ const ALIGN_ITEMS: Record<NonNullable<WidgetLabel['verticalAlign']>, string> = {
 
 export function ButtonWidgetContent({
   widget,
+  state,
   interactive,
   error,
   onTrigger
 }: {
   widget: ButtonWidget
+  state: WidgetState
   interactive: boolean
   error?: string
   onTrigger?: () => void
 }): React.JSX.Element {
-  const backgroundColor = widget.color ?? DEFAULT_WIDGET_COLOR
-  const borderColor = widget.borderColor ?? pickAutoBorderColor(backgroundColor)
+  const backgroundColor = state.color ?? DEFAULT_WIDGET_COLOR
+  const borderColor = state.borderColor ?? pickAutoBorderColor(backgroundColor)
 
   const buttonStyle: React.CSSProperties = {
-    backgroundColor: withOpacity(backgroundColor, widget.backgroundOpacity ?? 1),
-    borderColor: withOpacity(borderColor, widget.borderOpacity ?? 1)
+    backgroundColor: withOpacity(backgroundColor, state.backgroundOpacity ?? 1),
+    borderColor: withOpacity(borderColor, state.borderOpacity ?? 1)
   }
 
   // Each label is its own absolutely-positioned overlay covering the full
   // button, individually padded/aligned/styled — they don't stack or affect
   // each other's layout, so two labels sharing an align just overlap.
-  const labelElements = widget.labels.map((label) => {
+  const labelElements = state.labels.map((label) => {
     const textColor = label.textColor ?? pickLegibleTextColor(backgroundColor)
     const labelStyle: React.CSSProperties = {
       padding: label.padding ?? DEFAULT_WIDGET_PADDING,

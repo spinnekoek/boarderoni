@@ -15,8 +15,15 @@ export function Palette(): React.JSX.Element {
       y: 40,
       w: 160,
       h: 80,
-      labels: [{ id: nextId(), text: 'New Button', fontFamily: DEFAULT_FONT_ID, align: 'center', verticalAlign: 'center' }],
-      action: { kind: 'keypress', keys: [] }
+      action: { kind: 'keypress', keys: [] },
+      statesEnabled: false,
+      states: [
+        {
+          id: nextId(),
+          name: 'Default',
+          labels: [{ id: nextId(), text: 'New Button', fontFamily: DEFAULT_FONT_ID, align: 'center', verticalAlign: 'center' }]
+        }
+      ]
     }
     addWidget(widget)
     selectWidget(widget.id)
