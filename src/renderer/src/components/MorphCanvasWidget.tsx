@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useWidgetDrag } from '../useWidgetDrag'
 import { widgetFootprint } from '../layout'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
+import { normalizeMorphCells } from '@shared/morph'
 import type { MorphButtonWidget, MorphCell } from '@shared/types'
 
 interface ResizeState {
@@ -58,6 +59,75 @@ function computeExtendSpots(cells: MorphCell[]): ExtendSpot[] {
   return spots
 }
 
+interface RemoveSpot {
+  key: string
+  leftPct: number
+  topPct: number
+  cell: MorphCell
+}
+
+// Only cells with at most one same-widget neighbor ("tips" of the shape) are
+// offered for removal — a cell with two or more neighbors is load-bearing
+// for the shape's connectivity (e.g. the middle of a long strip), and
+// removing it would split the widget into two disjoint pieces. Also empty
+// once there's only one cell left: a morph widget always needs at least one.
+function computeRemoveSpots(cells: MorphCell[]): RemoveSpot[] {
+  if (cells.length <= 1) return []
+
+  const cellSet = new Set(cells.map((c) => `${c.col},${c.row}`))
+  const cols = cells.map((c) => c.col)
+  const rows = cells.map((c) => c.row)
+  const minCol = Math.min(...cols)
+  const minRow = Math.min(...rows)
+  const totalCols = Math.max(...cols) - minCol + 1
+  const totalRows = Math.max(...rows) - minRow + 1
+
+  const spots: RemoveSpot[] = []
+  for (const cell of cells) {
+    const neighborCount = [
+      cellSet.has(`${cell.col},${cell.row - 1}`),
+      cellSet.has(`${cell.col},${cell.row + 1}`),
+      cellSet.has(`${cell.col - 1},${cell.row}`),
+      cellSet.has(`${cell.col + 1},${cell.row}`)
+    ].filter(Boolean).length
+
+    if (neighborCount <= 1) {
+      spots.push({
+        key: `${cell.col},${cell.row}`,
+        leftPct: ((cell.col - minCol + 0.5) / totalCols) * 100,
+        topPct: ((cell.row - minRow + 0.5) / totalRows) * 100,
+        cell
+      })
+    }
+  }
+  return spots
+}
+
+// Holding Control while a morph widget is selected swaps its extend (+)
+// handles for remove (−) handles. Only the sole-selected widget ever renders
+// any handles, so a plain per-component listener is enough — no need to
+// share this across instances.
+function useCtrlHeld(): boolean {
+  const [ctrlHeld, setCtrlHeld] = useState(false)
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Control') setCtrlHeld(true)
+    }
+    function handleKeyUp(e: KeyboardEvent): void {
+      if (e.key === 'Control') setCtrlHeld(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [])
+
+  return ctrlHeld
+}
+
 export function MorphCanvasWidget({ widget, zoom }: { widget: MorphButtonWidget; zoom: number }): React.JSX.Element {
   const { selected, selectedWidgetIds, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
@@ -69,6 +139,7 @@ export function MorphCanvasWidget({ widget, zoom }: { widget: MorphButtonWidget;
 
   const resizeState = useRef<ResizeState | null>(null)
   const [resizing, setResizing] = useState(false)
+  const ctrlHeld = useCtrlHeld()
 
   const isSolePreviewTarget = selected && selectedWidgetIds.length === 1 && (widget.statesEnabled ?? false)
   const previewState = isSolePreviewTarget ? (widget.states[activeStateIndex] ?? widget.states[0]) : widget.states[0]
@@ -82,7 +153,17 @@ export function MorphCanvasWidget({ widget, zoom }: { widget: MorphButtonWidget;
       widgets.map((w) => {
         if (w.id !== widget.id || w.type !== 'morph') return w
         if (w.cells.some((c) => c.col === cell.col && c.row === cell.row)) return w
-        return { ...w, cells: [...w.cells, cell] }
+        return normalizeMorphCells({ ...w, cells: [...w.cells, cell] })
+      })
+    )
+  }
+
+  function removeCell(cell: MorphCell): void {
+    updateWidgets(
+      widgets.map((w) => {
+        if (w.id !== widget.id || w.type !== 'morph') return w
+        if (w.cells.length <= 1) return w
+        return normalizeMorphCells({ ...w, cells: w.cells.filter((c) => !(c.col === cell.col && c.row === cell.row)) })
       })
     )
   }
@@ -160,7 +241,7 @@ export function MorphCanvasWidget({ widget, zoom }: { widget: MorphButtonWidget;
           {Math.round(widget.cellW)} × {Math.round(widget.cellH)}
         </div>
       )}
-      {isSoleSelection &&
+      {isSoleSelection && !ctrlHeld &&
         computeExtendSpots(widget.cells).map((spot) => (
           <button
             key={spot.key}
@@ -176,6 +257,24 @@ export function MorphCanvasWidget({ widget, zoom }: { widget: MorphButtonWidget;
             }}
           >
             +
+          </button>
+        ))}
+      {isSoleSelection && ctrlHeld &&
+        computeRemoveSpots(widget.cells).map((spot) => (
+          <button
+            key={spot.key}
+            type="button"
+            className="canvas-widget__morph-extend canvas-widget__morph-extend--remove"
+            style={{ left: `${spot.leftPct}%`, top: `${spot.topPct}%` }}
+            title="Remove cell"
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              removeCell(spot.cell)
+            }}
+          >
+            −
           </button>
         ))}
       {isSoleSelection && (

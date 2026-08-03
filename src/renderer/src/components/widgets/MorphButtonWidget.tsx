@@ -2,11 +2,6 @@ import { DEFAULT_WIDGET_COLOR, pickAutoBorderColor, withOpacity } from '@shared/
 import type { MorphButtonWidget, WidgetState } from '@shared/types'
 import { renderWidgetLabels } from './labels'
 
-// Matches .deck-button's border-radius in styles.css — kept as a literal
-// here (not a shared constant/CSS var) since it's the only value that needs
-// to flow into JS for the outer-corners-only rounding logic below.
-const CELL_RADIUS = 8
-
 export function MorphButtonWidgetContent({
   widget,
   state,
@@ -51,15 +46,36 @@ export function MorphButtonWidgetContent({
   const totalCols = Math.max(...cols) - minCol + 1
   const totalRows = Math.max(...rows) - minRow + 1
 
-  // Fixed pixel offsets (not percentages of the bounding box), each cell
-  // inset by the full `spacing` on whichever of its top/left sides face
-  // outward (no same-widget neighbor there) and none on sides that touch
-  // another cell of this widget. A percentage-of-bounding-box shrink would
-  // only give a multi-cell shape a spacing/totalCols-sized gap instead of a
-  // full one, and that fraction changes with cell count — inconsistent with
-  // a plain ButtonWidget's (and any differently-sized morph shape's) full
-  // shrink, which is exactly what produced the overlap/gap mismatch between
-  // two touching shapes at spacing > 0.
+  // Every cell's inset is purely its own — no row/column aggregation.
+  // Aggregating top-inset per row (so a bar's middle cell aligns flush with
+  // its corners, which connect up into their legs and so never inset) was
+  // tried, but a cell's inset is the same number that reserves its spacing
+  // from anything external resting above it — flush-aligning the whole row
+  // to the corners means the corners' "no spacing, I connect to my own leg"
+  // requirement spreads to the entire row, so nothing placed on top of a
+  // bar (anywhere along it, not just above the corners) gets any spacing
+  // reserved at all. That's worse than the 1-2px cosmetic step this
+  // produces at a bar's corners, so back to plain per-cell — matching how
+  // left-inset already works (see the cross-widget spacing note below).
+  //
+  // Fixed pixel offsets (not percentages of the bounding box) — a
+  // percentage-of-bounding-box shrink would only give a multi-cell shape a
+  // spacing/totalCols-sized gap instead of a full one, and that fraction
+  // changes with cell count — inconsistent with a plain ButtonWidget's (and
+  // any differently-sized morph shape's) full shrink, which is exactly what
+  // produced the overlap/gap mismatch between two touching shapes at
+  // spacing > 0.
+  // Same-widget cells that connect are the same solid color with no border
+  // between them, but they're still two separate elements — Electron and an
+  // Android WebView are different rendering engines, and even when both
+  // cells' edges compute to the exact same CSS position, each can
+  // independently round to a different device pixel, leaving a hairline
+  // gap on one platform but not the other. Extending a cell's box by a
+  // pixel into a same-widget neighbor it connects to is invisible (same
+  // fill, no border there) and absorbs that rounding difference instead of
+  // showing it.
+  const SEAM_OVERLAP = 1
+
   const cellElements = widget.cells.map((cell) => {
     const hasUp = cellSet.has(`${cell.col},${cell.row - 1}`)
     const hasDown = cellSet.has(`${cell.col},${cell.row + 1}`)
@@ -69,20 +85,32 @@ export function MorphButtonWidgetContent({
     const insetLeft = hasLeft ? 0 : spacing
     const insetTop = hasUp ? 0 : spacing
 
+    let left = (cell.col - minCol) * widget.cellW + insetLeft
+    let top = (cell.row - minRow) * widget.cellH + insetTop
+    let width = Math.max(0, widget.cellW - insetLeft)
+    let height = Math.max(0, widget.cellH - insetTop)
+
+    if (hasLeft) {
+      left -= SEAM_OVERLAP
+      width += SEAM_OVERLAP
+    }
+    if (hasRight) width += SEAM_OVERLAP
+    if (hasUp) {
+      top -= SEAM_OVERLAP
+      height += SEAM_OVERLAP
+    }
+    if (hasDown) height += SEAM_OVERLAP
+
     const cellStyle: React.CSSProperties = {
-      left: (cell.col - minCol) * widget.cellW + insetLeft,
-      top: (cell.row - minRow) * widget.cellH + insetTop,
-      width: Math.max(0, widget.cellW - insetLeft),
-      height: Math.max(0, widget.cellH - insetTop),
+      left,
+      top,
+      width,
+      height,
       backgroundColor: bg,
       borderTop: hasUp ? 'none' : `1px solid ${border}`,
       borderBottom: hasDown ? 'none' : `1px solid ${border}`,
       borderLeft: hasLeft ? 'none' : `1px solid ${border}`,
-      borderRight: hasRight ? 'none' : `1px solid ${border}`,
-      borderTopLeftRadius: !hasUp && !hasLeft ? CELL_RADIUS : 0,
-      borderTopRightRadius: !hasUp && !hasRight ? CELL_RADIUS : 0,
-      borderBottomLeftRadius: !hasDown && !hasLeft ? CELL_RADIUS : 0,
-      borderBottomRightRadius: !hasDown && !hasRight ? CELL_RADIUS : 0
+      borderRight: hasRight ? 'none' : `1px solid ${border}`
     }
 
     const key = `${cell.col},${cell.row}`

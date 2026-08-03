@@ -336,6 +336,10 @@ body {
   pointer-events: auto;
 }
 
+.canvas-widget__morph-extend--remove {
+  background: #e2547b;
+}
+
 .canvas-widget__morph-extend:hover {
   filter: brightness(1.1);
 }
@@ -346,6 +350,12 @@ body {
   height: 100vh;
   overflow: hidden;
   background: #14161b;
+  /* Belt-and-suspenders alongside the viewport meta's user-scalable=no —
+     some WebViews don't fully honor that, and any zoom/pan drift away from
+     a clean 1.0 scale can round otherwise-identical cell edges to different
+     device pixels, showing as hairline gaps between morph cells. Nothing
+     here needs native scrolling either. */
+  touch-action: none;
 }
 
 .view-canvas__widget {
