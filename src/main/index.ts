@@ -6,7 +6,17 @@ import { randomUUID } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
 import { SERVER_PORT } from '../shared/constants'
-import { DEFAULT_DASHBOARD, type ClientToServer, type Dashboard, type DeviceInfo, type ServerToClient, type Widget } from '../shared/types'
+import {
+  DEFAULT_DASHBOARD,
+  type ClientToServer,
+  type Dashboard,
+  type DeviceInfo,
+  type ServerToClient,
+  type Variable,
+  type VariableValue,
+  type Widget
+} from '../shared/types'
+import { toVariableMap, tryEvaluateExpression } from '../shared/expr'
 
 // Pre-multi-label shape: a single flat `label` string plus its own styling
 // fields (including a widget-level `padding`), before they moved into
@@ -31,6 +41,10 @@ interface LegacyButtonWidget {
 }
 
 function migrateWidget(widget: Widget & LegacyButtonWidget): Widget {
+  // Morph widgets never existed in any of the legacy shapes below — they're
+  // always created with a states[]/blocks[] array from the start.
+  if (widget.type === 'morph') return widget
+
   if (!Array.isArray(widget.labels)) {
     const { label, fontFamily, fontSize, textColor, textOpacity, align, verticalAlign, padding, ...rest } = widget
     widget = {
@@ -87,6 +101,9 @@ function loadDashboard(): Dashboard {
       // single change — see backgroundImageVersion in shared/types.ts).
       delete loaded.backgroundImage
       loaded.widgets = loaded.widgets.map(migrateWidget)
+      // Dashboards saved before Variable existed have no `variables` key at
+      // all — normalize once here so nothing downstream needs `?? []`.
+      loaded.variables = loaded.variables ?? []
       return loaded
     }
   } catch (err) {
@@ -214,12 +231,58 @@ function keyFromName(name: string): Key {
   return key
 }
 
+// Constrains an update-state action's return value for one variable down to
+// VariableValue — anything else (object, array, undefined, ...) becomes its
+// string form rather than being rejected outright, since this is meant to
+// stay permissive scripting, not a strict schema.
+function coerceVariableValue(value: unknown): VariableValue {
+  return typeof value === 'number' || typeof value === 'boolean' ? value : String(value)
+}
+
+// Evaluates an update-state action's code and merges whatever it returns
+// into dashboard.variables — creating new variables for names that don't
+// exist yet, same as assigning a new variable in a loose scripting
+// language. Runs server-side (not per-client) so every client's next
+// dashboard:sync already reflects the result, same as any other mutation.
+function runUpdateState(code: string): void {
+  const variableMap = toVariableMap(dashboard.variables ?? [])
+  const result = tryEvaluateExpression(code, variableMap)
+  // A genuine failure (syntax error, thrown exception, ...) surfaces to the
+  // caller — triggerAction's catch turns it into an action:error the client
+  // shows on the widget. Code that just doesn't return anything (empty body,
+  // no update intended) is a normal no-op, not an error.
+  if (!result.ok) throw new Error(result.error)
+  if (!result.value || typeof result.value !== 'object') return
+
+  const updates = result.value as Record<string, unknown>
+  const existing = dashboard.variables ?? []
+  const existingNames = new Set(existing.map((v) => v.name))
+  const variables: Variable[] = existing.map((v) => (v.name in updates ? { ...v, value: coerceVariableValue(updates[v.name]) } : v))
+  for (const [name, value] of Object.entries(updates)) {
+    if (!existingNames.has(name)) variables.push({ id: randomUUID(), name, value: coerceVariableValue(value) })
+  }
+
+  dashboard = { ...dashboard, variables }
+  saveDashboard()
+  broadcast({ type: 'dashboard:sync', dashboard })
+}
+
 async function triggerAction(widgetId: string, ws: WebSocket): Promise<void> {
   const widget = dashboard.widgets.find((w) => w.id === widgetId)
   if (!widget) {
     sendError(ws, widgetId, 'Widget not found')
     return
   }
+
+  if (widget.action.kind === 'update-state') {
+    try {
+      runUpdateState(widget.action.code)
+    } catch (err) {
+      sendError(ws, widgetId, err instanceof Error ? err.message : String(err))
+    }
+    return
+  }
+
   try {
     const keys = widget.action.keys.map(keyFromName)
     await keyboard.pressKey(...keys)

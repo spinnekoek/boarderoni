@@ -129,6 +129,20 @@ body {
   color: #6b7280;
 }
 
+.toolbar__button {
+  background: #2a2e37;
+  color: #e8e8ea;
+  border: 1px solid #3a3f4a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toolbar__button:hover {
+  background: #343a46;
+}
+
 .app__body {
   flex: 1;
   display: flex;
@@ -259,6 +273,14 @@ body {
   overflow: hidden;
 }
 
+.canvas-marquee {
+  position: absolute;
+  border: 1px solid #5b8def;
+  background: rgba(91, 141, 239, 0.15);
+  pointer-events: none;
+  z-index: 20;
+}
+
 .canvas-device-bounds__label {
   position: absolute;
   top: -20px;
@@ -271,6 +293,16 @@ body {
 .canvas-widget {
   position: absolute;
   cursor: pointer;
+}
+
+/* A morph widget's box is its blocks' bounding box, which can include empty
+   area (e.g. a U's notch) that isn't actually part of the shape — the box
+   itself must let clicks pass through so anything placed behind/inside it
+   stays reachable; only the actual blocks (and the +/resize handles) opt
+   back into receiving pointer events below. */
+.canvas-widget--morph {
+  cursor: default;
+  pointer-events: none;
 }
 
 .canvas-widget--selected {
@@ -306,6 +338,34 @@ body {
   pointer-events: auto;
 }
 
+.canvas-widget__morph-extend {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #5b8def;
+  color: #14161b;
+  border: 2px solid #14161b;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 11;
+  padding: 0;
+  pointer-events: auto;
+}
+
+.canvas-widget__morph-extend--remove {
+  background: #e2547b;
+}
+
+.canvas-widget__morph-extend:hover {
+  filter: brightness(1.1);
+}
+
 .view-canvas {
   position: relative;
   width: 100vw;
@@ -323,11 +383,15 @@ body {
   position: absolute;
 }
 
+/* See .canvas-widget--morph — same reasoning, so a widget placed inside a
+   morph shape's notch is still tappable on the deployed client. */
+.view-canvas__widget--morph {
+  pointer-events: none;
+}
+
 .deck-button {
   position: absolute;
   inset: 0;
-  border-radius: 4px;
-  border: 1px solid #3a3f4a;
   background: #2a2e37;
   color: #e8e8ea;
   cursor: pointer;
@@ -358,6 +422,62 @@ button.deck-button:focus-visible {
   pointer-events: none;
   white-space: nowrap;
   overflow: visible;
+}
+
+.deck-morph {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.deck-morph-cell {
+  position: absolute;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  background: #2a2e37;
+  color: #e8e8ea;
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+  outline: none;
+  transition:
+    background-color 80ms ease,
+    border-color 80ms ease;
+}
+
+button.deck-morph-cell:focus,
+button.deck-morph-cell:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.deck-morph-cell--static {
+  cursor: default;
+}
+
+/* Marks whichever block the properties panel's spacing/radius/border
+   sub-panel currently targets — a distinct color from .canvas-widget's own
+   blue selection outline so the two selection layers (widget vs. block)
+   don't read as the same thing. No z-index here: a positioned element with
+   an explicit z-index paints above any z-index:auto sibling regardless of
+   DOM order, which would otherwise put a selected cell's fill in front of
+   .deck-morph-labels (below) instead of behind it. */
+.deck-morph-cell--selected {
+  outline: 2px solid #e2a53d;
+  outline-offset: -2px;
+}
+
+.deck-morph-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Always above every block's fill, whether or not a block is selected —
+     see the note on .deck-morph-cell--selected. */
+  z-index: 1;
 }
 
 .deck-button__error {
@@ -434,6 +554,18 @@ button.deck-button:focus-visible {
 .properties__field input:disabled {
   color: #6b7280;
   cursor: not-allowed;
+}
+
+.properties__code {
+  background: #14161b;
+  border: 1px solid #3a3f4a;
+  border-radius: 4px;
+  color: #e8e8ea;
+  padding: 8px;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  line-height: 1.5;
+  resize: vertical;
 }
 
 .align-buttons {
@@ -550,6 +682,7 @@ button.deck-button:focus-visible {
 }
 
 .key-capture {
+  flex: 1;
   background: #14161b;
   border: 1px solid #3a3f4a;
   border-radius: 4px;
@@ -716,6 +849,13 @@ button.deck-button:focus-visible {
 
 .properties__file-remove:hover {
   background: #5c2424;
+}
+
+.properties__file-remove:disabled {
+  background: #2a2e37;
+  color: #6b7280;
+  border-color: #3a3f4a;
+  cursor: not-allowed;
 }
 
 .anchor-grid {
@@ -978,4 +1118,84 @@ button.deck-button:focus-visible {
 
 .device-modal__save:hover {
   filter: brightness(1.1);
+}
+
+.variables-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.variables-modal {
+  background: #1c1f26;
+  border: 1px solid #2a2e37;
+  border-radius: 8px;
+  padding: 20px;
+  width: 480px;
+  max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+.variables-modal__title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: #e8e8ea;
+}
+
+.variables-modal__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 16px;
+}
+
+.variables-modal__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 22px;
+  gap: 8px;
+  align-items: center;
+}
+
+.variables-modal__row--header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+}
+
+.variables-modal__row input {
+  background: #14161b;
+  border: 1px solid #3a3f4a;
+  border-radius: 4px;
+  color: #e8e8ea;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.variables-modal__remove {
+  background: none;
+  border: none;
+  color: #e27e7e;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.variables-modal__remove:hover {
+  color: #ff9b9b;
+}
+
+.variables-modal__actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
 }

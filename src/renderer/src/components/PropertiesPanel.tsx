@@ -7,10 +7,20 @@ import { FONT_OPTIONS, resolveFont } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoBorderColor, pickLegibleTextColor } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
 import { deriveClickedState } from '@shared/states'
+import { blockMerge, type BlockMerge } from '@shared/morph'
 import { ANCHOR_OPTIONS } from '../background'
 import { KeyCapture } from './KeyCapture'
 import { ColorPicker } from './ColorPicker'
-import type { BackgroundFit, HorizontalAlign, VerticalAlign, Widget, WidgetLabel, WidgetState } from '@shared/types'
+import type {
+  BackgroundFit,
+  HorizontalAlign,
+  MorphBlock,
+  MorphBlockStateOverride,
+  VerticalAlign,
+  Widget,
+  WidgetLabel,
+  WidgetState
+} from '@shared/types'
 
 const HORIZONTAL_ALIGNS: { value: HorizontalAlign; label: string }[] = [
   { value: 'left', label: 'L' },
@@ -59,13 +69,31 @@ function LabelFields({
   onRemove: () => void
 }): React.JSX.Element {
   const isAutoTextColor = label.textColor == null
+  const isTextExpr = label.textExpr !== undefined
 
   return (
     <>
       <label className="properties__field">
         <span>Text</span>
-        <input value={label.text} onChange={(e) => onChange({ text: e.target.value })} />
+        {isTextExpr ? (
+          <textarea
+            className="properties__code"
+            rows={4}
+            placeholder={'return "Count: " + variables.my_variable;'}
+            value={label.textExpr}
+            onChange={(e) => onChange({ textExpr: e.target.value })}
+          />
+        ) : (
+          <input value={label.text} onChange={(e) => onChange({ text: e.target.value })} />
+        )}
       </label>
+      <button
+        type="button"
+        className="properties__file-button"
+        onClick={() => onChange({ textExpr: isTextExpr ? undefined : '' })}
+      >
+        {isTextExpr ? 'Use static text' : 'Use expression'}
+      </button>
 
       <label className="properties__field">
         <span>Font</span>
@@ -159,6 +187,258 @@ function LabelFields({
   )
 }
 
+// Spacing/radius/border-thickness for one base block in the currently
+// active state. Any side touching another block of this widget is
+// auto-computed (and its input disabled) whenever auto fit is on — the
+// override values still shown for a locked field are what auto fit itself
+// resolved to (see effectiveBlockAppearance), not the raw manual value,
+// so the field reads correctly even while disabled.
+function MorphBlockFields({
+  block,
+  merge,
+  override,
+  widgetColor,
+  widgetBorderColor,
+  widgetBackgroundOpacity,
+  widgetBorderOpacity,
+  onChange
+}: {
+  block: MorphBlock
+  // Per-side: is this side currently coordinating an auto-fit seam with its
+  // neighbor (see blockMerge in shared/morph.ts — requires both this
+  // block's own autoFit AND the neighbor's to be on, not just adjacency).
+  merge: BlockMerge
+  override: MorphBlockStateOverride
+  // Resolved widget-level fallbacks — what this block shows while its own
+  // color/opacity fields are left on Auto (i.e. inherited, not overridden).
+  widgetColor: string
+  widgetBorderColor: string
+  widgetBackgroundOpacity: number
+  widgetBorderOpacity: number
+  onChange: (fields: Partial<MorphBlockStateOverride>) => void
+}): React.JSX.Element {
+  const autoFit = override.autoFit ?? true
+  const isAutoColor = override.color === undefined
+  const isColorExpr = override.colorExpr !== undefined
+  const isAutoBorderColor = override.borderColor === undefined
+  const lockTop = merge.up
+  const lockRight = merge.right
+  const lockBottom = merge.down
+  const lockLeft = merge.left
+  const lockTopLeft = merge.up || merge.left
+  const lockTopRight = merge.up || merge.right
+  const lockBottomLeft = merge.down || merge.left
+  const lockBottomRight = merge.down || merge.right
+
+  return (
+    <>
+      <p className="properties__hint">
+        Editing base block ({block.col}, {block.row})
+      </p>
+
+      <label className="properties__checkbox">
+        <input type="checkbox" checked={autoFit} onChange={(e) => onChange({ autoFit: e.target.checked })} />
+        Auto fit
+      </label>
+      <p className="properties__hint">
+        Sides touching another block of this widget are computed automatically (disabled below) while auto fit is on.
+      </p>
+
+      <span className="properties__section-label">Color</span>
+      <label className="properties__field">
+        <span>Color</span>
+        {isColorExpr ? (
+          <textarea
+            className="properties__code"
+            rows={4}
+            placeholder={'return variables.my_color;'}
+            value={override.colorExpr}
+            onChange={(e) => onChange({ colorExpr: e.target.value })}
+          />
+        ) : (
+          <div className="color-picker-row">
+            <button
+              type="button"
+              className={`color-picker-row__auto${isAutoColor ? ' color-picker-row__auto--active' : ''}`}
+              onClick={() => onChange({ color: undefined })}
+            >
+              Auto
+            </button>
+            <ColorPicker value={override.color ?? widgetColor} onChange={(color) => onChange({ color })} auto={isAutoColor} />
+          </div>
+        )}
+      </label>
+      <button
+        type="button"
+        className="properties__file-button"
+        onClick={() => onChange({ colorExpr: isColorExpr ? undefined : '' })}
+      >
+        {isColorExpr ? 'Use static color' : 'Use expression'}
+      </button>
+      <OpacityField
+        label="Background opacity"
+        value={override.backgroundOpacity ?? widgetBackgroundOpacity}
+        onChange={(v) => onChange({ backgroundOpacity: v })}
+      />
+      <label className="properties__field">
+        <span>Border color</span>
+        <div className="color-picker-row">
+          <button
+            type="button"
+            className={`color-picker-row__auto${isAutoBorderColor ? ' color-picker-row__auto--active' : ''}`}
+            onClick={() => onChange({ borderColor: undefined })}
+          >
+            Auto
+          </button>
+          <ColorPicker
+            value={override.borderColor ?? widgetBorderColor}
+            onChange={(color) => onChange({ borderColor: color })}
+            auto={isAutoBorderColor}
+          />
+        </div>
+      </label>
+      <OpacityField
+        label="Border opacity"
+        value={override.borderOpacity ?? widgetBorderOpacity}
+        onChange={(v) => onChange({ borderOpacity: v })}
+      />
+      <p className="properties__hint">Auto inherits the widget's own color for this state — override here to make just this block different.</p>
+
+      <span className="properties__section-label">Spacing</span>
+      <div className="properties__grid2">
+        <label className="properties__field">
+          <span>Top</span>
+          <input
+            type="number"
+            min={-1}
+            disabled={lockTop}
+            value={lockTop ? -1 : (override.spacingTop ?? 0)}
+            onChange={(e) => onChange({ spacingTop: Math.max(-1, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Right</span>
+          <input
+            type="number"
+            min={-1}
+            disabled={lockRight}
+            value={lockRight ? -1 : (override.spacingRight ?? 0)}
+            onChange={(e) => onChange({ spacingRight: Math.max(-1, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Bottom</span>
+          <input
+            type="number"
+            min={-1}
+            disabled={lockBottom}
+            value={lockBottom ? -1 : (override.spacingBottom ?? 0)}
+            onChange={(e) => onChange({ spacingBottom: Math.max(-1, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Left</span>
+          <input
+            type="number"
+            min={-1}
+            disabled={lockLeft}
+            value={lockLeft ? -1 : (override.spacingLeft ?? 0)}
+            onChange={(e) => onChange({ spacingLeft: Math.max(-1, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+      </div>
+
+      <span className="properties__section-label">Border radius</span>
+      <div className="properties__grid2">
+        <label className="properties__field">
+          <span>Top left</span>
+          <input
+            type="number"
+            min={0}
+            disabled={lockTopLeft}
+            value={lockTopLeft ? 0 : (override.radiusTopLeft ?? 4)}
+            onChange={(e) => onChange({ radiusTopLeft: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Top right</span>
+          <input
+            type="number"
+            min={0}
+            disabled={lockTopRight}
+            value={lockTopRight ? 0 : (override.radiusTopRight ?? 4)}
+            onChange={(e) => onChange({ radiusTopRight: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Bottom left</span>
+          <input
+            type="number"
+            min={0}
+            disabled={lockBottomLeft}
+            value={lockBottomLeft ? 0 : (override.radiusBottomLeft ?? 4)}
+            onChange={(e) => onChange({ radiusBottomLeft: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Bottom right</span>
+          <input
+            type="number"
+            min={0}
+            disabled={lockBottomRight}
+            value={lockBottomRight ? 0 : (override.radiusBottomRight ?? 4)}
+            onChange={(e) => onChange({ radiusBottomRight: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+      </div>
+
+      <span className="properties__section-label">Border thickness</span>
+      <div className="properties__grid2">
+        <label className="properties__field">
+          <span>Top</span>
+          <input
+            type="number"
+            min={0}
+            disabled={lockTop}
+            value={lockTop ? 0 : (override.borderWidthTop ?? 1)}
+            onChange={(e) => onChange({ borderWidthTop: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Right</span>
+          <input
+            type="number"
+            min={0}
+            disabled={lockRight}
+            value={lockRight ? 0 : (override.borderWidthRight ?? 1)}
+            onChange={(e) => onChange({ borderWidthRight: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Bottom</span>
+          <input
+            type="number"
+            min={0}
+            disabled={lockBottom}
+            value={lockBottom ? 0 : (override.borderWidthBottom ?? 1)}
+            onChange={(e) => onChange({ borderWidthBottom: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Left</span>
+          <input
+            type="number"
+            min={0}
+            disabled={lockLeft}
+            value={lockLeft ? 0 : (override.borderWidthLeft ?? 1)}
+            onChange={(e) => onChange({ borderWidthLeft: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+      </div>
+    </>
+  )
+}
+
 export function PropertiesPanel(): React.JSX.Element {
   const dashboard = useDashboardStore((s) => s.dashboard)
   const widgets = dashboard.widgets
@@ -172,6 +452,7 @@ export function PropertiesPanel(): React.JSX.Element {
   const bringToFront = useDashboardStore((s) => s.bringToFront)
   const sendToBack = useDashboardStore((s) => s.sendToBack)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
+  const selectedBlockId = useDashboardStore((s) => s.selectedBlockId)
   const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
   const setActiveStateIndex = useDashboardStore((s) => s.setActiveStateIndex)
   const confirm = useConfirmStore((s) => s.confirm)
@@ -329,7 +610,10 @@ export function PropertiesPanel(): React.JSX.Element {
   }
 
   function patch(fields: Partial<Widget>): void {
-    updateWidgets(widgets.map((w) => (w.id === widget!.id ? { ...w, ...fields } : w)))
+    // fields' shape always matches widget's actual type at each call site
+    // (e.g. blocks only patched from the morph branch below) — TS can't
+    // verify that through a generic Widget union, hence the cast.
+    updateWidgets(widgets.map((w) => (w.id === widget!.id ? ({ ...w, ...fields } as Widget) : w)))
   }
 
   const stateIndex = widget.statesEnabled ? Math.min(activeStateIndex, widget.states.length - 1) : 0
@@ -337,6 +621,19 @@ export function PropertiesPanel(): React.JSX.Element {
 
   function patchState(fields: Partial<WidgetState>): void {
     patch({ states: widget!.states.map((s, i) => (i === stateIndex ? { ...s, ...fields } : s)) })
+  }
+
+  // Only meaningful when widget.type === 'morph' — every call site is
+  // reached exclusively from the morph branch below, where a block is known
+  // to be selected.
+  function patchBlock(blockId: string, fields: Partial<MorphBlockStateOverride>): void {
+    if (widget!.type !== 'morph') return
+    const currentWidget = widget!
+    patch({
+      blocks: currentWidget.blocks.map((b) =>
+        b.id === blockId ? { ...b, perState: { ...b.perState, [activeState.id]: { ...b.perState[activeState.id], ...fields } } } : b
+      )
+    })
   }
 
   function patchLabel(labelId: string, fields: Partial<WidgetLabel>): void {
@@ -427,6 +724,7 @@ export function PropertiesPanel(): React.JSX.Element {
   }
 
   const effectiveColor = activeState.color ?? DEFAULT_WIDGET_COLOR
+  const isColorExpr = activeState.colorExpr !== undefined
   const isAutoBorderColor = activeState.borderColor == null
   const minSize = snapToGrid ? gridSize : 1
 
@@ -528,118 +826,208 @@ export function PropertiesPanel(): React.JSX.Element {
 
       <div className="properties__divider" />
 
-      <label className="properties__field">
-        <span>Color</span>
-        <ColorPicker value={effectiveColor} onChange={(color) => patchState({ color })} />
-      </label>
-      <OpacityField
-        label="Background opacity"
-        value={activeState.backgroundOpacity ?? 1}
-        onChange={(v) => patchState({ backgroundOpacity: v })}
-      />
-
-      <label className="properties__field">
-        <span>Border color</span>
-        <div className="color-picker-row">
+      {widget.type === 'button' ? (
+        <>
+          <label className="properties__field">
+            <span>Color</span>
+            {isColorExpr ? (
+              <textarea
+                className="properties__code"
+                rows={4}
+                placeholder={'return variables.my_color;'}
+                value={activeState.colorExpr}
+                onChange={(e) => patchState({ colorExpr: e.target.value })}
+              />
+            ) : (
+              <ColorPicker value={effectiveColor} onChange={(color) => patchState({ color })} />
+            )}
+          </label>
           <button
             type="button"
-            className={`color-picker-row__auto${isAutoBorderColor ? ' color-picker-row__auto--active' : ''}`}
-            onClick={() => patchState({ borderColor: undefined })}
+            className="properties__file-button"
+            onClick={() => patchState({ colorExpr: isColorExpr ? undefined : '' })}
           >
-            Auto
+            {isColorExpr ? 'Use static color' : 'Use expression'}
           </button>
-          <ColorPicker
-            value={activeState.borderColor ?? pickAutoBorderColor(effectiveColor)}
-            onChange={(color) => patchState({ borderColor: color })}
-            auto={isAutoBorderColor}
+          <OpacityField
+            label="Background opacity"
+            value={activeState.backgroundOpacity ?? 1}
+            onChange={(v) => patchState({ backgroundOpacity: v })}
           />
-        </div>
-      </label>
-      <OpacityField label="Border opacity" value={activeState.borderOpacity ?? 1} onChange={(v) => patchState({ borderOpacity: v })} />
+
+          <label className="properties__field">
+            <span>Border color</span>
+            <div className="color-picker-row">
+              <button
+                type="button"
+                className={`color-picker-row__auto${isAutoBorderColor ? ' color-picker-row__auto--active' : ''}`}
+                onClick={() => patchState({ borderColor: undefined })}
+              >
+                Auto
+              </button>
+              <ColorPicker
+                value={activeState.borderColor ?? pickAutoBorderColor(effectiveColor)}
+                onChange={(color) => patchState({ borderColor: color })}
+                auto={isAutoBorderColor}
+              />
+            </div>
+          </label>
+          <OpacityField label="Border opacity" value={activeState.borderOpacity ?? 1} onChange={(v) => patchState({ borderOpacity: v })} />
+        </>
+      ) : (
+        <p className="properties__hint">Color lives per base block now — select one on the canvas to set it.</p>
+      )}
 
       <div className="properties__divider" />
 
-      <span className="properties__section-label">Spacing</span>
-      <div className="properties__grid2">
-        <label className="properties__field">
-          <span>Top</span>
-          <input
-            type="number"
-            min={-1}
-            value={activeState.spacingTop ?? 0}
-            onChange={(e) => patchState({ spacingTop: Math.max(-1, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Right</span>
-          <input
-            type="number"
-            min={-1}
-            value={activeState.spacingRight ?? 0}
-            onChange={(e) => patchState({ spacingRight: Math.max(-1, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Bottom</span>
-          <input
-            type="number"
-            min={-1}
-            value={activeState.spacingBottom ?? 0}
-            onChange={(e) => patchState({ spacingBottom: Math.max(-1, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Left</span>
-          <input
-            type="number"
-            min={-1}
-            value={activeState.spacingLeft ?? 0}
-            onChange={(e) => patchState({ spacingLeft: Math.max(-1, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-      </div>
+      {widget.type === 'button' ? (
+        <>
+          <span className="properties__section-label">Spacing</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Top</span>
+              <input
+                type="number"
+                min={-1}
+                value={activeState.spacingTop ?? 0}
+                onChange={(e) => patchState({ spacingTop: Math.max(-1, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Right</span>
+              <input
+                type="number"
+                min={-1}
+                value={activeState.spacingRight ?? 0}
+                onChange={(e) => patchState({ spacingRight: Math.max(-1, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Bottom</span>
+              <input
+                type="number"
+                min={-1}
+                value={activeState.spacingBottom ?? 0}
+                onChange={(e) => patchState({ spacingBottom: Math.max(-1, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Left</span>
+              <input
+                type="number"
+                min={-1}
+                value={activeState.spacingLeft ?? 0}
+                onChange={(e) => patchState({ spacingLeft: Math.max(-1, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+          </div>
 
-      <div className="properties__divider" />
+          <div className="properties__divider" />
 
-      <span className="properties__section-label">Border radius</span>
-      <div className="properties__grid2">
-        <label className="properties__field">
-          <span>Top left</span>
-          <input
-            type="number"
-            min={0}
-            value={activeState.radiusTopLeft ?? 4}
-            onChange={(e) => patchState({ radiusTopLeft: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Top right</span>
-          <input
-            type="number"
-            min={0}
-            value={activeState.radiusTopRight ?? 4}
-            onChange={(e) => patchState({ radiusTopRight: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Bottom left</span>
-          <input
-            type="number"
-            min={0}
-            value={activeState.radiusBottomLeft ?? 4}
-            onChange={(e) => patchState({ radiusBottomLeft: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Bottom right</span>
-          <input
-            type="number"
-            min={0}
-            value={activeState.radiusBottomRight ?? 4}
-            onChange={(e) => patchState({ radiusBottomRight: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-      </div>
+          <span className="properties__section-label">Border radius</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Top left</span>
+              <input
+                type="number"
+                min={0}
+                value={activeState.radiusTopLeft ?? 4}
+                onChange={(e) => patchState({ radiusTopLeft: Math.max(0, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Top right</span>
+              <input
+                type="number"
+                min={0}
+                value={activeState.radiusTopRight ?? 4}
+                onChange={(e) => patchState({ radiusTopRight: Math.max(0, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Bottom left</span>
+              <input
+                type="number"
+                min={0}
+                value={activeState.radiusBottomLeft ?? 4}
+                onChange={(e) => patchState({ radiusBottomLeft: Math.max(0, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Bottom right</span>
+              <input
+                type="number"
+                min={0}
+                value={activeState.radiusBottomRight ?? 4}
+                onChange={(e) => patchState({ radiusBottomRight: Math.max(0, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <span className="properties__section-label">Border thickness</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Top</span>
+              <input
+                type="number"
+                min={0}
+                value={activeState.borderWidthTop ?? 1}
+                onChange={(e) => patchState({ borderWidthTop: Math.max(0, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Right</span>
+              <input
+                type="number"
+                min={0}
+                value={activeState.borderWidthRight ?? 1}
+                onChange={(e) => patchState({ borderWidthRight: Math.max(0, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Bottom</span>
+              <input
+                type="number"
+                min={0}
+                value={activeState.borderWidthBottom ?? 1}
+                onChange={(e) => patchState({ borderWidthBottom: Math.max(0, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Left</span>
+              <input
+                type="number"
+                min={0}
+                value={activeState.borderWidthLeft ?? 1}
+                onChange={(e) => patchState({ borderWidthLeft: Math.max(0, Math.round(Number(e.target.value))) })}
+              />
+            </label>
+          </div>
+        </>
+      ) : (
+        (() => {
+          const selectedBlock = widget.blocks.find((b) => b.id === selectedBlockId)
+          if (!selectedBlock) {
+            return <p className="properties__hint">Select a base block on the canvas to edit its spacing/radius/border.</p>
+          }
+          const merge = blockMerge(widget.blocks, selectedBlock, activeState.id)
+          const override = selectedBlock.perState[activeState.id] ?? {}
+          return (
+            <MorphBlockFields
+              block={selectedBlock}
+              merge={merge}
+              override={override}
+              widgetColor={effectiveColor}
+              widgetBorderColor={activeState.borderColor ?? pickAutoBorderColor(effectiveColor)}
+              widgetBackgroundOpacity={activeState.backgroundOpacity ?? 1}
+              widgetBorderOpacity={activeState.borderOpacity ?? 1}
+              onChange={(fields) => patchBlock(selectedBlock.id, fields)}
+            />
+          )
+        })()
+      )}
 
       <div className="properties__divider" />
 
@@ -665,10 +1053,56 @@ export function PropertiesPanel(): React.JSX.Element {
       <div className="properties__divider" />
 
       <label className="properties__field">
-        <span>Keys</span>
-        <KeyCapture keys={widget.action.keys} onChange={(keys) => patch({ action: { ...widget.action, keys } })} />
+        <span>Action</span>
+        <select
+          value={widget.action.kind}
+          onChange={(e) =>
+            patch({
+              action: e.target.value === 'keypress' ? { kind: 'keypress', keys: [] } : { kind: 'update-state', code: '' }
+            })
+          }
+        >
+          <option value="keypress">Keypress</option>
+          <option value="update-state">Update state</option>
+        </select>
       </label>
-      <p className="properties__hint">Click the box, then press the key combo to bind. Click away to finish.</p>
+
+      {widget.action.kind === 'keypress' ? (
+        <>
+          <label className="properties__field">
+            <span>Keys</span>
+            <div className="properties__file-row">
+              <KeyCapture keys={widget.action.keys} onChange={(keys) => patch({ action: { kind: 'keypress', keys } })} />
+              <button
+                type="button"
+                className="properties__file-remove"
+                disabled={widget.action.keys.length === 0}
+                onClick={() => patch({ action: { kind: 'keypress', keys: [] } })}
+              >
+                Unbind
+              </button>
+            </div>
+          </label>
+          <p className="properties__hint">Click the box, then press the key combo to bind. Click away to finish.</p>
+        </>
+      ) : (
+        <>
+          <label className="properties__field">
+            <span>Code</span>
+            <textarea
+              className="properties__code"
+              rows={6}
+              placeholder={'return { my_variable: (variables.my_variable ?? 0) + 1 };'}
+              value={widget.action.code}
+              onChange={(e) => patch({ action: { kind: 'update-state', code: e.target.value } })}
+            />
+          </label>
+          <p className="properties__hint">
+            JS function body — <code>variables</code> holds every variable&rsquo;s current value. Return an object of{' '}
+            <code>{'{ name: newValue }'}</code> pairs to update them (unknown names get created).
+          </p>
+        </>
+      )}
 
       <div className="properties__divider" />
 
@@ -683,25 +1117,56 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Y</span>
             <input type="number" value={widget.y} onChange={(e) => patch({ y: Number(e.target.value) })} />
           </label>
-          <label className="properties__field">
-            <span>W</span>
-            <input
-              type="number"
-              min={minSize}
-              value={widget.w}
-              onChange={(e) => patch({ w: Math.max(minSize, Number(e.target.value)) })}
-            />
-          </label>
-          <label className="properties__field">
-            <span>H</span>
-            <input
-              type="number"
-              min={minSize}
-              value={widget.h}
-              onChange={(e) => patch({ h: Math.max(minSize, Number(e.target.value)) })}
-            />
-          </label>
+          {widget.type === 'button' ? (
+            <>
+              <label className="properties__field">
+                <span>W</span>
+                <input
+                  type="number"
+                  min={minSize}
+                  value={widget.w}
+                  onChange={(e) => patch({ w: Math.max(minSize, Number(e.target.value)) })}
+                />
+              </label>
+              <label className="properties__field">
+                <span>H</span>
+                <input
+                  type="number"
+                  min={minSize}
+                  value={widget.h}
+                  onChange={(e) => patch({ h: Math.max(minSize, Number(e.target.value)) })}
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label className="properties__field">
+                <span>Cell W</span>
+                <input
+                  type="number"
+                  min={minSize}
+                  value={widget.cellW}
+                  onChange={(e) => patch({ cellW: Math.max(minSize, Number(e.target.value)) })}
+                />
+              </label>
+              <label className="properties__field">
+                <span>Cell H</span>
+                <input
+                  type="number"
+                  min={minSize}
+                  value={widget.cellH}
+                  onChange={(e) => patch({ cellH: Math.max(minSize, Number(e.target.value)) })}
+                />
+              </label>
+            </>
+          )}
         </div>
+        {widget.type === 'morph' && (
+          <p className="properties__hint">
+            {widget.blocks.length} block{widget.blocks.length === 1 ? '' : 's'} — select the widget on the canvas and use its +
+            handles to add more.
+          </p>
+        )}
       </details>
 
       <div className="properties__divider" />

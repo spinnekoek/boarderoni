@@ -11,6 +11,10 @@ interface DashboardStore {
   connected: boolean
   errors: Record<string, string>
   selectedWidgetIds: string[]
+  // Which base block of a selected morph widget the properties panel's
+  // spacing/radius/border sub-panel targets — reset to null on every
+  // widget-selection change (see selectWidget/pasteWidgets/removeWidget(s)).
+  selectedBlockId: string | null
   // Which of the selected widget's states the editor canvas previews (its
   // properties panel tab) — reset to 0 (Default) on every selection change.
   activeStateIndex: number
@@ -18,7 +22,7 @@ interface DashboardStore {
   connect: (mode: Mode) => void
   updateWidgets: (widgets: Widget[]) => void
   updateDashboardMeta: (
-    fields: Partial<Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundFit' | 'backgroundAnchor'>>
+    fields: Partial<Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundFit' | 'backgroundAnchor' | 'variables'>>
   ) => void
   uploadBackgroundImage: (dataUrl: string) => void
   clearBackgroundImage: () => void
@@ -30,6 +34,11 @@ interface DashboardStore {
   removeWidgets: (ids: string[]) => void
   triggerWidget: (id: string) => void
   selectWidget: (id: string | null, options?: { additive?: boolean }) => void
+  // Marquee (shift-drag) selection — replaces the current selection by
+  // default, or unions with it when additive (shift-drag always passes
+  // additive, matching shift-click's existing meaning elsewhere).
+  selectWidgets: (ids: string[], options?: { additive?: boolean }) => void
+  selectBlock: (id: string | null) => void
   setActiveStateIndex: (index: number | ((current: number) => number)) => void
   renameDevice: (deviceId: string, name: string) => void
 }
@@ -66,6 +75,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   connected: false,
   errors: {},
   selectedWidgetIds: [],
+  selectedBlockId: null,
   activeStateIndex: 0,
   devices: [],
 
@@ -150,7 +160,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   // pasted batch is immediately draggable as a group without an extra click.
   pasteWidgets: (widgets) => {
     get().updateWidgets([...get().dashboard.widgets, ...widgets])
-    set({ selectedWidgetIds: widgets.map((w) => w.id), activeStateIndex: 0 })
+    set({ selectedWidgetIds: widgets.map((w) => w.id), selectedBlockId: null, activeStateIndex: 0 })
   },
 
   // Widgets render (and thus paint-stack) in array order — last wins any
@@ -171,22 +181,32 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   removeWidget: (id) => {
     get().updateWidgets(get().dashboard.widgets.filter((w) => w.id !== id))
-    set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => w !== id) }))
+    set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => w !== id), selectedBlockId: null }))
   },
 
   removeWidgets: (ids) => {
     const idSet = new Set(ids)
     get().updateWidgets(get().dashboard.widgets.filter((w) => !idSet.has(w.id)))
-    set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => !idSet.has(w)) }))
+    set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => !idSet.has(w)), selectedBlockId: null }))
   },
 
   triggerWidget: (id) => {
+    // Optimistically clear any error from a previous attempt — otherwise a
+    // stale red banner sticks on the widget forever, even after fixing
+    // whatever caused it, since nothing else ever removes an entry here. A
+    // fresh action:error re-populates it if this attempt fails too.
+    set((s) => {
+      if (!(id in s.errors)) return {}
+      const errors = { ...s.errors }
+      delete errors[id]
+      return { errors }
+    })
     send({ type: 'action:trigger', widgetId: id })
   },
 
   selectWidget: (id, options) => {
     if (id === null) {
-      set({ selectedWidgetIds: [], activeStateIndex: 0 })
+      set({ selectedWidgetIds: [], selectedBlockId: null, activeStateIndex: 0 })
       return
     }
     if (options?.additive) {
@@ -194,11 +214,31 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         selectedWidgetIds: s.selectedWidgetIds.includes(id)
           ? s.selectedWidgetIds.filter((w) => w !== id)
           : [...s.selectedWidgetIds, id],
+        selectedBlockId: null,
         activeStateIndex: 0
       }))
       return
     }
-    set({ selectedWidgetIds: [id], activeStateIndex: 0 })
+    set((s) => {
+      // A no-op re-click on an already-sole-selected widget (see
+      // useWidgetDrag's handlePointerUp, which re-confirms selection on
+      // every clean click so a multi-select can collapse to one) must not
+      // clobber a block selection made in this same click's pointerdown.
+      if (s.selectedWidgetIds.length === 1 && s.selectedWidgetIds[0] === id) return {}
+      return { selectedWidgetIds: [id], selectedBlockId: null, activeStateIndex: 0 }
+    })
+  },
+
+  selectWidgets: (ids, options) => {
+    set((s) => ({
+      selectedWidgetIds: options?.additive ? Array.from(new Set([...s.selectedWidgetIds, ...ids])) : ids,
+      selectedBlockId: null,
+      activeStateIndex: 0
+    }))
+  },
+
+  selectBlock: (id) => {
+    set({ selectedBlockId: id })
   },
 
   setActiveStateIndex: (indexOrUpdater) => {

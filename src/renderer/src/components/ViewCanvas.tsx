@@ -1,19 +1,24 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { getEffectiveStates } from '@shared/states'
+import { morphFootprint } from '@shared/morph'
+import { toVariableMap, type VariableMap } from '@shared/expr'
 import type { Widget } from '@shared/types'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
+import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
 import { DeviceSettingsModal } from './DeviceSettingsModal'
 
 const SETTINGS_GESTURE_FINGER_COUNT = 5
 
 function ViewWidget({
   widget,
+  variables,
   onTrigger,
   error
 }: {
   widget: Widget
+  variables: VariableMap
   onTrigger: () => void
   error?: string
 }): React.JSX.Element {
@@ -27,6 +32,26 @@ function ViewWidget({
 
   function release(): void {
     setPressed(false)
+  }
+
+  // Morph blocks own their own pointer handling (see MorphButtonWidgetContent)
+  // instead of a single full-bounding-box wrapper, since an irregular shape's
+  // bounding box includes area that isn't actually part of any block (a U's
+  // notch) — a wrapper div there would show "pressed" for taps that don't
+  // land on any real block.
+  if (widget.type === 'morph') {
+    return (
+      <MorphButtonWidgetContent
+        widget={widget}
+        state={state}
+        interactive
+        variables={variables}
+        onTrigger={onTrigger}
+        onPress={press}
+        onRelease={release}
+        error={error}
+      />
+    )
   }
 
   function handlePointerDown(e: React.PointerEvent): void {
@@ -46,19 +71,22 @@ function ViewWidget({
       onPointerCancel={release}
       onPointerLeave={release}
     >
-      <ButtonWidgetContent widget={widget} state={state} interactive onTrigger={onTrigger} error={error} />
+      <ButtonWidgetContent widget={widget} state={state} interactive variables={variables} onTrigger={onTrigger} error={error} />
     </div>
   )
 }
 
 export function ViewCanvas(): React.JSX.Element {
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
+  const variables = useDashboardStore((s) => s.dashboard.variables)
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
   const backgroundImageVersion = useDashboardStore((s) => s.dashboard.backgroundImageVersion)
   const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
   const backgroundAnchor = useDashboardStore((s) => s.dashboard.backgroundAnchor)
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   const errors = useDashboardStore((s) => s.errors)
+
+  const variableMap = useMemo(() => toVariableMap(variables ?? []), [variables])
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Guards against re-opening on every touchmove while 5+ fingers stay down,
@@ -94,15 +122,18 @@ export function ViewCanvas(): React.JSX.Element {
           }}
         />
       )}
-      {widgets.map((widget) => (
-        <div
-          key={widget.id}
-          className="view-canvas__widget"
-          style={{ left: widget.x, top: widget.y, width: widget.w, height: widget.h }}
-        >
-          <ViewWidget widget={widget} onTrigger={() => triggerWidget(widget.id)} error={errors[widget.id]} />
-        </div>
-      ))}
+      {widgets.map((widget) => {
+        const rendered = widget.type === 'morph' ? morphFootprint(widget) : widget
+        return (
+          <div
+            key={widget.id}
+            className={`view-canvas__widget${widget.type === 'morph' ? ' view-canvas__widget--morph' : ''}`}
+            style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
+          >
+            <ViewWidget widget={widget} variables={variableMap} onTrigger={() => triggerWidget(widget.id)} error={errors[widget.id]} />
+          </div>
+        )
+      })}
       {settingsOpen && <DeviceSettingsModal onClose={() => setSettingsOpen(false)} />}
     </div>
   )

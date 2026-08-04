@@ -3,7 +3,19 @@ export interface KeypressAction {
   keys: string[]
 }
 
-export type WidgetAction = KeypressAction
+// JS function body, evaluated (see shared/expr.ts) with `states` — the
+// current value of every Variable, keyed by name — in scope. Runs
+// server-side on trigger (see main/index.ts's triggerAction); the returned
+// value is expected to be a plain object of {variableName: newValue}, and
+// every key present gets merged into Dashboard.variables (creating new
+// variables for names that don't exist yet). More action kinds (macro, REST
+// call, ...) can join this union later.
+export interface UpdateStateAction {
+  kind: 'update-state'
+  code: string
+}
+
+export type WidgetAction = KeypressAction | UpdateStateAction
 
 // x/y/w/h are absolute CSS pixels on the dashboard canvas — not grid units.
 // A widget is always rendered at exactly this pixel size on every client, no
@@ -19,6 +31,10 @@ export type VerticalAlign = 'top' | 'center' | 'bottom'
 export interface WidgetLabel {
   id: string
   text: string
+  // When set, evaluated (see resolveLabelText in shared/expr.ts) and used
+  // instead of `text` — same expression mechanism as ColorAppearance's
+  // colorExpr below, just returning display text instead of a color.
+  textExpr?: string
   fontFamily?: string
   fontSize?: number
   textColor?: string
@@ -28,34 +44,59 @@ export interface WidgetLabel {
   padding?: number
 }
 
+// Purely geometric per-side appearance shared by anything rendered as a
+// bordered/rounded box: a plain button's per-state look, and a morph block's
+// per-state override (see MorphBlockStateOverride below) — both need the
+// exact same three knobs, just sourced differently (always-manual for a
+// plain button; auto-fit-computed-or-manual for a morph block).
+export interface BoxAppearance {
+  // Per-side inset (px) on top of the widget's own x/y/w/h. Negative values
+  // (down to -1) expand the box outward instead of shrinking it.
+  spacingTop?: number
+  spacingRight?: number
+  spacingBottom?: number
+  spacingLeft?: number
+  // Per-corner border radius (px).
+  radiusTopLeft?: number
+  radiusTopRight?: number
+  radiusBottomLeft?: number
+  radiusBottomRight?: number
+  // Per-side border thickness (px) — 0 removes that side's border entirely
+  // (used by morph auto-fit to drop the border on a seam between two
+  // touching blocks, on top of the -1 spacing/0 radius there).
+  borderWidthTop?: number
+  borderWidthRight?: number
+  borderWidthBottom?: number
+  borderWidthLeft?: number
+}
+
+// Fill/border color+opacity, shared by a widget's own per-state look and a
+// morph block's per-state override (see MorphBlockStateOverride below) — a
+// block's override falls back to the widget's own state fields wherever
+// it's unset (see effectiveBlockColor in shared/morph.ts), so by default
+// every block matches the widget and only diverges where you explicitly
+// override it.
+export interface ColorAppearance {
+  color?: string
+  // When set, evaluated (see resolveColor in shared/expr.ts) with `states`
+  // in scope and used instead of `color` — a JS expression instead of a
+  // fixed value, e.g. to derive this look from a Variable's current value.
+  colorExpr?: string
+  borderColor?: string
+  backgroundOpacity?: number
+  borderOpacity?: number
+}
+
 // A named, independently-styled visual variant of a widget. "Default" (the
 // first entry, always present) is the idle look; "Clicked" (conventionally
 // the second entry) is shown while the button is held on the view client.
 // Anything past those two is inert for now — no runtime mechanism switches to
 // them yet, that's future state-machine work — but they're fully editable so
 // design work can get ahead of it.
-export interface WidgetState {
+export interface WidgetState extends BoxAppearance, ColorAppearance {
   id: string
   name: string
   labels: WidgetLabel[]
-  color?: string
-  borderColor?: string
-  backgroundOpacity?: number
-  borderOpacity?: number
-  // Per-side inset (px) on top of the widget's own x/y/w/h — independent of
-  // every other state's, so switching states (e.g. on press) can visually
-  // squish/shift the button. Negative values (down to -1) expand the box
-  // outward instead of shrinking it.
-  spacingTop?: number
-  spacingRight?: number
-  spacingBottom?: number
-  spacingLeft?: number
-  // Per-corner border radius (px), independent of every other state's for
-  // the same reason as spacing above.
-  radiusTopLeft?: number
-  radiusTopRight?: number
-  radiusBottomLeft?: number
-  radiusBottomRight?: number
   // CSS z-index override for this state, independent of every other
   // state's — e.g. a "Clicked" state can pop above neighboring widgets
   // while held, overriding the default paint-order stacking (see
@@ -86,7 +127,63 @@ export interface ButtonWidget {
   states: WidgetState[]
 }
 
-export type Widget = ButtonWidget
+// Grid-relative, NOT normalized to a 0-based origin — col/row 0 always maps
+// to the widget's own (x, y) regardless of which blocks actually exist, so
+// extending a shape "up" or "left" (negative col/row) never requires
+// rewriting x/y or other blocks to compensate (normalizeMorphBlocks folds
+// this back to 0-based after every add/remove). Must stay 4-connected (every
+// block reachable from any other via shared edges) — that's what "acting as
+// one button" depends on.
+export interface MorphCell {
+  col: number
+  row: number
+}
+
+// A block's per-state appearance. With autoFit on (the default for a new
+// block), any side touching another block of this SAME widget is computed
+// automatically (spacing -1, radius 0, border 0 on that side — see
+// effectiveBlockAppearance in shared/morph.ts) and its fields here are
+// ignored/disabled in the UI; a side with no neighbor always falls back to
+// the manual value here regardless of autoFit. With autoFit off, every side
+// is manual, same as a plain button's state. Color fields are unrelated to
+// autoFit — always either an explicit per-block override or inherited from
+// the widget's own state (see ColorAppearance above); nothing stops two
+// blocks of the same widget from ending up different colors if you set them
+// that way yourself.
+export interface MorphBlockStateOverride extends BoxAppearance, ColorAppearance {
+  autoFit?: boolean
+}
+
+// One base cell of a morph button. Its appearance can differ per widget
+// state (e.g. auto-fit merged in "Default", manually pulled apart in some
+// other state) — keyed by WidgetState.id rather than a parallel array so
+// reordering/adding/removing states doesn't require reindexing every block.
+export interface MorphBlock extends MorphCell {
+  id: string
+  perState: Record<string, MorphBlockStateOverride>
+}
+
+// A button whose hit area is a union of grid blocks rather than one
+// rectangle — e.g. a U-shaped run of blocks that still triggers one action
+// and shows one label/state, like several ButtonWidgets fused into one.
+// cellW/cellH size every block uniformly; there's no per-block size. Labels,
+// keys, and the states list itself are shared by the whole widget (one set
+// of states for all blocks) — color, spacing, radius, and border (via
+// perState on each block) can all differ block to block.
+export interface MorphButtonWidget {
+  id: string
+  type: 'morph'
+  x: number
+  y: number
+  cellW: number
+  cellH: number
+  blocks: MorphBlock[]
+  action: WidgetAction
+  statesEnabled?: boolean
+  states: WidgetState[]
+}
+
+export type Widget = ButtonWidget | MorphButtonWidget
 
 // 'cover'/'contain'/'stretch' scale the image proportionally or not, 'tile'
 // repeats it at native size, 'none' places it at native size unscaled — the
@@ -103,6 +200,22 @@ export type BackgroundAnchor =
   | 'bottom-center'
   | 'bottom-right'
 
+// Loosely-typed on purpose — whatever a variable's controlling widget's
+// update-state action last returned for it (see UpdateStateAction above).
+export type VariableValue = string | number | boolean
+
+// Named piece of shared, internal, live state — set by an update-state
+// action, read by any widget's colorExpr/textExpr elsewhere on the
+// dashboard via `states.<name>`. `id` is just for stable list identity in
+// the editor (drag-reorder, delete) — expressions reference variables by
+// `name`, so renaming one is a manual find-and-fix in whatever expressions
+// used the old name, not something this app can track for you.
+export interface Variable {
+  id: string
+  name: string
+  value: VariableValue
+}
+
 export interface Dashboard {
   id: string
   name: string
@@ -115,6 +228,11 @@ export interface Dashboard {
   backgroundImageMime?: string
   backgroundFit?: BackgroundFit
   backgroundAnchor?: BackgroundAnchor
+  // Optional (rather than always-present) so a dashboard saved before this
+  // existed still loads — see loadDashboard in main/index.ts, which
+  // normalizes it to [] once at load time so nothing downstream has to
+  // re-check for undefined.
+  variables?: Variable[]
   widgets: Widget[]
 }
 
@@ -165,5 +283,6 @@ export const DEFAULT_DASHBOARD: Dashboard = {
   backgroundColor: '#14161b',
   backgroundFit: 'cover',
   backgroundAnchor: 'center',
+  variables: [],
   widgets: []
 }

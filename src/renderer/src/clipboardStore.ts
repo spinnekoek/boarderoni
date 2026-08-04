@@ -9,17 +9,34 @@ import type { Widget } from '@shared/types'
 const PASTE_OFFSET = 24
 
 function cloneWidget(widget: Widget, offset: number): Widget {
-  return {
-    ...widget,
-    id: nextId(),
-    x: widget.x + offset,
-    y: widget.y + offset,
-    states: widget.states.map((state) => ({
-      ...state,
+  // Tracks old state id -> new state id so a morph widget's blocks (below)
+  // can rekey their perState overrides onto the states they actually get
+  // cloned alongside, instead of pointing at ids that no longer exist.
+  const stateIdMap = new Map<string, string>()
+  const states = widget.states.map((state) => {
+    const newStateId = nextId()
+    stateIdMap.set(state.id, newStateId)
+    return { ...state, id: newStateId, labels: state.labels.map((label) => ({ ...label, id: nextId() })) }
+  })
+
+  if (widget.type === 'morph') {
+    return {
+      ...widget,
       id: nextId(),
-      labels: state.labels.map((label) => ({ ...label, id: nextId() }))
-    }))
+      x: widget.x + offset,
+      y: widget.y + offset,
+      states,
+      blocks: widget.blocks.map((block) => ({
+        ...block,
+        id: nextId(),
+        perState: Object.fromEntries(
+          Object.entries(block.perState).map(([stateId, override]) => [stateIdMap.get(stateId) ?? stateId, override])
+        )
+      }))
+    }
   }
+
+  return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset, states }
 }
 
 interface ClipboardStore {

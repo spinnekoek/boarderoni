@@ -3,6 +3,7 @@ import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useWidgetDrag } from '../useWidgetDrag'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
+import type { VariableMap } from '@shared/expr'
 import type { ButtonWidget } from '@shared/types'
 
 interface ResizeState {
@@ -15,10 +16,12 @@ interface ResizeState {
 export function CanvasWidget({
   widget,
   zoom,
+  variables,
   onContextMenu
 }: {
   widget: ButtonWidget
   zoom: number
+  variables: VariableMap
   onContextMenu: (e: React.MouseEvent) => void
 }): React.JSX.Element {
   const { selected, selectedWidgetIds, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
@@ -88,7 +91,7 @@ export function CanvasWidget({
       onPointerUp={handlePointerUp}
       onContextMenu={onContextMenu}
     >
-      <ButtonWidgetContent widget={widget} state={previewState} interactive={false} />
+      <ButtonWidgetContent widget={widget} state={previewState} interactive={false} variables={variables} />
       {resizing && (
         <div className="canvas-widget__size-label" style={{ transform: `scale(${1 / zoom})` }}>
           {Math.round(widget.w)} × {Math.round(widget.h)}

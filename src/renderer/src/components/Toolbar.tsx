@@ -1,9 +1,12 @@
+import { useState } from 'react'
 import { useEditorSettings } from '../settingsStore'
 import { useDashboardStore } from '../store'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
+import { VariablesModal } from './VariablesModal'
 
 export function Toolbar(): React.JSX.Element {
+  const [variablesOpen, setVariablesOpen] = useState(false)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
   const setSnapToGrid = useEditorSettings((s) => s.setSnapToGrid)
@@ -59,6 +62,10 @@ export function Toolbar(): React.JSX.Element {
         />
         <span className="toolbar__unit">px</span>
       </label>
+      <button type="button" className="toolbar__button" onClick={() => setVariablesOpen(true)}>
+        Variables
+      </button>
+      {variablesOpen && <VariablesModal onClose={() => setVariablesOpen(false)} />}
     </div>
   )
 }

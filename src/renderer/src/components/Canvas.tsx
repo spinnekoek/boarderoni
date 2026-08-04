@@ -1,9 +1,12 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useEditorShortcuts } from '../useEditorShortcuts'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
+import { morphFootprint } from '@shared/morph'
+import { toVariableMap } from '@shared/expr'
 import { CanvasWidget } from './CanvasWidget'
+import { MorphCanvasWidget } from './MorphCanvasWidget'
 import { ContextMenu } from './ContextMenu'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
@@ -33,6 +36,16 @@ interface ContextMenuState {
   widgetIds: string[] | null
 }
 
+interface WorldPoint {
+  x: number
+  y: number
+}
+
+interface MarqueeState {
+  start: WorldPoint
+  current: WorldPoint
+}
+
 export function Canvas(): React.JSX.Element {
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
@@ -40,21 +53,47 @@ export function Canvas(): React.JSX.Element {
   const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
   const backgroundAnchor = useDashboardStore((s) => s.dashboard.backgroundAnchor)
   const devices = useDashboardStore((s) => s.devices)
+  const variables = useDashboardStore((s) => s.dashboard.variables)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
+  const selectWidgets = useDashboardStore((s) => s.selectWidgets)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
   const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
 
   useEditorShortcuts()
 
+  const variableMap = useMemo(() => toVariableMap(variables ?? []), [variables])
+
   const [camera, setCamera] = useState<Camera>(INITIAL_CAMERA)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [marquee, setMarquee] = useState<MarqueeState | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const panState = useRef<PanState | null>(null)
+
+  // Converts a viewport-relative screen point into the same world space
+  // widget x/y/w/h live in — inverse of the canvas-layer's own translate+
+  // scale transform (see handleWheel below for the matching forward math).
+  function screenToWorld(clientX: number, clientY: number): WorldPoint {
+    const rect = viewportRef.current!.getBoundingClientRect()
+    return {
+      x: (clientX - rect.left - camera.x) / camera.zoom,
+      y: (clientY - rect.top - camera.y) / camera.zoom
+    }
+  }
 
   function handleBackgroundPointerDown(e: React.PointerEvent): void {
     // Right-click opens the context menu instead (see handleBackgroundContextMenu) — left un-guarded, it would also arm a pan.
     if (e.button !== 0) return
+    if (e.shiftKey) {
+      const point = screenToWorld(e.clientX, e.clientY)
+      setMarquee({ start: point, current: point })
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {
+        // best-effort, see CanvasWidget's handlePointerDown
+      }
+      return
+    }
     panState.current = { startX: e.clientX, startY: e.clientY, camX: camera.x, camY: camera.y, moved: false }
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
@@ -81,6 +120,10 @@ export function Canvas(): React.JSX.Element {
   }
 
   function handleBackgroundPointerMove(e: React.PointerEvent): void {
+    if (marquee) {
+      setMarquee((m) => (m ? { ...m, current: screenToWorld(e.clientX, e.clientY) } : m))
+      return
+    }
     const pan = panState.current
     if (!pan) return
     const dx = e.clientX - pan.startX
@@ -90,6 +133,21 @@ export function Canvas(): React.JSX.Element {
   }
 
   function handleBackgroundPointerUp(): void {
+    if (marquee) {
+      const left = Math.min(marquee.start.x, marquee.current.x)
+      const right = Math.max(marquee.start.x, marquee.current.x)
+      const top = Math.min(marquee.start.y, marquee.current.y)
+      const bottom = Math.max(marquee.start.y, marquee.current.y)
+      const ids = widgets
+        .filter((widget) => {
+          const box = widget.type === 'morph' ? morphFootprint(widget) : widget
+          return box.x < right && box.x + box.w > left && box.y < bottom && box.y + box.h > top
+        })
+        .map((widget) => widget.id)
+      selectWidgets(ids, { additive: true })
+      setMarquee(null)
+      return
+    }
     // Only deselect for a pointerup this element's own pointerdown actually
     // started (panState set) — otherwise an interactive child that stops
     // propagation on pointerdown/click but not pointerup would bubble its
@@ -130,7 +188,7 @@ export function Canvas(): React.JSX.Element {
         <span className="canvas-toolbar__devices">
           {connectedCount === 0 ? 'No devices connected' : `${connectedCount} device${connectedCount > 1 ? 's' : ''} connected`}
         </span>
-        <span className="canvas-toolbar__hint">Scroll to zoom · drag empty space to pan</span>
+        <span className="canvas-toolbar__hint">Scroll to zoom · drag empty space to pan · hold Shift and drag to box-select</span>
       </div>
       <div
         className="canvas-background"
@@ -166,14 +224,36 @@ export function Canvas(): React.JSX.Element {
               </div>
             )}
           </div>
-          {widgets.map((widget) => (
-            <CanvasWidget
-              key={widget.id}
-              widget={widget}
-              zoom={camera.zoom}
-              onContextMenu={(e) => handleWidgetContextMenu(e, widget.id)}
+          {widgets.map((widget) =>
+            widget.type === 'morph' ? (
+              <MorphCanvasWidget
+                key={widget.id}
+                widget={widget}
+                zoom={camera.zoom}
+                variables={variableMap}
+                onContextMenu={(e) => handleWidgetContextMenu(e, widget.id)}
+              />
+            ) : (
+              <CanvasWidget
+                key={widget.id}
+                widget={widget}
+                zoom={camera.zoom}
+                variables={variableMap}
+                onContextMenu={(e) => handleWidgetContextMenu(e, widget.id)}
+              />
+            )
+          )}
+          {marquee && (
+            <div
+              className="canvas-marquee"
+              style={{
+                left: Math.min(marquee.start.x, marquee.current.x),
+                top: Math.min(marquee.start.y, marquee.current.y),
+                width: Math.abs(marquee.current.x - marquee.start.x),
+                height: Math.abs(marquee.current.y - marquee.start.y)
+              }}
             />
-          ))}
+          )}
         </div>
       </div>
       {contextMenu && (
