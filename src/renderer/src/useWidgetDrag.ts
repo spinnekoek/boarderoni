@@ -14,11 +14,7 @@ interface DragState {
   wasSelected: boolean
 }
 
-// Selection + drag-to-move for a widget on the editor canvas — shared by
-// CanvasWidget and MorphCanvasWidget since "move the whole thing by
-// translating x/y, respecting multi-select group drag" is identical
-// regardless of a widget's shape. Resizing/shape-editing stays owned by each
-// widget type's own component.
+// Selection + drag-to-move for a widget on the editor canvas.
 export function useWidgetDrag(
   widget: Widget,
   zoom: number
@@ -43,6 +39,10 @@ export function useWidgetDrag(
   }
 
   function handlePointerDown(e: React.PointerEvent): void {
+    // Right-click is reserved for the context menu (see Canvas's
+    // handleWidgetContextMenu) — left un-guarded, it would also arm a drag
+    // and, via the matching pointerup, register as a plain click.
+    if (e.button !== 0) return
     e.stopPropagation()
     const additive = e.shiftKey || e.ctrlKey || e.metaKey
     const wasSelected = selectedWidgetIds.includes(widget.id)

@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
+import { useEditorShortcuts } from '../useEditorShortcuts'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { CanvasWidget } from './CanvasWidget'
-import { MorphCanvasWidget } from './MorphCanvasWidget'
+import { ContextMenu } from './ContextMenu'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
 
@@ -26,6 +27,12 @@ interface PanState {
   moved: boolean
 }
 
+interface ContextMenuState {
+  x: number
+  y: number
+  widgetIds: string[] | null
+}
+
 export function Canvas(): React.JSX.Element {
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
@@ -38,17 +45,39 @@ export function Canvas(): React.JSX.Element {
   const gridSize = useEditorSettings((s) => s.gridSize)
   const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
 
+  useEditorShortcuts()
+
   const [camera, setCamera] = useState<Camera>(INITIAL_CAMERA)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const panState = useRef<PanState | null>(null)
 
   function handleBackgroundPointerDown(e: React.PointerEvent): void {
+    // Right-click opens the context menu instead (see handleBackgroundContextMenu) — left un-guarded, it would also arm a pan.
+    if (e.button !== 0) return
     panState.current = { startX: e.clientX, startY: e.clientY, camX: camera.x, camY: camera.y, moved: false }
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
       // best-effort, see CanvasWidget's handlePointerDown
     }
+  }
+
+  function handleBackgroundContextMenu(e: React.MouseEvent): void {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, widgetIds: null })
+  }
+
+  // Right-clicking a widget that's already part of the current multi-select
+  // keeps the whole selection (so the menu's actions apply to all of it);
+  // right-clicking anything else collapses selection down to just that one,
+  // matching how a plain click would.
+  function handleWidgetContextMenu(e: React.MouseEvent, widgetId: string): void {
+    e.preventDefault()
+    e.stopPropagation()
+    const { selectedWidgetIds } = useDashboardStore.getState()
+    if (!selectedWidgetIds.includes(widgetId)) selectWidget(widgetId)
+    setContextMenu({ x: e.clientX, y: e.clientY, widgetIds: useDashboardStore.getState().selectedWidgetIds })
   }
 
   function handleBackgroundPointerMove(e: React.PointerEvent): void {
@@ -63,9 +92,8 @@ export function Canvas(): React.JSX.Element {
   function handleBackgroundPointerUp(): void {
     // Only deselect for a pointerup this element's own pointerdown actually
     // started (panState set) — otherwise an interactive child that stops
-    // propagation on pointerdown/click but not pointerup (e.g. the morph
-    // widget's + handles) would bubble its release here and get incorrectly
-    // treated as "clicked empty background."
+    // propagation on pointerdown/click but not pointerup would bubble its
+    // release here and get incorrectly treated as "clicked empty background."
     const pan = panState.current
     panState.current = null
     if (pan && !pan.moved) selectWidget(null)
@@ -109,6 +137,7 @@ export function Canvas(): React.JSX.Element {
         onPointerDown={handleBackgroundPointerDown}
         onPointerMove={handleBackgroundPointerMove}
         onPointerUp={handleBackgroundPointerUp}
+        onContextMenu={handleBackgroundContextMenu}
         style={
           snapToGrid
             ? {
@@ -137,15 +166,19 @@ export function Canvas(): React.JSX.Element {
               </div>
             )}
           </div>
-          {widgets.map((widget) =>
-            widget.type === 'morph' ? (
-              <MorphCanvasWidget key={widget.id} widget={widget} zoom={camera.zoom} />
-            ) : (
-              <CanvasWidget key={widget.id} widget={widget} zoom={camera.zoom} />
-            )
-          )}
+          {widgets.map((widget) => (
+            <CanvasWidget
+              key={widget.id}
+              widget={widget}
+              zoom={camera.zoom}
+              onContextMenu={(e) => handleWidgetContextMenu(e, widget.id)}
+            />
+          ))}
         </div>
       </div>
+      {contextMenu && (
+        <ContextMenu x={contextMenu.x} y={contextMenu.y} widgetIds={contextMenu.widgetIds} onClose={() => setContextMenu(null)} />
+      )}
     </div>
   )
 }

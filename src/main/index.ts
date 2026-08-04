@@ -7,7 +7,6 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
 import { SERVER_PORT } from '../shared/constants'
 import { DEFAULT_DASHBOARD, type ClientToServer, type Dashboard, type DeviceInfo, type ServerToClient, type Widget } from '../shared/types'
-import { normalizeMorphCells } from '../shared/morph'
 
 // Pre-multi-label shape: a single flat `label` string plus its own styling
 // fields (including a widget-level `padding`), before they moved into
@@ -32,13 +31,6 @@ interface LegacyButtonWidget {
 }
 
 function migrateWidget(widget: Widget & LegacyButtonWidget): Widget {
-  // Morph widgets never existed in any of the legacy shapes below — they're
-  // always created with a states[] array from the start. Still normalize
-  // cell coordinates on every load in case a widget saved before that was
-  // enforced (client-side, on add/remove) drifted out of alignment — see
-  // normalizeMorphCells for why a non-normalized shape breaks resizing.
-  if (widget.type === 'morph') return normalizeMorphCells(widget)
-
   if (!Array.isArray(widget.labels)) {
     const { label, fontFamily, fontSize, textColor, textOpacity, align, verticalAlign, padding, ...rest } = widget
     widget = {

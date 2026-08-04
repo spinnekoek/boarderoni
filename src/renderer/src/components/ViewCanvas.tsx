@@ -1,23 +1,19 @@
 import { useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
-import { applySpacing, widgetFootprint } from '../layout'
 import { getEffectiveStates } from '@shared/states'
 import type { Widget } from '@shared/types'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
-import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
 import { DeviceSettingsModal } from './DeviceSettingsModal'
 
 const SETTINGS_GESTURE_FINGER_COUNT = 5
 
 function ViewWidget({
   widget,
-  spacing,
   onTrigger,
   error
 }: {
   widget: Widget
-  spacing: number
   onTrigger: () => void
   error?: string
 }): React.JSX.Element {
@@ -31,26 +27,6 @@ function ViewWidget({
 
   function release(): void {
     setPressed(false)
-  }
-
-  // Morph cells own their own pointer handling (see MorphButtonWidgetContent)
-  // instead of a single full-bounding-box wrapper, since an irregular shape's
-  // bounding box includes area that isn't actually part of any cell (a U's
-  // notch) — a wrapper div there would show "pressed" for taps that don't
-  // land on any real cell.
-  if (widget.type === 'morph') {
-    return (
-      <MorphButtonWidgetContent
-        widget={widget}
-        state={state}
-        interactive
-        spacing={spacing}
-        onTrigger={onTrigger}
-        onPress={press}
-        onRelease={release}
-        error={error}
-      />
-    )
   }
 
   function handlePointerDown(e: React.PointerEvent): void {
@@ -77,7 +53,6 @@ function ViewWidget({
 
 export function ViewCanvas(): React.JSX.Element {
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
-  const spacing = useDashboardStore((s) => s.dashboard.spacing ?? 0)
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
   const backgroundImageVersion = useDashboardStore((s) => s.dashboard.backgroundImageVersion)
   const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
@@ -119,23 +94,15 @@ export function ViewCanvas(): React.JSX.Element {
           }}
         />
       )}
-      {widgets.map((widget) => {
-        const footprint = widgetFootprint(widget)
-        // Morph widgets stay at their raw (unspaced) footprint — spacing is
-        // applied per cell inside MorphButtonWidgetContent instead (see its
-        // comment on cellElements).
-        const rendered =
-          widget.type === 'morph' ? footprint : applySpacing(footprint.x, footprint.y, footprint.w, footprint.h, spacing)
-        return (
-          <div
-            key={widget.id}
-            className={`view-canvas__widget${widget.type === 'morph' ? ' view-canvas__widget--morph' : ''}`}
-            style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
-          >
-            <ViewWidget widget={widget} spacing={spacing} onTrigger={() => triggerWidget(widget.id)} error={errors[widget.id]} />
-          </div>
-        )
-      })}
+      {widgets.map((widget) => (
+        <div
+          key={widget.id}
+          className="view-canvas__widget"
+          style={{ left: widget.x, top: widget.y, width: widget.w, height: widget.h }}
+        >
+          <ViewWidget widget={widget} onTrigger={() => triggerWidget(widget.id)} error={errors[widget.id]} />
+        </div>
+      ))}
       {settingsOpen && <DeviceSettingsModal onClose={() => setSettingsOpen(false)} />}
     </div>
   )

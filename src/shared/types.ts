@@ -42,6 +42,26 @@ export interface WidgetState {
   borderColor?: string
   backgroundOpacity?: number
   borderOpacity?: number
+  // Per-side inset (px) on top of the widget's own x/y/w/h — independent of
+  // every other state's, so switching states (e.g. on press) can visually
+  // squish/shift the button. Negative values (down to -1) expand the box
+  // outward instead of shrinking it.
+  spacingTop?: number
+  spacingRight?: number
+  spacingBottom?: number
+  spacingLeft?: number
+  // Per-corner border radius (px), independent of every other state's for
+  // the same reason as spacing above.
+  radiusTopLeft?: number
+  radiusTopRight?: number
+  radiusBottomLeft?: number
+  radiusBottomRight?: number
+  // CSS z-index override for this state, independent of every other
+  // state's — e.g. a "Clicked" state can pop above neighboring widgets
+  // while held, overriding the default paint-order stacking (see
+  // useDashboardStore's bringToFront/sendToBack for the array-order
+  // fallback every widget uses when this is unset).
+  zIndex?: number
   // Marks the one state that plays while the button is held on the view
   // client (see getEffectiveStates in shared/states.ts) — a structural flag,
   // not derived from `name`, so renaming some other state to "Clicked"
@@ -66,35 +86,7 @@ export interface ButtonWidget {
   states: WidgetState[]
 }
 
-// Grid-relative, NOT normalized to a 0-based origin — col/row 0 always maps
-// to the widget's own (x, y) regardless of which cells actually exist, so
-// extending a shape "up" or "left" (negative col/row) never requires
-// rewriting x/y or other cells to compensate. Must stay 4-connected (every
-// cell reachable from any other via shared edges) — that's what "acting as
-// one button" depends on.
-export interface MorphCell {
-  col: number
-  row: number
-}
-
-// A button whose hit area is a union of grid cells rather than one rectangle
-// — e.g. a U-shaped run of cells that still triggers one action and shows
-// one label/state, like several ButtonWidgets fused into one. cellW/cellH
-// size every cell uniformly; there's no per-cell size.
-export interface MorphButtonWidget {
-  id: string
-  type: 'morph'
-  x: number
-  y: number
-  cellW: number
-  cellH: number
-  cells: MorphCell[]
-  action: WidgetAction
-  statesEnabled?: boolean
-  states: WidgetState[]
-}
-
-export type Widget = ButtonWidget | MorphButtonWidget
+export type Widget = ButtonWidget
 
 // 'cover'/'contain'/'stretch' scale the image proportionally or not, 'tile'
 // repeats it at native size, 'none' places it at native size unscaled — the
@@ -123,11 +115,6 @@ export interface Dashboard {
   backgroundImageMime?: string
   backgroundFit?: BackgroundFit
   backgroundAnchor?: BackgroundAnchor
-  // Rendering inset (px) applied to every widget's left/top edge — affects
-  // actual layout on every client (including the deployed mobile view), so
-  // unlike snapToGrid/gridSize (editor-only, in settingsStore.ts) this has to
-  // live in the synced dashboard, not local editor settings.
-  spacing?: number
   widgets: Widget[]
 }
 

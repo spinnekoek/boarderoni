@@ -18,11 +18,14 @@ interface DashboardStore {
   connect: (mode: Mode) => void
   updateWidgets: (widgets: Widget[]) => void
   updateDashboardMeta: (
-    fields: Partial<Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundFit' | 'backgroundAnchor' | 'spacing'>>
+    fields: Partial<Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundFit' | 'backgroundAnchor'>>
   ) => void
   uploadBackgroundImage: (dataUrl: string) => void
   clearBackgroundImage: () => void
   addWidget: (widget: Widget) => void
+  pasteWidgets: (widgets: Widget[]) => void
+  bringToFront: (ids: string[]) => void
+  sendToBack: (ids: string[]) => void
   removeWidget: (id: string) => void
   removeWidgets: (ids: string[]) => void
   triggerWidget: (id: string) => void
@@ -141,6 +144,29 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   addWidget: (widget) => {
     get().updateWidgets([...get().dashboard.widgets, widget])
+  },
+
+  // Pasted widgets replace the current selection with themselves, so a
+  // pasted batch is immediately draggable as a group without an extra click.
+  pasteWidgets: (widgets) => {
+    get().updateWidgets([...get().dashboard.widgets, ...widgets])
+    set({ selectedWidgetIds: widgets.map((w) => w.id), activeStateIndex: 0 })
+  },
+
+  // Widgets render (and thus paint-stack) in array order — last wins any
+  // overlap. These reorder within the array without touching x/y/etc, so a
+  // widget can be pulled on top of (or pushed under) whatever it visually
+  // overlaps without an explicit per-widget z-index.
+  bringToFront: (ids) => {
+    const idSet = new Set(ids)
+    const widgets = get().dashboard.widgets
+    get().updateWidgets([...widgets.filter((w) => !idSet.has(w.id)), ...widgets.filter((w) => idSet.has(w.id))])
+  },
+
+  sendToBack: (ids) => {
+    const idSet = new Set(ids)
+    const widgets = get().dashboard.widgets
+    get().updateWidgets([...widgets.filter((w) => idSet.has(w.id)), ...widgets.filter((w) => !idSet.has(w.id))])
   },
 
   removeWidget: (id) => {

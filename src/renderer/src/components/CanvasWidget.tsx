@@ -2,7 +2,6 @@ import { useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useWidgetDrag } from '../useWidgetDrag'
-import { applySpacing } from '../layout'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
 import type { ButtonWidget } from '@shared/types'
 
@@ -13,11 +12,18 @@ interface ResizeState {
   origH: number
 }
 
-export function CanvasWidget({ widget, zoom }: { widget: ButtonWidget; zoom: number }): React.JSX.Element {
+export function CanvasWidget({
+  widget,
+  zoom,
+  onContextMenu
+}: {
+  widget: ButtonWidget
+  zoom: number
+  onContextMenu: (e: React.MouseEvent) => void
+}): React.JSX.Element {
   const { selected, selectedWidgetIds, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
-  const spacing = useDashboardStore((s) => s.dashboard.spacing ?? 0)
   const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
@@ -73,15 +79,14 @@ export function CanvasWidget({ widget, zoom }: { widget: ButtonWidget; zoom: num
     setResizing(false)
   }
 
-  const rendered = applySpacing(widget.x, widget.y, widget.w, widget.h, spacing)
-
   return (
     <div
       className={`canvas-widget${selected ? ' canvas-widget--selected' : ''}`}
-      style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
+      style={{ left: widget.x, top: widget.y, width: widget.w, height: widget.h }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onContextMenu={onContextMenu}
     >
       <ButtonWidgetContent widget={widget} state={previewState} interactive={false} />
       {resizing && (

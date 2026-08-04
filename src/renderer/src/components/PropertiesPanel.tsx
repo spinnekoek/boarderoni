@@ -169,6 +169,8 @@ export function PropertiesPanel(): React.JSX.Element {
   const clearBackgroundImage = useDashboardStore((s) => s.clearBackgroundImage)
   const removeWidget = useDashboardStore((s) => s.removeWidget)
   const removeWidgets = useDashboardStore((s) => s.removeWidgets)
+  const bringToFront = useDashboardStore((s) => s.bringToFront)
+  const sendToBack = useDashboardStore((s) => s.sendToBack)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
   const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
   const setActiveStateIndex = useDashboardStore((s) => s.setActiveStateIndex)
@@ -224,6 +226,14 @@ export function PropertiesPanel(): React.JSX.Element {
         <p className="properties__hint">
           {selectedWidgetIds.length} widgets selected — select just one to edit its properties.
         </p>
+        <div className="properties__file-row">
+          <button type="button" className="properties__file-button" onClick={() => bringToFront(selectedWidgetIds)}>
+            Bring to front
+          </button>
+          <button type="button" className="properties__file-button" onClick={() => sendToBack(selectedWidgetIds)}>
+            Send to back
+          </button>
+        </div>
         <div className="properties__divider" />
         <button className="properties__delete" onClick={handleDeleteMany}>
           Delete {selectedWidgetIds.length} widgets
@@ -319,10 +329,7 @@ export function PropertiesPanel(): React.JSX.Element {
   }
 
   function patch(fields: Partial<Widget>): void {
-    // fields' shape always matches widget's actual type at each call site
-    // (e.g. cellW only patched from the morph branch below) — TS can't
-    // verify that through a generic Widget union, hence the cast.
-    updateWidgets(widgets.map((w) => (w.id === widget!.id ? ({ ...w, ...fields } as Widget) : w)))
+    updateWidgets(widgets.map((w) => (w.id === widget!.id ? { ...w, ...fields } : w)))
   }
 
   const stateIndex = widget.statesEnabled ? Math.min(activeStateIndex, widget.states.length - 1) : 0
@@ -427,6 +434,16 @@ export function PropertiesPanel(): React.JSX.Element {
     <aside className="properties" style={{ width: propertiesWidth }}>
       {resizeHandle}
       <h2 className="properties__title">Properties</h2>
+
+      <div className="properties__file-row">
+        <button type="button" className="properties__file-button" onClick={() => bringToFront(selectedWidgetIds)}>
+          Bring to front
+        </button>
+        <button type="button" className="properties__file-button" onClick={() => sendToBack(selectedWidgetIds)}>
+          Send to back
+        </button>
+      </div>
+      <div className="properties__divider" />
 
       <label className="properties__checkbox">
         <input
@@ -542,6 +559,111 @@ export function PropertiesPanel(): React.JSX.Element {
 
       <div className="properties__divider" />
 
+      <span className="properties__section-label">Spacing</span>
+      <div className="properties__grid2">
+        <label className="properties__field">
+          <span>Top</span>
+          <input
+            type="number"
+            min={-1}
+            value={activeState.spacingTop ?? 0}
+            onChange={(e) => patchState({ spacingTop: Math.max(-1, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Right</span>
+          <input
+            type="number"
+            min={-1}
+            value={activeState.spacingRight ?? 0}
+            onChange={(e) => patchState({ spacingRight: Math.max(-1, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Bottom</span>
+          <input
+            type="number"
+            min={-1}
+            value={activeState.spacingBottom ?? 0}
+            onChange={(e) => patchState({ spacingBottom: Math.max(-1, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Left</span>
+          <input
+            type="number"
+            min={-1}
+            value={activeState.spacingLeft ?? 0}
+            onChange={(e) => patchState({ spacingLeft: Math.max(-1, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+      </div>
+
+      <div className="properties__divider" />
+
+      <span className="properties__section-label">Border radius</span>
+      <div className="properties__grid2">
+        <label className="properties__field">
+          <span>Top left</span>
+          <input
+            type="number"
+            min={0}
+            value={activeState.radiusTopLeft ?? 4}
+            onChange={(e) => patchState({ radiusTopLeft: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Top right</span>
+          <input
+            type="number"
+            min={0}
+            value={activeState.radiusTopRight ?? 4}
+            onChange={(e) => patchState({ radiusTopRight: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Bottom left</span>
+          <input
+            type="number"
+            min={0}
+            value={activeState.radiusBottomLeft ?? 4}
+            onChange={(e) => patchState({ radiusBottomLeft: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <label className="properties__field">
+          <span>Bottom right</span>
+          <input
+            type="number"
+            min={0}
+            value={activeState.radiusBottomRight ?? 4}
+            onChange={(e) => patchState({ radiusBottomRight: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+      </div>
+
+      <div className="properties__divider" />
+
+      <label className="properties__field">
+        <span>Z-index</span>
+        <div className="color-picker-row">
+          <button
+            type="button"
+            className={`color-picker-row__auto${activeState.zIndex === undefined ? ' color-picker-row__auto--active' : ''}`}
+            onClick={() => patchState({ zIndex: undefined })}
+          >
+            Auto
+          </button>
+          <input
+            type="number"
+            value={activeState.zIndex ?? 0}
+            onChange={(e) => patchState({ zIndex: Math.round(Number(e.target.value)) })}
+          />
+        </div>
+      </label>
+      <p className="properties__hint">Auto follows normal paint order (see Bring to front / Send to back above).</p>
+
+      <div className="properties__divider" />
+
       <label className="properties__field">
         <span>Keys</span>
         <KeyCapture keys={widget.action.keys} onChange={(keys) => patch({ action: { ...widget.action, keys } })} />
@@ -561,56 +683,25 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Y</span>
             <input type="number" value={widget.y} onChange={(e) => patch({ y: Number(e.target.value) })} />
           </label>
-          {widget.type === 'button' ? (
-            <>
-              <label className="properties__field">
-                <span>W</span>
-                <input
-                  type="number"
-                  min={minSize}
-                  value={widget.w}
-                  onChange={(e) => patch({ w: Math.max(minSize, Number(e.target.value)) })}
-                />
-              </label>
-              <label className="properties__field">
-                <span>H</span>
-                <input
-                  type="number"
-                  min={minSize}
-                  value={widget.h}
-                  onChange={(e) => patch({ h: Math.max(minSize, Number(e.target.value)) })}
-                />
-              </label>
-            </>
-          ) : (
-            <>
-              <label className="properties__field">
-                <span>Cell W</span>
-                <input
-                  type="number"
-                  min={minSize}
-                  value={widget.cellW}
-                  onChange={(e) => patch({ cellW: Math.max(minSize, Number(e.target.value)) })}
-                />
-              </label>
-              <label className="properties__field">
-                <span>Cell H</span>
-                <input
-                  type="number"
-                  min={minSize}
-                  value={widget.cellH}
-                  onChange={(e) => patch({ cellH: Math.max(minSize, Number(e.target.value)) })}
-                />
-              </label>
-            </>
-          )}
+          <label className="properties__field">
+            <span>W</span>
+            <input
+              type="number"
+              min={minSize}
+              value={widget.w}
+              onChange={(e) => patch({ w: Math.max(minSize, Number(e.target.value)) })}
+            />
+          </label>
+          <label className="properties__field">
+            <span>H</span>
+            <input
+              type="number"
+              min={minSize}
+              value={widget.h}
+              onChange={(e) => patch({ h: Math.max(minSize, Number(e.target.value)) })}
+            />
+          </label>
         </div>
-        {widget.type === 'morph' && (
-          <p className="properties__hint">
-            {widget.cells.length} cell{widget.cells.length === 1 ? '' : 's'} — select the widget on the canvas and use its + handles
-            to add more.
-          </p>
-        )}
       </details>
 
       <div className="properties__divider" />

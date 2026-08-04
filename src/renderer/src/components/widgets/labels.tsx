@@ -17,9 +17,7 @@ const ALIGN_ITEMS: Record<NonNullable<WidgetLabel['verticalAlign']>, string> = {
 
 // Each label is its own absolutely-positioned overlay covering the full
 // widget, individually padded/aligned/styled — they don't stack or affect
-// each other's layout, so two labels sharing an align just overlap. Shared
-// between ButtonWidget and MorphButtonWidget since a widget's overall shape
-// doesn't change how a single label renders within its box.
+// each other's layout, so two labels sharing an align just overlap.
 export function renderWidgetLabels(labels: WidgetLabel[], backgroundColor: string): React.JSX.Element[] {
   return labels.map((label) => {
     const textColor = label.textColor ?? pickLegibleTextColor(backgroundColor)
