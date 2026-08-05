@@ -5,7 +5,11 @@ import { OpacityField } from './OpacityField'
 import { CodeEditor } from './CodeEditor'
 import { ExpressionEditorModal } from './ExpressionEditorModal'
 
-const EXPR_PLACEHOLDER = "return variables.my_color;\n// or: return { color: '#ff0000', opacity: 70 }"
+// Kept to a single line deliberately — CodeMirror's placeholder extension
+// renders an embedded "\n" as an actual second visual row, so the empty
+// editor would render two rows tall and then visibly shrink to one the
+// moment real (single-line) text replaces the placeholder.
+const EXPR_PLACEHOLDER = 'return variables.my_color;'
 
 // Single-button color field. Two faces, both toggled by clicking the same
 // trigger:

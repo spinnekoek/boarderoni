@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useDashboardStore } from '../store'
 import { getDeviceId } from '../id'
+import { useEscapeToClose } from '../useEscapeToClose'
 import { friendlyDeviceName } from '@shared/deviceName'
 
 export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   const devices = useDashboardStore((s) => s.devices)
   const renameDevice = useDashboardStore((s) => s.renameDevice)
   const disconnect = useDashboardStore((s) => s.disconnect)
+  useEscapeToClose(onClose)
 
   const deviceId = getDeviceId()
   const device = devices.find((d) => d.id === deviceId)

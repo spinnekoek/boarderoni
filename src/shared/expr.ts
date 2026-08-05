@@ -27,6 +27,16 @@ export function tryEvaluateExpression(code: string, variables: VariableMap): Exp
   }
 }
 
+// Evaluates an event-source mapping's transform expression with the raw
+// field value exposed as `variables.$value`, alongside every existing
+// Variable. `$value` is a reserved key deliberately unlikely to collide with
+// a real variable name — a bare `value` key would silently shadow an actual
+// Variable named "value" inside this one expression (unreachable, no error,
+// just wrong data).
+export function evaluateMappingExpression(expr: string, rawValue: VariableValue, variables: VariableMap): ExpressionResult {
+  return tryEvaluateExpression(expr, { ...variables, $value: rawValue })
+}
+
 export interface ResolvedColor {
   color?: string
   // Already converted to the internal 0-1 scale used everywhere else (see

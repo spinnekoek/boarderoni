@@ -29,7 +29,9 @@ interface DashboardStore {
   disconnect: () => void
   updateWidgets: (widgets: Widget[]) => void
   updateDashboardMeta: (
-    fields: Partial<Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundFit' | 'backgroundAnchor' | 'variables'>>
+    fields: Partial<
+      Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundFit' | 'backgroundAnchor' | 'variables' | 'eventSources'>
+    >
   ) => void
   uploadBackgroundImage: (dataUrl: string) => void
   clearBackgroundImage: () => void

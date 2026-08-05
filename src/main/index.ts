@@ -22,12 +22,14 @@ import {
   type Dashboard,
   type DeckSummary,
   type DeviceInfo,
+  type EventSource,
   type ServerToClient,
   type Variable,
   type VariableValue,
   type Widget
 } from '../shared/types'
-import { toVariableMap, tryEvaluateExpression } from '../shared/expr'
+import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression } from '../shared/expr'
+import { EVENT_SOURCE_PRODUCERS } from './eventSourceProducers'
 
 // Pre-multi-label shape: a single flat `label` string plus its own styling
 // fields (including a widget-level `padding`), before they moved into
@@ -144,6 +146,7 @@ function loadDeckDashboard(deckId: string): Dashboard | null {
     // Dashboards saved before Variable existed have no `variables` key at
     // all — normalize once here so nothing downstream needs `?? []`.
     loaded.variables = loaded.variables ?? []
+    loaded.eventSources = loaded.eventSources ?? []
     return loaded
   } catch (err) {
     // A single corrupted deck must not take down the picker list or the app —
@@ -156,6 +159,27 @@ function loadDeckDashboard(deckId: string): Dashboard | null {
 function saveDeckDashboard(room: DeckRoom): void {
   mkdirSync(deckDir(room.id), { recursive: true })
   writeFileSync(deckDashboardFile(room.id), JSON.stringify(room.dashboard, null, 2), 'utf-8')
+}
+
+const DASHBOARD_SAVE_DEBOUNCE_MS = 500
+
+// Debounced counterpart to saveDeckDashboard — used for saves that repeat on
+// a tight cadence (event-source ticks, as often as once a second) rather
+// than a one-off user action, so an idle deck with a running clock source
+// isn't rewriting dashboard.json to disk every second forever.
+function scheduleDebouncedSave(room: DeckRoom): void {
+  if (room.dashboardSaveTimeout) clearTimeout(room.dashboardSaveTimeout)
+  room.dashboardSaveTimeout = setTimeout(() => {
+    room.dashboardSaveTimeout = null
+    saveDeckDashboard(room)
+  }, DASHBOARD_SAVE_DEBOUNCE_MS)
+}
+
+function cancelScheduledSave(room: DeckRoom): void {
+  if (room.dashboardSaveTimeout) {
+    clearTimeout(room.dashboardSaveTimeout)
+    room.dashboardSaveTimeout = null
+  }
 }
 
 // Runs once, at module load, before anything else touches decksDir. Migrates
@@ -172,6 +196,7 @@ function migrateLegacyDashboard(): void {
       delete loaded.backgroundImage
       loaded.widgets = loaded.widgets.map(migrateWidget)
       loaded.variables = loaded.variables ?? []
+      loaded.eventSources = loaded.eventSources ?? []
       const id = loaded.id || 'default'
       mkdirSync(deckDir(id), { recursive: true })
       writeFileSync(deckDashboardFile(id), JSON.stringify({ ...loaded, id }, null, 2), 'utf-8')
@@ -257,6 +282,16 @@ interface DeckRoom {
   dashboard: Dashboard
   devices: Map<string, DeviceInfo>
   sockets: Set<WebSocket>
+  // Running event-source producers for this room, keyed by EventSource.id.
+  // `signature` is `JSON.stringify({kind, config})` of the instance that's
+  // currently running — see syncEventSources, which restarts a producer
+  // whenever this changes (mappings are excluded on purpose: they're
+  // re-read fresh on every tick, so editing them never needs a restart).
+  eventSourceStops: Map<string, { stop: () => void; signature: string }>
+  // Debounce handle for saveDeckDashboard — see scheduleDebouncedSave. Event
+  // source ticks (as often as once a second) go through this instead of
+  // saving synchronously on every tick.
+  dashboardSaveTimeout: NodeJS.Timeout | null
 }
 // Keyed by deck id, lazily populated on first connection/reference (see
 // getOrLoadRoom) and never evicted — same always-resident philosophy the old
@@ -279,8 +314,16 @@ function getOrLoadRoom(deckId: string): DeckRoom | null {
   if (!isValidDeckId(deckId)) return null
   const dashboard = loadDeckDashboard(deckId)
   if (!dashboard) return null
-  const room: DeckRoom = { id: deckId, dashboard, devices: new Map(), sockets: new Set() }
+  const room: DeckRoom = {
+    id: deckId,
+    dashboard,
+    devices: new Map(),
+    sockets: new Set(),
+    eventSourceStops: new Map(),
+    dashboardSaveTimeout: null
+  }
   rooms.set(deckId, room)
+  syncEventSources(room)
   return room
 }
 
@@ -408,6 +451,12 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
     const room = rooms.get(deckId)
     if (room) {
       for (const socket of room.sockets) socket.close(DECK_CLOSE_CODE_UNKNOWN, 'Deck deleted')
+      for (const { stop } of room.eventSourceStops.values()) stop()
+      // Load-bearing, not decorative: a pending debounced save from an
+      // active event source firing ~500ms after this point would recreate
+      // deckDir(deckId) via saveDeckDashboard's mkdirSync, silently
+      // resurrecting the deck's dashboard.json right after this deletes it.
+      cancelScheduledSave(room)
       rooms.delete(deckId)
     }
     rmSync(deckDir(deckId), { recursive: true, force: true })
@@ -506,12 +555,35 @@ function coerceVariableValue(value: unknown): VariableValue {
   return typeof value === 'number' || typeof value === 'boolean' ? value : String(value)
 }
 
+// Merges `updates` ({variableName: newValue}) into the room's
+// dashboard.variables — creating new variables for names that don't exist
+// yet, same as assigning a new variable in a loose scripting language — then
+// broadcasts and saves. `immediate: true` (button clicks, via
+// runUpdateState) saves synchronously right away, same as before this was
+// extracted; `immediate: false` (event-source ticks, via syncEventSources)
+// debounces instead — see scheduleDebouncedSave.
+function applyVariableUpdates(room: DeckRoom, updates: Record<string, unknown>, options: { immediate: boolean }): void {
+  const existing = room.dashboard.variables ?? []
+  const existingNames = new Set(existing.map((v) => v.name))
+  const variables: Variable[] = existing.map((v) => (v.name in updates ? { ...v, value: coerceVariableValue(updates[v.name]) } : v))
+  for (const [name, value] of Object.entries(updates)) {
+    if (!existingNames.has(name)) variables.push({ id: randomUUID(), name, value: coerceVariableValue(value) })
+  }
+
+  room.dashboard = { ...room.dashboard, variables }
+  broadcastToRoom(room, { type: 'dashboard:sync', dashboard: room.dashboard })
+  if (options.immediate) {
+    cancelScheduledSave(room)
+    saveDeckDashboard(room)
+  } else {
+    scheduleDebouncedSave(room)
+  }
+}
+
 // Evaluates an update-state action's code and merges whatever it returns
-// into the room's dashboard.variables — creating new variables for names
-// that don't exist yet, same as assigning a new variable in a loose
-// scripting language. Runs server-side (not per-client) so every client's
-// next dashboard:sync already reflects the result, same as any other
-// mutation.
+// into the room's dashboard.variables. Runs server-side (not per-client) so
+// every client's next dashboard:sync already reflects the result, same as
+// any other mutation.
 function runUpdateState(room: DeckRoom, code: string): void {
   const variableMap = toVariableMap(room.dashboard.variables ?? [])
   const result = tryEvaluateExpression(code, variableMap)
@@ -521,18 +593,89 @@ function runUpdateState(room: DeckRoom, code: string): void {
   // no update intended) is a normal no-op, not an error.
   if (!result.ok) throw new Error(result.error)
   if (!result.value || typeof result.value !== 'object') return
+  applyVariableUpdates(room, result.value as Record<string, unknown>, { immediate: true })
+}
 
-  const updates = result.value as Record<string, unknown>
-  const existing = room.dashboard.variables ?? []
-  const existingNames = new Set(existing.map((v) => v.name))
-  const variables: Variable[] = existing.map((v) => (v.name in updates ? { ...v, value: coerceVariableValue(updates[v.name]) } : v))
-  for (const [name, value] of Object.entries(updates)) {
-    if (!existingNames.has(name)) variables.push({ id: randomUUID(), name, value: coerceVariableValue(value) })
+function eventSourceSignature(source: EventSource): string {
+  return JSON.stringify({ kind: source.kind, config: source.config ?? null })
+}
+
+// Starts/stops per-room event-source producers to match
+// room.dashboard.eventSources, and wires each running producer's emitted
+// field values through its instance's mappings into variables. Called
+// whenever room.dashboard might have gained/lost/changed an event source —
+// see call sites at getOrLoadRoom and the 'dashboard:update' handler below.
+// Diffed by id + a signature of {kind, config} (not just id) so a future
+// kind's config change (e.g. a webhook's path) also restarts its producer —
+// mappings are deliberately excluded from the signature since the emit
+// closure below re-reads them fresh off room.dashboard on every tick, so
+// editing a mapping never needs a restart.
+function syncEventSources(room: DeckRoom): void {
+  const instances = room.dashboard.eventSources ?? []
+  const instanceIds = new Set(instances.map((s) => s.id))
+
+  for (const [id, running] of room.eventSourceStops) {
+    if (!instanceIds.has(id)) {
+      running.stop()
+      room.eventSourceStops.delete(id)
+    }
   }
 
-  room.dashboard = { ...room.dashboard, variables }
-  saveDeckDashboard(room)
-  broadcastToRoom(room, { type: 'dashboard:sync', dashboard: room.dashboard })
+  for (const instance of instances) {
+    const signature = eventSourceSignature(instance)
+    const running = room.eventSourceStops.get(instance.id)
+    if (running && running.signature === signature) continue
+    running?.stop()
+
+    const producer = EVENT_SOURCE_PRODUCERS[instance.kind]
+    if (!producer) continue
+
+    // Per-field values from this instance's previous tick, captured by this
+    // closure (not stored on the eventSourceStops entry — that's only set
+    // below, after producer.start's own synchronous first tick has already
+    // run once). Starts empty, so every field looks "changed" on the very
+    // first tick — that's what seeds each mapping's variable with a real
+    // value immediately instead of waiting for the field to actually change.
+    let previousValues: Record<string, unknown> = {}
+
+    const stop = producer.start(instance, (values) => {
+      // A tick runs on a setInterval with nothing else on the call stack —
+      // unlike a button click (always inside triggerAction's own
+      // try/catch), an uncaught exception here becomes a Node
+      // uncaughtException and can take down the whole Electron main
+      // process, so the entire body is guarded.
+      let current: EventSource | undefined
+      try {
+        current = room.dashboard.eventSources?.find((s) => s.id === instance.id)
+        if (!current) return
+        const variableMap = toVariableMap(room.dashboard.variables ?? [])
+        const updates: Record<string, unknown> = {}
+        for (const mapping of current.mappings) {
+          if (!mapping.variableName.trim() || !(mapping.field in values)) continue
+          const rawValue = values[mapping.field]
+          // Skip a mapping whose underlying field is unchanged since the
+          // last tick — an expression is only re-run when there's an
+          // actual new raw value to feed it, not on every tick regardless.
+          if (rawValue === previousValues[mapping.field]) continue
+          if (mapping.expr && mapping.expr.trim()) {
+            const result = evaluateMappingExpression(mapping.expr, coerceVariableValue(rawValue), variableMap)
+            if (!result.ok) {
+              console.error(`[boarderoni] event source mapping expression failed (${current.name} -> ${mapping.variableName})`, result.error)
+              continue
+            }
+            updates[mapping.variableName] = result.value
+          } else {
+            updates[mapping.variableName] = rawValue
+          }
+        }
+        previousValues = values
+        if (Object.keys(updates).length > 0) applyVariableUpdates(room, updates, { immediate: false })
+      } catch (err) {
+        console.error(`[boarderoni] event source tick failed (${current?.name ?? instance.id})`, err)
+      }
+    })
+    room.eventSourceStops.set(instance.id, { stop, signature })
+  }
 }
 
 async function triggerAction(room: DeckRoom, widgetId: string, ws: WebSocket): Promise<void> {
@@ -625,6 +768,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         activeRoom.dashboard = message.dashboard
         saveDeckDashboard(activeRoom)
         broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard }, ws)
+        syncEventSources(activeRoom)
         break
       case 'action:trigger':
         await triggerAction(activeRoom, message.widgetId, ws)

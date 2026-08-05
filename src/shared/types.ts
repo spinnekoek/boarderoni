@@ -231,6 +231,38 @@ export interface DeckSummary {
   name: string
 }
 
+// One field of an event source's output routed into a Variable. `field` is
+// a key from that source kind's metadata (see EVENT_SOURCE_TYPES in
+// shared/eventSources.ts) — the raw value for it comes from the matching
+// main-process producer (see main/eventSourceProducers.ts). `expr`, if set,
+// is evaluated (see evaluateMappingExpression in shared/expr.ts) with the
+// raw value exposed as `variables.$value`, alongside every existing
+// Variable — same expression mechanism as everywhere else in the app, just
+// with one extra reserved key in scope.
+export interface EventSourceMapping {
+  id: string
+  field: string
+  variableName: string
+  expr?: string
+}
+
+// A configured, persistent instance of an event source (e.g. "the clock"),
+// continuously producing named fields and feeding a subset of them into
+// Variables via `mappings`. `kind` is deliberately an open string rather
+// than a union — every kind shares this exact shape (mappings + opaque
+// config), so a union would only add friction when a new kind is added,
+// unlike WidgetAction where each kind's payload actually differs. `config`
+// is unused by the only kind implemented so far ('datetime') — reserved for
+// a future kind's own settings, e.g. a webhook's path or a poller's
+// interval.
+export interface EventSource {
+  id: string
+  kind: string
+  name: string
+  mappings: EventSourceMapping[]
+  config?: Record<string, unknown>
+}
+
 export interface Dashboard {
   id: string
   name: string
@@ -248,6 +280,10 @@ export interface Dashboard {
   // normalizes it to [] once at load time so nothing downstream has to
   // re-check for undefined.
   variables?: Variable[]
+  // Same optional-for-old-dashboards treatment as `variables` above —
+  // normalized to [] once at load time (see loadDeckDashboard in
+  // main/index.ts).
+  eventSources?: EventSource[]
   widgets: Widget[]
 }
 
@@ -299,5 +335,6 @@ export const DEFAULT_DASHBOARD: Dashboard = {
   backgroundFit: 'cover',
   backgroundAnchor: 'center',
   variables: [],
+  eventSources: [],
   widgets: []
 }

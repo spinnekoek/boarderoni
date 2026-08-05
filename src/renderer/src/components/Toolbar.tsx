@@ -4,9 +4,11 @@ import { useDashboardStore } from '../store'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
 import { VariablesModal } from './VariablesModal'
+import { EventsModal } from './EventsModal'
 
 export function Toolbar(): React.JSX.Element {
   const [variablesOpen, setVariablesOpen] = useState(false)
+  const [eventsOpen, setEventsOpen] = useState(false)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
   const setSnapToGrid = useEditorSettings((s) => s.setSnapToGrid)
@@ -65,7 +67,11 @@ export function Toolbar(): React.JSX.Element {
       <button type="button" className="toolbar__button" onClick={() => setVariablesOpen(true)}>
         Variables
       </button>
+      <button type="button" className="toolbar__button" onClick={() => setEventsOpen(true)}>
+        Events
+      </button>
       {variablesOpen && <VariablesModal onClose={() => setVariablesOpen(false)} />}
+      {eventsOpen && <EventsModal onClose={() => setEventsOpen(false)} />}
     </div>
   )
 }

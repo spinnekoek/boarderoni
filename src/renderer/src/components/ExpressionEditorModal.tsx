@@ -1,3 +1,4 @@
+import { useEscapeToClose } from '../useEscapeToClose'
 import { CodeEditor } from './CodeEditor'
 
 export function ExpressionEditorModal({
@@ -11,6 +12,8 @@ export function ExpressionEditorModal({
   placeholder?: string
   onClose: () => void
 }): React.JSX.Element {
+  useEscapeToClose(onClose)
+
   return (
     <div className="expr-modal-overlay" onPointerDown={onClose}>
       <div className="expr-modal" onPointerDown={(e) => e.stopPropagation()}>
