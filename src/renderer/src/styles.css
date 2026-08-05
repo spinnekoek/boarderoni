@@ -598,35 +598,53 @@ button.deck-morph-cell:focus-visible {
   resize: vertical;
 }
 
-.align-buttons {
-  display: flex;
+.text-align-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 30px);
+  grid-template-rows: repeat(3, 30px);
   gap: 4px;
-  margin-bottom: 4px;
+  justify-content: center;
 }
 
-.align-button {
-  flex: 1;
+.text-align-button {
+  display: flex;
+  flex-direction: column;
   background: #14161b;
   border: 1px solid #3a3f4a;
   border-radius: 4px;
-  color: #9098a8;
-  padding: 6px 0;
-  font-size: 12px;
+  padding: 6px;
   cursor: pointer;
 }
 
-.align-button:hover {
+.text-align-button:hover {
   background: #1c2028;
+  border-color: #4a505e;
 }
 
-.align-button--active {
+.text-align-button--active {
   background: #5b8def;
   border-color: #5b8def;
-  color: #14161b;
 }
 
-.align-button--active:hover {
+.text-align-button--active:hover {
   background: #5b8def;
+}
+
+.text-align-button__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.text-align-button__lines span {
+  height: 2px;
+  min-width: 3px;
+  border-radius: 1px;
+  background: #6b7280;
+}
+
+.text-align-button--active .text-align-button__lines span {
+  background: #14161b;
 }
 
 .color-picker {
@@ -960,6 +978,117 @@ button.deck-morph-cell:focus-visible {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 12px;
+}
+
+.sides-grid,
+.corners-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 0 auto 16px;
+  max-width: 190px;
+}
+
+.sides-grid label,
+.corners-grid label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.sides-grid label span,
+.corners-grid label span {
+  font-size: 9px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sides-grid__top {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.sides-grid__left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.sides-grid__center,
+.corners-grid__center {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sides-grid__center::before {
+  content: '';
+  width: 22px;
+  height: 22px;
+  border: 1.5px dashed #3a3f4a;
+  border-radius: 3px;
+}
+
+.corners-grid__center::before {
+  content: '';
+  width: 22px;
+  height: 22px;
+  border: 1.5px dashed #3a3f4a;
+  /* Visibly rounder than the spacing icon's sharp corners — reinforces
+     that this grid is specifically about corner radius. */
+  border-radius: 9px;
+}
+
+.sides-grid__right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.sides-grid__bottom {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.corners-grid__top-left {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.corners-grid__top-right {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.corners-grid__bottom-left {
+  grid-column: 1;
+  grid-row: 3;
+}
+
+.corners-grid__bottom-right {
+  grid-column: 3;
+  grid-row: 3;
+}
+
+.sides-grid input,
+.corners-grid input {
+  width: 100%;
+  text-align: center;
+  background: #14161b;
+  border: 1px solid #3a3f4a;
+  border-radius: 4px;
+  color: #e8e8ea;
+  padding: 5px 2px;
+  font-size: 12px;
+}
+
+.sides-grid input:disabled,
+.corners-grid input:disabled {
+  color: #6b7280;
+  cursor: not-allowed;
 }
 
 .properties__hint {

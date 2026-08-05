@@ -23,16 +23,22 @@ import type {
   WidgetState
 } from '@shared/types'
 
-const HORIZONTAL_ALIGNS: { value: HorizontalAlign; label: string }[] = [
-  { value: 'left', label: 'L' },
-  { value: 'center', label: 'C' },
-  { value: 'right', label: 'R' }
+// One 3x3 grid replaces the old separate horizontal/vertical button rows —
+// each cell is a (h, v) pair, in reading order (top-left to bottom-right),
+// so picking a corner/edge sets both axes in a single click instead of two.
+const ALIGN_GRID: { h: HorizontalAlign; v: VerticalAlign }[] = [
+  { h: 'left', v: 'top' },
+  { h: 'center', v: 'top' },
+  { h: 'right', v: 'top' },
+  { h: 'left', v: 'center' },
+  { h: 'center', v: 'center' },
+  { h: 'right', v: 'center' },
+  { h: 'left', v: 'bottom' },
+  { h: 'center', v: 'bottom' },
+  { h: 'right', v: 'bottom' }
 ]
-const VERTICAL_ALIGNS: { value: VerticalAlign; label: string }[] = [
-  { value: 'top', label: 'T' },
-  { value: 'center', label: 'M' },
-  { value: 'bottom', label: 'B' }
-]
+const JUSTIFY_FOR_V: Record<VerticalAlign, string> = { top: 'flex-start', center: 'center', bottom: 'flex-end' }
+const ALIGN_ITEMS_FOR_H: Record<HorizontalAlign, string> = { left: 'flex-start', center: 'center', right: 'flex-end' }
 
 const BACKGROUND_FITS: { value: BackgroundFit; label: string }[] = [
   { value: 'cover', label: 'Cover' },
@@ -45,6 +51,111 @@ const BACKGROUND_FITS: { value: BackgroundFit; label: string }[] = [
 interface ResizeState {
   startX: number
   startWidth: number
+}
+
+interface SideFieldProps {
+  value: number
+  min: number
+  disabled?: boolean
+  onChange: (value: number) => void
+}
+
+// A "box model" style 4-input layout (top/left/right/bottom arranged around
+// a small box icon) for a set of per-side values — spacing and border
+// thickness both are one, for both a plain button's own state and a morph
+// block's override. Position alone conveys which side each field is, same
+// idea as the text-align grid above.
+function SidesInputGrid({
+  top,
+  right,
+  bottom,
+  left
+}: {
+  top: SideFieldProps
+  right: SideFieldProps
+  bottom: SideFieldProps
+  left: SideFieldProps
+}): React.JSX.Element {
+  function renderInput(side: SideFieldProps): React.JSX.Element {
+    return (
+      <input
+        type="number"
+        min={side.min}
+        disabled={side.disabled}
+        value={side.value}
+        onChange={(e) => side.onChange(Math.max(side.min, Math.round(Number(e.target.value))))}
+      />
+    )
+  }
+  return (
+    <div className="sides-grid">
+      <label className="sides-grid__top" title="Top">
+        <span>T</span>
+        {renderInput(top)}
+      </label>
+      <label className="sides-grid__left" title="Left">
+        <span>L</span>
+        {renderInput(left)}
+      </label>
+      <div className="sides-grid__center" />
+      <label className="sides-grid__right" title="Right">
+        <span>R</span>
+        {renderInput(right)}
+      </label>
+      <label className="sides-grid__bottom" title="Bottom">
+        <span>B</span>
+        {renderInput(bottom)}
+      </label>
+    </div>
+  )
+}
+
+// Same idea as SidesInputGrid, but for the 4 corners (border radius) rather
+// than the 4 edges — each input sits in the grid corner matching the corner
+// it controls, around a center icon with rounded corners of its own.
+function CornersInputGrid({
+  topLeft,
+  topRight,
+  bottomLeft,
+  bottomRight
+}: {
+  topLeft: SideFieldProps
+  topRight: SideFieldProps
+  bottomLeft: SideFieldProps
+  bottomRight: SideFieldProps
+}): React.JSX.Element {
+  function renderInput(corner: SideFieldProps): React.JSX.Element {
+    return (
+      <input
+        type="number"
+        min={corner.min}
+        disabled={corner.disabled}
+        value={corner.value}
+        onChange={(e) => corner.onChange(Math.max(corner.min, Math.round(Number(e.target.value))))}
+      />
+    )
+  }
+  return (
+    <div className="corners-grid">
+      <label className="corners-grid__top-left" title="Top left">
+        <span>TL</span>
+        {renderInput(topLeft)}
+      </label>
+      <label className="corners-grid__top-right" title="Top right">
+        <span>TR</span>
+        {renderInput(topRight)}
+      </label>
+      <div className="corners-grid__center" />
+      <label className="corners-grid__bottom-left" title="Bottom left">
+        <span>BL</span>
+        {renderInput(bottomLeft)}
+      </label>
+      <label className="corners-grid__bottom-right" title="Bottom right">
+        <span>BR</span>
+        {renderInput(bottomRight)}
+      </label>
+    </div>
+  )
 }
 
 function LabelFields({
@@ -142,31 +253,26 @@ function LabelFields({
 
       <label className="properties__field">
         <span>Align</span>
-        <div className="align-buttons">
-          {HORIZONTAL_ALIGNS.map(({ value, label: alignLabel }) => (
-            <button
-              key={value}
-              type="button"
-              className={`align-button${(label.align ?? 'center') === value ? ' align-button--active' : ''}`}
-              onClick={() => onChange({ align: value })}
-              title={`Align ${value}`}
-            >
-              {alignLabel}
-            </button>
-          ))}
-        </div>
-        <div className="align-buttons">
-          {VERTICAL_ALIGNS.map(({ value, label: alignLabel }) => (
-            <button
-              key={value}
-              type="button"
-              className={`align-button${(label.verticalAlign ?? 'center') === value ? ' align-button--active' : ''}`}
-              onClick={() => onChange({ verticalAlign: value })}
-              title={`Align ${value}`}
-            >
-              {alignLabel}
-            </button>
-          ))}
+        <div className="text-align-grid">
+          {ALIGN_GRID.map(({ h, v }) => {
+            const active = (label.align ?? 'center') === h && (label.verticalAlign ?? 'center') === v
+            return (
+              <button
+                key={`${h}-${v}`}
+                type="button"
+                className={`text-align-button${active ? ' text-align-button--active' : ''}`}
+                style={{ justifyContent: JUSTIFY_FOR_V[v] }}
+                onClick={() => onChange({ align: h, verticalAlign: v })}
+                title={`Align ${v} ${h}`}
+              >
+                <span className="text-align-button__lines" style={{ alignItems: ALIGN_ITEMS_FOR_H[h] }}>
+                  <span style={{ width: '60%' }} />
+                  <span style={{ width: '100%' }} />
+                  <span style={{ width: '45%' }} />
+                </span>
+              </button>
+            )
+          })}
         </div>
       </label>
 
@@ -273,136 +379,78 @@ function MorphBlockFields({
       <p className="properties__hint">Auto inherits the widget's own color for this state — override here to make just this block different.</p>
 
       <span className="properties__section-label">Spacing</span>
-      <div className="properties__grid2">
-        <label className="properties__field">
-          <span>Top</span>
-          <input
-            type="number"
-            min={-1}
-            disabled={lockTop}
-            value={lockTop ? -1 : (override.spacingTop ?? 0)}
-            onChange={(e) => onChange({ spacingTop: Math.max(-1, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Right</span>
-          <input
-            type="number"
-            min={-1}
-            disabled={lockRight}
-            value={lockRight ? -1 : (override.spacingRight ?? 0)}
-            onChange={(e) => onChange({ spacingRight: Math.max(-1, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Bottom</span>
-          <input
-            type="number"
-            min={-1}
-            disabled={lockBottom}
-            value={lockBottom ? -1 : (override.spacingBottom ?? 0)}
-            onChange={(e) => onChange({ spacingBottom: Math.max(-1, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Left</span>
-          <input
-            type="number"
-            min={-1}
-            disabled={lockLeft}
-            value={lockLeft ? -1 : (override.spacingLeft ?? 0)}
-            onChange={(e) => onChange({ spacingLeft: Math.max(-1, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-      </div>
+      <SidesInputGrid
+        top={{ value: lockTop ? -1 : (override.spacingTop ?? 0), min: -1, disabled: lockTop, onChange: (v) => onChange({ spacingTop: v }) }}
+        right={{
+          value: lockRight ? -1 : (override.spacingRight ?? 0),
+          min: -1,
+          disabled: lockRight,
+          onChange: (v) => onChange({ spacingRight: v })
+        }}
+        bottom={{
+          value: lockBottom ? -1 : (override.spacingBottom ?? 0),
+          min: -1,
+          disabled: lockBottom,
+          onChange: (v) => onChange({ spacingBottom: v })
+        }}
+        left={{
+          value: lockLeft ? -1 : (override.spacingLeft ?? 0),
+          min: -1,
+          disabled: lockLeft,
+          onChange: (v) => onChange({ spacingLeft: v })
+        }}
+      />
 
       <span className="properties__section-label">Border radius</span>
-      <div className="properties__grid2">
-        <label className="properties__field">
-          <span>Top left</span>
-          <input
-            type="number"
-            min={0}
-            disabled={lockTopLeft}
-            value={lockTopLeft ? 0 : (override.radiusTopLeft ?? 4)}
-            onChange={(e) => onChange({ radiusTopLeft: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Top right</span>
-          <input
-            type="number"
-            min={0}
-            disabled={lockTopRight}
-            value={lockTopRight ? 0 : (override.radiusTopRight ?? 4)}
-            onChange={(e) => onChange({ radiusTopRight: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Bottom left</span>
-          <input
-            type="number"
-            min={0}
-            disabled={lockBottomLeft}
-            value={lockBottomLeft ? 0 : (override.radiusBottomLeft ?? 4)}
-            onChange={(e) => onChange({ radiusBottomLeft: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Bottom right</span>
-          <input
-            type="number"
-            min={0}
-            disabled={lockBottomRight}
-            value={lockBottomRight ? 0 : (override.radiusBottomRight ?? 4)}
-            onChange={(e) => onChange({ radiusBottomRight: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-      </div>
+      <CornersInputGrid
+        topLeft={{
+          value: lockTopLeft ? 0 : (override.radiusTopLeft ?? 4),
+          min: 0,
+          disabled: lockTopLeft,
+          onChange: (v) => onChange({ radiusTopLeft: v })
+        }}
+        topRight={{
+          value: lockTopRight ? 0 : (override.radiusTopRight ?? 4),
+          min: 0,
+          disabled: lockTopRight,
+          onChange: (v) => onChange({ radiusTopRight: v })
+        }}
+        bottomLeft={{
+          value: lockBottomLeft ? 0 : (override.radiusBottomLeft ?? 4),
+          min: 0,
+          disabled: lockBottomLeft,
+          onChange: (v) => onChange({ radiusBottomLeft: v })
+        }}
+        bottomRight={{
+          value: lockBottomRight ? 0 : (override.radiusBottomRight ?? 4),
+          min: 0,
+          disabled: lockBottomRight,
+          onChange: (v) => onChange({ radiusBottomRight: v })
+        }}
+      />
 
       <span className="properties__section-label">Border thickness</span>
-      <div className="properties__grid2">
-        <label className="properties__field">
-          <span>Top</span>
-          <input
-            type="number"
-            min={0}
-            disabled={lockTop}
-            value={lockTop ? 0 : (override.borderWidthTop ?? 1)}
-            onChange={(e) => onChange({ borderWidthTop: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Right</span>
-          <input
-            type="number"
-            min={0}
-            disabled={lockRight}
-            value={lockRight ? 0 : (override.borderWidthRight ?? 1)}
-            onChange={(e) => onChange({ borderWidthRight: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Bottom</span>
-          <input
-            type="number"
-            min={0}
-            disabled={lockBottom}
-            value={lockBottom ? 0 : (override.borderWidthBottom ?? 1)}
-            onChange={(e) => onChange({ borderWidthBottom: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-        <label className="properties__field">
-          <span>Left</span>
-          <input
-            type="number"
-            min={0}
-            disabled={lockLeft}
-            value={lockLeft ? 0 : (override.borderWidthLeft ?? 1)}
-            onChange={(e) => onChange({ borderWidthLeft: Math.max(0, Math.round(Number(e.target.value))) })}
-          />
-        </label>
-      </div>
+      <SidesInputGrid
+        top={{ value: lockTop ? 0 : (override.borderWidthTop ?? 1), min: 0, disabled: lockTop, onChange: (v) => onChange({ borderWidthTop: v }) }}
+        right={{
+          value: lockRight ? 0 : (override.borderWidthRight ?? 1),
+          min: 0,
+          disabled: lockRight,
+          onChange: (v) => onChange({ borderWidthRight: v })
+        }}
+        bottom={{
+          value: lockBottom ? 0 : (override.borderWidthBottom ?? 1),
+          min: 0,
+          disabled: lockBottom,
+          onChange: (v) => onChange({ borderWidthBottom: v })
+        }}
+        left={{
+          value: lockLeft ? 0 : (override.borderWidthLeft ?? 1),
+          min: 0,
+          disabled: lockLeft,
+          onChange: (v) => onChange({ borderWidthLeft: v })
+        }}
+      />
     </>
   )
 }
@@ -853,128 +901,32 @@ export function PropertiesPanel(): React.JSX.Element {
       {widget.type === 'button' ? (
         <>
           <span className="properties__section-label">Spacing</span>
-          <div className="properties__grid2">
-            <label className="properties__field">
-              <span>Top</span>
-              <input
-                type="number"
-                min={-1}
-                value={activeState.spacingTop ?? 0}
-                onChange={(e) => patchState({ spacingTop: Math.max(-1, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-            <label className="properties__field">
-              <span>Right</span>
-              <input
-                type="number"
-                min={-1}
-                value={activeState.spacingRight ?? 0}
-                onChange={(e) => patchState({ spacingRight: Math.max(-1, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-            <label className="properties__field">
-              <span>Bottom</span>
-              <input
-                type="number"
-                min={-1}
-                value={activeState.spacingBottom ?? 0}
-                onChange={(e) => patchState({ spacingBottom: Math.max(-1, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-            <label className="properties__field">
-              <span>Left</span>
-              <input
-                type="number"
-                min={-1}
-                value={activeState.spacingLeft ?? 0}
-                onChange={(e) => patchState({ spacingLeft: Math.max(-1, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-          </div>
+          <SidesInputGrid
+            top={{ value: activeState.spacingTop ?? 0, min: -1, onChange: (v) => patchState({ spacingTop: v }) }}
+            right={{ value: activeState.spacingRight ?? 0, min: -1, onChange: (v) => patchState({ spacingRight: v }) }}
+            bottom={{ value: activeState.spacingBottom ?? 0, min: -1, onChange: (v) => patchState({ spacingBottom: v }) }}
+            left={{ value: activeState.spacingLeft ?? 0, min: -1, onChange: (v) => patchState({ spacingLeft: v }) }}
+          />
 
           <div className="properties__divider" />
 
           <span className="properties__section-label">Border radius</span>
-          <div className="properties__grid2">
-            <label className="properties__field">
-              <span>Top left</span>
-              <input
-                type="number"
-                min={0}
-                value={activeState.radiusTopLeft ?? 4}
-                onChange={(e) => patchState({ radiusTopLeft: Math.max(0, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-            <label className="properties__field">
-              <span>Top right</span>
-              <input
-                type="number"
-                min={0}
-                value={activeState.radiusTopRight ?? 4}
-                onChange={(e) => patchState({ radiusTopRight: Math.max(0, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-            <label className="properties__field">
-              <span>Bottom left</span>
-              <input
-                type="number"
-                min={0}
-                value={activeState.radiusBottomLeft ?? 4}
-                onChange={(e) => patchState({ radiusBottomLeft: Math.max(0, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-            <label className="properties__field">
-              <span>Bottom right</span>
-              <input
-                type="number"
-                min={0}
-                value={activeState.radiusBottomRight ?? 4}
-                onChange={(e) => patchState({ radiusBottomRight: Math.max(0, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-          </div>
+          <CornersInputGrid
+            topLeft={{ value: activeState.radiusTopLeft ?? 4, min: 0, onChange: (v) => patchState({ radiusTopLeft: v }) }}
+            topRight={{ value: activeState.radiusTopRight ?? 4, min: 0, onChange: (v) => patchState({ radiusTopRight: v }) }}
+            bottomLeft={{ value: activeState.radiusBottomLeft ?? 4, min: 0, onChange: (v) => patchState({ radiusBottomLeft: v }) }}
+            bottomRight={{ value: activeState.radiusBottomRight ?? 4, min: 0, onChange: (v) => patchState({ radiusBottomRight: v }) }}
+          />
 
           <div className="properties__divider" />
 
           <span className="properties__section-label">Border thickness</span>
-          <div className="properties__grid2">
-            <label className="properties__field">
-              <span>Top</span>
-              <input
-                type="number"
-                min={0}
-                value={activeState.borderWidthTop ?? 1}
-                onChange={(e) => patchState({ borderWidthTop: Math.max(0, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-            <label className="properties__field">
-              <span>Right</span>
-              <input
-                type="number"
-                min={0}
-                value={activeState.borderWidthRight ?? 1}
-                onChange={(e) => patchState({ borderWidthRight: Math.max(0, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-            <label className="properties__field">
-              <span>Bottom</span>
-              <input
-                type="number"
-                min={0}
-                value={activeState.borderWidthBottom ?? 1}
-                onChange={(e) => patchState({ borderWidthBottom: Math.max(0, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-            <label className="properties__field">
-              <span>Left</span>
-              <input
-                type="number"
-                min={0}
-                value={activeState.borderWidthLeft ?? 1}
-                onChange={(e) => patchState({ borderWidthLeft: Math.max(0, Math.round(Number(e.target.value))) })}
-              />
-            </label>
-          </div>
+          <SidesInputGrid
+            top={{ value: activeState.borderWidthTop ?? 1, min: 0, onChange: (v) => patchState({ borderWidthTop: v }) }}
+            right={{ value: activeState.borderWidthRight ?? 1, min: 0, onChange: (v) => patchState({ borderWidthRight: v }) }}
+            bottom={{ value: activeState.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchState({ borderWidthBottom: v }) }}
+            left={{ value: activeState.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchState({ borderWidthLeft: v }) }}
+          />
         </>
       ) : (
         (() => {
