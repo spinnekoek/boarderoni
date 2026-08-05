@@ -12,7 +12,6 @@ import { ANCHOR_OPTIONS } from '../background'
 import { KeyCapture } from './KeyCapture'
 import { ColorPicker } from './ColorPicker'
 import { ColorPickerButton } from './ColorPickerButton'
-import { OpacityField } from './OpacityField'
 import type {
   BackgroundFit,
   HorizontalAlign,
@@ -209,9 +208,10 @@ function MorphBlockFields({
   onChange: (fields: Partial<MorphBlockStateOverride>) => void
 }): React.JSX.Element {
   const autoFit = override.autoFit ?? true
-  const isAutoColor = override.color === undefined
   const isColorExpr = override.colorExpr !== undefined
-  const isAutoBorderColor = override.borderColor === undefined
+  const isAutoColor = override.color === undefined && !isColorExpr
+  const isBorderColorExpr = override.borderColorExpr !== undefined
+  const isAutoBorderColor = override.borderColor === undefined && !isBorderColorExpr
   const lockTop = merge.up
   const lockRight = merge.right
   const lockBottom = merge.down
@@ -236,63 +236,40 @@ function MorphBlockFields({
       </p>
 
       <span className="properties__section-label">Color</span>
-      <label className="properties__field">
+      <div className="properties__field">
         <span>Color</span>
-        {isColorExpr ? (
-          <textarea
-            className="properties__code"
-            rows={4}
-            placeholder={'return variables.my_color;'}
-            value={override.colorExpr}
-            onChange={(e) => onChange({ colorExpr: e.target.value })}
-          />
-        ) : (
-          <div className="color-picker-row">
-            <button
-              type="button"
-              className={`color-picker-row__auto${isAutoColor ? ' color-picker-row__auto--active' : ''}`}
-              onClick={() => onChange({ color: undefined })}
-            >
-              Auto
-            </button>
-            <ColorPicker value={override.color ?? widgetColor} onChange={(color) => onChange({ color })} auto={isAutoColor} />
-          </div>
-        )}
-      </label>
-      <button
-        type="button"
-        className="properties__file-button"
-        onClick={() => onChange({ colorExpr: isColorExpr ? undefined : '' })}
-      >
-        {isColorExpr ? 'Use static color' : 'Use expression'}
-      </button>
-      <OpacityField
-        label="Background opacity"
-        value={override.backgroundOpacity ?? widgetBackgroundOpacity}
-        onChange={(v) => onChange({ backgroundOpacity: v })}
-      />
-      <label className="properties__field">
+        <ColorPickerButton
+          key={`${block.id}-color`}
+          value={override.color ?? widgetColor}
+          onChange={(color) => onChange({ color, colorExpr: undefined })}
+          isExpr={isColorExpr}
+          exprValue={override.colorExpr ?? ''}
+          onExprChange={(code) => onChange({ colorExpr: code })}
+          onEnterExpr={() => onChange({ colorExpr: override.colorExpr ?? '' })}
+          onClearExpr={() => onChange({ colorExpr: undefined })}
+          auto={isAutoColor}
+          onAuto={() => onChange({ color: undefined, colorExpr: undefined })}
+          opacity={override.backgroundOpacity ?? widgetBackgroundOpacity}
+          onOpacityChange={(v) => onChange({ backgroundOpacity: v })}
+        />
+      </div>
+      <div className="properties__field">
         <span>Border color</span>
-        <div className="color-picker-row">
-          <button
-            type="button"
-            className={`color-picker-row__auto${isAutoBorderColor ? ' color-picker-row__auto--active' : ''}`}
-            onClick={() => onChange({ borderColor: undefined })}
-          >
-            Auto
-          </button>
-          <ColorPicker
-            value={override.borderColor ?? widgetBorderColor}
-            onChange={(color) => onChange({ borderColor: color })}
-            auto={isAutoBorderColor}
-          />
-        </div>
-      </label>
-      <OpacityField
-        label="Border opacity"
-        value={override.borderOpacity ?? widgetBorderOpacity}
-        onChange={(v) => onChange({ borderOpacity: v })}
-      />
+        <ColorPickerButton
+          key={`${block.id}-border`}
+          value={override.borderColor ?? widgetBorderColor}
+          onChange={(color) => onChange({ borderColor: color, borderColorExpr: undefined })}
+          isExpr={isBorderColorExpr}
+          exprValue={override.borderColorExpr ?? ''}
+          onExprChange={(code) => onChange({ borderColorExpr: code })}
+          onEnterExpr={() => onChange({ borderColorExpr: override.borderColorExpr ?? '' })}
+          onClearExpr={() => onChange({ borderColorExpr: undefined })}
+          auto={isAutoBorderColor}
+          onAuto={() => onChange({ borderColor: undefined, borderColorExpr: undefined })}
+          opacity={override.borderOpacity ?? widgetBorderOpacity}
+          onOpacityChange={(v) => onChange({ borderOpacity: v })}
+        />
+      </div>
       <p className="properties__hint">Auto inherits the widget's own color for this state — override here to make just this block different.</p>
 
       <span className="properties__section-label">Spacing</span>
@@ -818,7 +795,7 @@ export function PropertiesPanel(): React.JSX.Element {
 
       <div className="properties__divider" />
 
-      {widget.type === 'button' ? (
+      {widget.type === 'button' || selectedBlockId === null ? (
         <>
           {/* A plain div, not a <label> — ColorPickerButton's popover nests
               OpacityField, which renders its own <label>, and a <label>
@@ -827,6 +804,12 @@ export function PropertiesPanel(): React.JSX.Element {
               re-trigger the outer label's default action on its first
               labelable descendant — the trigger button — closing the
               popover right as you release the mouse). */}
+          {widget.type === 'morph' && (
+            <p className="properties__hint">
+              This widget's own color — every base block inherits it while left on Auto. Select a block on the canvas to override
+              just that one.
+            </p>
+          )}
           <div className="properties__field">
             <span>Color</span>
             <ColorPickerButton
@@ -862,7 +845,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </div>
         </>
       ) : (
-        <p className="properties__hint">Color lives per base block now — select one on the canvas to set it.</p>
+        <p className="properties__hint">Editing this block's own color — see below.</p>
       )}
 
       <div className="properties__divider" />

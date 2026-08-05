@@ -217,7 +217,20 @@ export function MorphCanvasWidget({
         onCellPointerMove={handlePointerMove}
         onCellPointerUp={handlePointerUp}
         onCellContextMenu={onContextMenu}
-        onBlockSelect={(block) => selectBlock(block.id)}
+        // isSoleSelection here reflects selection state as of the render
+        // before this click (selected/selectedWidgetIds come from
+        // useWidgetDrag, which reads the store at render time) — same
+        // "wasSelected" idea useWidgetDrag itself uses. So: a click that's
+        // also the click selecting this widget leaves it at the top
+        // (widget-level) selection, with no block picked yet; a second
+        // click, now that the widget is already sole-selected, picks a
+        // block; and clicking that same block again drops back to the
+        // top-level (block deselected, widget stays selected) rather than
+        // switching to some other block.
+        onBlockSelect={(block) => {
+          if (!isSoleSelection) return
+          selectBlock(selectedBlockId === block.id ? null : block.id)
+        }}
       />
       {resizing && (
         <div className="canvas-widget__size-label" style={{ transform: `scale(${1 / zoom})` }}>

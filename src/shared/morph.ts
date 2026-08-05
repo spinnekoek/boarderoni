@@ -1,4 +1,4 @@
-import { resolveColor, type VariableMap } from './expr'
+import { resolveBorderColor, resolveColor, type VariableMap } from './expr'
 import type { BoxAppearance, ColorAppearance, MorphBlock, MorphButtonWidget, WidgetState } from './types'
 
 function key(col: number, row: number): string {
@@ -88,24 +88,24 @@ export function effectiveBlockAppearance(blocks: MorphBlock[], block: MorphBlock
 }
 
 // This block's fill/border color+opacity for the given state: its own
-// perState override where set (colorExpr evaluated where present, same as a
-// plain button's own color), falling back to the widget's own state fields
-// (and from there to the same DEFAULT_WIDGET_COLOR/pickAutoBorderColor
-// fallbacks a plain button already uses — left to the caller, same as
+// perState override where set (colorExpr/borderColorExpr evaluated where
+// present, same as a plain button's own color/border), falling back to the
+// widget's own state fields — themselves resolved the same way, so a
+// widget-level colorExpr/borderColorExpr still applies to blocks left on
+// Auto — and from there to the same DEFAULT_WIDGET_COLOR/pickAutoBorderColor
+// fallbacks a plain button already uses (left to the caller, same as
 // state.color ?? DEFAULT_WIDGET_COLOR is today). Nothing here ties this to
 // autoFit or block adjacency — a block's color is always either explicitly
 // overridden or inherited, never computed from neighbors.
 export function effectiveBlockColor(block: MorphBlock, state: WidgetState, variables: VariableMap): ColorAppearance {
   const override = block.perState[state.id] ?? {}
+  const resolvedColor = resolveColor(override, variables)
+  const resolvedBorder = resolveBorderColor(override, variables)
   return {
-    // Only the color half of resolveColor's result — a colorExpr returning
-    // an opacity override isn't wired up for morph blocks (no UI exposes
-    // that toggle here yet, unlike the plain button widget), so it's
-    // ignored rather than half-applied.
-    color: resolveColor(override, variables).color ?? resolveColor(state, variables).color,
-    borderColor: override.borderColor ?? state.borderColor,
-    backgroundOpacity: override.backgroundOpacity ?? state.backgroundOpacity,
-    borderOpacity: override.borderOpacity ?? state.borderOpacity
+    color: resolvedColor.color ?? resolveColor(state, variables).color,
+    backgroundOpacity: resolvedColor.opacity ?? override.backgroundOpacity ?? state.backgroundOpacity,
+    borderColor: resolvedBorder.color ?? resolveBorderColor(state, variables).color,
+    borderOpacity: resolvedBorder.opacity ?? override.borderOpacity ?? state.borderOpacity
   }
 }
 
