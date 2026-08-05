@@ -11,6 +11,8 @@ import { blockMerge, type BlockMerge } from '@shared/morph'
 import { ANCHOR_OPTIONS } from '../background'
 import { KeyCapture } from './KeyCapture'
 import { ColorPicker } from './ColorPicker'
+import { ColorPickerButton } from './ColorPickerButton'
+import { OpacityField } from './OpacityField'
 import type {
   BackgroundFit,
   HorizontalAlign,
@@ -46,17 +48,6 @@ interface ResizeState {
   startWidth: number
 }
 
-function OpacityField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }): React.JSX.Element {
-  return (
-    <label className="properties__field">
-      <span>
-        {label} <span className="properties__hint-inline">{Math.round(value * 100)}%</span>
-      </span>
-      <input type="range" min={0} max={1} step={0.05} value={value} onChange={(e) => onChange(Number(e.target.value))} />
-    </label>
-  )
-}
-
 function LabelFields({
   label,
   backgroundColor,
@@ -68,7 +59,8 @@ function LabelFields({
   onChange: (fields: Partial<WidgetLabel>) => void
   onRemove: () => void
 }): React.JSX.Element {
-  const isAutoTextColor = label.textColor == null
+  const isTextColorExpr = label.textColorExpr !== undefined
+  const isAutoTextColor = label.textColor == null && !isTextColorExpr
   const isTextExpr = label.textExpr !== undefined
 
   return (
@@ -131,24 +123,23 @@ function LabelFields({
         />
       </label>
 
-      <label className="properties__field">
+      <div className="properties__field">
         <span>Text color</span>
-        <div className="color-picker-row">
-          <button
-            type="button"
-            className={`color-picker-row__auto${isAutoTextColor ? ' color-picker-row__auto--active' : ''}`}
-            onClick={() => onChange({ textColor: undefined })}
-          >
-            Auto
-          </button>
-          <ColorPicker
-            value={label.textColor ?? pickLegibleTextColor(backgroundColor)}
-            onChange={(color) => onChange({ textColor: color })}
-            auto={isAutoTextColor}
-          />
-        </div>
-      </label>
-      <OpacityField label="Text opacity" value={label.textOpacity ?? 1} onChange={(v) => onChange({ textOpacity: v })} />
+        <ColorPickerButton
+          key={`${label.id}-textColor`}
+          value={label.textColor ?? pickLegibleTextColor(backgroundColor)}
+          onChange={(color) => onChange({ textColor: color, textColorExpr: undefined })}
+          isExpr={isTextColorExpr}
+          exprValue={label.textColorExpr ?? ''}
+          onExprChange={(code) => onChange({ textColorExpr: code })}
+          onEnterExpr={() => onChange({ textColorExpr: label.textColorExpr ?? '' })}
+          onClearExpr={() => onChange({ textColorExpr: undefined })}
+          auto={isAutoTextColor}
+          onAuto={() => onChange({ textColor: undefined, textColorExpr: undefined })}
+          opacity={label.textOpacity ?? 1}
+          onOpacityChange={(v) => onChange({ textOpacity: v })}
+        />
+      </div>
 
       <label className="properties__field">
         <span>Align</span>
@@ -725,7 +716,8 @@ export function PropertiesPanel(): React.JSX.Element {
 
   const effectiveColor = activeState.color ?? DEFAULT_WIDGET_COLOR
   const isColorExpr = activeState.colorExpr !== undefined
-  const isAutoBorderColor = activeState.borderColor == null
+  const isBorderColorExpr = activeState.borderColorExpr !== undefined
+  const isAutoBorderColor = activeState.borderColor == null && !isBorderColorExpr
   const minSize = snapToGrid ? gridSize : 1
 
   return (
@@ -828,51 +820,46 @@ export function PropertiesPanel(): React.JSX.Element {
 
       {widget.type === 'button' ? (
         <>
-          <label className="properties__field">
+          {/* A plain div, not a <label> — ColorPickerButton's popover nests
+              OpacityField, which renders its own <label>, and a <label>
+              nested inside another <label> is invalid HTML that browsers
+              handle inconsistently (clicks inside the inner one could also
+              re-trigger the outer label's default action on its first
+              labelable descendant — the trigger button — closing the
+              popover right as you release the mouse). */}
+          <div className="properties__field">
             <span>Color</span>
-            {isColorExpr ? (
-              <textarea
-                className="properties__code"
-                rows={4}
-                placeholder={'return variables.my_color;'}
-                value={activeState.colorExpr}
-                onChange={(e) => patchState({ colorExpr: e.target.value })}
-              />
-            ) : (
-              <ColorPicker value={effectiveColor} onChange={(color) => patchState({ color })} />
-            )}
-          </label>
-          <button
-            type="button"
-            className="properties__file-button"
-            onClick={() => patchState({ colorExpr: isColorExpr ? undefined : '' })}
-          >
-            {isColorExpr ? 'Use static color' : 'Use expression'}
-          </button>
-          <OpacityField
-            label="Background opacity"
-            value={activeState.backgroundOpacity ?? 1}
-            onChange={(v) => patchState({ backgroundOpacity: v })}
-          />
+            <ColorPickerButton
+              key={`${activeState.id}-color`}
+              value={effectiveColor}
+              onChange={(color) => patchState({ color, colorExpr: undefined })}
+              isExpr={isColorExpr}
+              exprValue={activeState.colorExpr ?? ''}
+              onExprChange={(code) => patchState({ colorExpr: code })}
+              onEnterExpr={() => patchState({ colorExpr: activeState.colorExpr ?? '' })}
+              onClearExpr={() => patchState({ colorExpr: undefined })}
+              opacity={activeState.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchState({ backgroundOpacity: v })}
+            />
+          </div>
 
-          <label className="properties__field">
+          <div className="properties__field">
             <span>Border color</span>
-            <div className="color-picker-row">
-              <button
-                type="button"
-                className={`color-picker-row__auto${isAutoBorderColor ? ' color-picker-row__auto--active' : ''}`}
-                onClick={() => patchState({ borderColor: undefined })}
-              >
-                Auto
-              </button>
-              <ColorPicker
-                value={activeState.borderColor ?? pickAutoBorderColor(effectiveColor)}
-                onChange={(color) => patchState({ borderColor: color })}
-                auto={isAutoBorderColor}
-              />
-            </div>
-          </label>
-          <OpacityField label="Border opacity" value={activeState.borderOpacity ?? 1} onChange={(v) => patchState({ borderOpacity: v })} />
+            <ColorPickerButton
+              key={`${activeState.id}-border`}
+              value={activeState.borderColor ?? pickAutoBorderColor(effectiveColor)}
+              onChange={(color) => patchState({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderColorExpr}
+              exprValue={activeState.borderColorExpr ?? ''}
+              onExprChange={(code) => patchState({ borderColorExpr: code })}
+              onEnterExpr={() => patchState({ borderColorExpr: activeState.borderColorExpr ?? '' })}
+              onClearExpr={() => patchState({ borderColorExpr: undefined })}
+              auto={isAutoBorderColor}
+              onAuto={() => patchState({ borderColor: undefined, borderColorExpr: undefined })}
+              opacity={activeState.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchState({ borderOpacity: v })}
+            />
+          </div>
         </>
       ) : (
         <p className="properties__hint">Color lives per base block now — select one on the canvas to set it.</p>

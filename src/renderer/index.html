@@ -3,6 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+    <!-- Widget colors are user-authored and must render exactly as set —
+         without this, some WebViews (Android's "Force Dark"/auto-dark-theme,
+         used by kiosk browsers like Fully Kiosk) heuristically invert/darken
+         light backgrounds, which looks like a rendering bug but is really
+         the WebView "helpfully" overriding colors we deliberately chose. -->
+    <meta name="color-scheme" content="light" />
     <title>Boarderoni</title>
   </head>
   <body>

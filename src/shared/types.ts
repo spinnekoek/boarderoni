@@ -38,6 +38,10 @@ export interface WidgetLabel {
   fontFamily?: string
   fontSize?: number
   textColor?: string
+  // Same idea as ColorAppearance's colorExpr (see resolveTextColor in
+  // shared/expr.ts) — independent of textExpr, which drives the label's
+  // displayed text content, not its color.
+  textColorExpr?: string
   textOpacity?: number
   align?: HorizontalAlign
   verticalAlign?: VerticalAlign
@@ -83,6 +87,10 @@ export interface ColorAppearance {
   // fixed value, e.g. to derive this look from a Variable's current value.
   colorExpr?: string
   borderColor?: string
+  // Same idea as colorExpr, but for borderColor (see resolveBorderColor in
+  // shared/expr.ts). Independent of colorExpr — a widget can have a static
+  // background with an expression-driven border, or vice versa.
+  borderColorExpr?: string
   backgroundOpacity?: number
   borderOpacity?: number
 }
@@ -214,6 +222,13 @@ export interface Variable {
   id: string
   name: string
   value: VariableValue
+}
+
+// Lightweight stand-in for a Dashboard in the deck picker's list — avoids
+// shipping every deck's full widget array just to render a row of names.
+export interface DeckSummary {
+  id: string
+  name: string
 }
 
 export interface Dashboard {

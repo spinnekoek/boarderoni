@@ -81,6 +81,7 @@ export function ViewCanvas(): React.JSX.Element {
   const variables = useDashboardStore((s) => s.dashboard.variables)
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
   const backgroundImageVersion = useDashboardStore((s) => s.dashboard.backgroundImageVersion)
+  const deckId = useDashboardStore((s) => s.deckId)
   const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
   const backgroundAnchor = useDashboardStore((s) => s.dashboard.backgroundAnchor)
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
@@ -113,11 +114,11 @@ export function ViewCanvas(): React.JSX.Element {
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
     >
-      {backgroundImageVersion && (
+      {backgroundImageVersion && deckId && (
         <div
           className="dashboard-wallpaper"
           style={{
-            backgroundImage: `url(${backgroundImageUrl(backgroundImageVersion)})`,
+            backgroundImage: `url(${backgroundImageUrl(deckId, backgroundImageVersion)})`,
             ...backgroundImageStyle(backgroundFit ?? 'cover', backgroundAnchor ?? 'center')
           }}
         />

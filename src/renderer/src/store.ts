@@ -1,11 +1,14 @@
 import { create } from 'zustand'
-import { SERVER_PORT } from '@shared/constants'
+import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN } from '@shared/constants'
 import { DEFAULT_DASHBOARD, type ClientToServer, type Dashboard, type DeviceInfo, type ServerToClient, type Widget } from '@shared/types'
-import { getDeviceId } from './id'
+import { getDeviceId, setLastDeckId, clearLastDeckId } from './id'
 
 type Mode = 'edit' | 'view'
 
 interface DashboardStore {
+  // Null until a deck is chosen in the picker — the single source of truth
+  // for "which screen is showing" (see App.tsx).
+  deckId: string | null
   dashboard: Dashboard
   mode: Mode
   connected: boolean
@@ -19,7 +22,11 @@ interface DashboardStore {
   // properties panel tab) — reset to 0 (Default) on every selection change.
   activeStateIndex: number
   devices: DeviceInfo[]
-  connect: (mode: Mode) => void
+  connect: (mode: Mode, deckId: string) => void
+  // Tears down the current connection and returns to the deck picker (the
+  // "← Decks" button in edit mode, "Change deck" in the view-mode device
+  // settings modal).
+  disconnect: () => void
   updateWidgets: (widgets: Widget[]) => void
   updateDashboardMeta: (
     fields: Partial<Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundFit' | 'backgroundAnchor' | 'variables'>>
@@ -44,6 +51,11 @@ interface DashboardStore {
 }
 
 let socket: WebSocket | null = null
+// Set by disconnect() just before closing, so the close listener below knows
+// this was a deliberate "back to picker" close rather than a network drop —
+// without it, the existing auto-reconnect would silently redial the same
+// deck 1.5s after the user chose to leave it.
+let intentionalDisconnect = false
 
 function send(message: ClientToServer): void {
   if (socket && socket.readyState === WebSocket.OPEN) {
@@ -69,7 +81,26 @@ function sendHello(mode: Mode): void {
   }
 }
 
+// Shared "back to the picker" state, used both by an explicit disconnect()
+// and by the close listener's DECK_CLOSE_CODE_UNKNOWN branch below.
+function pickerResetState(): Pick<
+  DashboardStore,
+  'deckId' | 'connected' | 'dashboard' | 'devices' | 'errors' | 'selectedWidgetIds' | 'selectedBlockId' | 'activeStateIndex'
+> {
+  return {
+    deckId: null,
+    connected: false,
+    dashboard: DEFAULT_DASHBOARD,
+    devices: [],
+    errors: {},
+    selectedWidgetIds: [],
+    selectedBlockId: null,
+    activeStateIndex: 0
+  }
+}
+
 export const useDashboardStore = create<DashboardStore>((set, get) => ({
+  deckId: null,
   dashboard: DEFAULT_DASHBOARD,
   mode: 'edit',
   connected: false,
@@ -79,12 +110,13 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   activeStateIndex: 0,
   devices: [],
 
-  connect: (mode) => {
-    set({ mode })
+  connect: (mode, deckId) => {
+    set({ mode, deckId })
+    setLastDeckId(deckId)
     if (socket) return
 
     const host = window.location.hostname || 'localhost'
-    const ws = new WebSocket(`ws://${host}:${SERVER_PORT}/ws`)
+    const ws = new WebSocket(`ws://${host}:${SERVER_PORT}/ws?deck=${encodeURIComponent(deckId)}`)
     socket = ws
 
     ws.addEventListener('open', () => {
@@ -92,10 +124,23 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       sendHello(mode)
     })
 
-    ws.addEventListener('close', () => {
-      set({ connected: false })
+    ws.addEventListener('close', (event) => {
       socket = null
-      setTimeout(() => get().connect(mode), 1500)
+      if (intentionalDisconnect) {
+        intentionalDisconnect = false
+        return
+      }
+      if (event.code === DECK_CLOSE_CODE_UNKNOWN) {
+        // The deck this connection named is missing or was deleted — retrying
+        // it would just spin forever, so fall back to the picker instead of
+        // auto-reconnecting. Also forget it as "last opened" — otherwise the
+        // next launch would just try to restore this same dead id again.
+        clearLastDeckId()
+        set(pickerResetState())
+        return
+      }
+      set({ connected: false })
+      setTimeout(() => get().connect(mode, deckId), 1500)
     })
 
     ws.addEventListener('message', (event) => {
@@ -130,6 +175,14 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         true
       )
     }
+  },
+
+  disconnect: () => {
+    intentionalDisconnect = true
+    socket?.close()
+    socket = null
+    clearLastDeckId()
+    set(pickerResetState())
   },
 
   updateWidgets: (widgets) => {

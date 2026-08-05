@@ -16,3 +16,24 @@ export function getDeviceId(): string {
   localStorage.setItem(DEVICE_ID_KEY, id)
   return id
 }
+
+const LAST_DECK_ID_KEY = 'boarderoni-last-deck-id'
+
+// Which deck this browser/WebView had open last — read once at launch (see
+// App.tsx) so both the desktop editor and the mobile view client skip
+// straight back into it instead of always landing on the picker.
+export function getLastDeckId(): string | null {
+  return localStorage.getItem(LAST_DECK_ID_KEY)
+}
+
+export function setLastDeckId(id: string): void {
+  localStorage.setItem(LAST_DECK_ID_KEY, id)
+}
+
+// Called on an explicit "back to picker" (disconnect(), or the server
+// rejecting a remembered id that no longer exists) — an intentional exit
+// like that means the next launch should ask again, not silently reopen
+// whatever was last open.
+export function clearLastDeckId(): void {
+  localStorage.removeItem(LAST_DECK_ID_KEY)
+}

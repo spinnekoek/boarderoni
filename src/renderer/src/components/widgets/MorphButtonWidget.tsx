@@ -49,7 +49,7 @@ export function MorphButtonWidgetContent({
 }): React.JSX.Element {
   // Shared fallback used for the label layer (which isn't per-block) and by
   // any block that doesn't override its own color — see effectiveBlockColor.
-  const backgroundColor = resolveColor(state, variables) ?? DEFAULT_WIDGET_COLOR
+  const backgroundColor = resolveColor(state, variables).color ?? DEFAULT_WIDGET_COLOR
 
   // A "Clicked" look with states disabled is auto-derived (see
   // deriveClickedState in shared/states.ts) as a synthetic WidgetState whose

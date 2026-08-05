@@ -1,7 +1,7 @@
 import { resolveFont } from '@shared/fonts'
-import { pickLegibleTextColor, withOpacity } from '@shared/color'
+import { withOpacity } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
-import { resolveLabelText, type VariableMap } from '@shared/expr'
+import { resolveLabelText, resolveTextColor, type VariableMap } from '@shared/expr'
 import type { WidgetLabel } from '@shared/types'
 
 const JUSTIFY_CONTENT: Record<NonNullable<WidgetLabel['align']>, string> = {
@@ -21,12 +21,12 @@ const ALIGN_ITEMS: Record<NonNullable<WidgetLabel['verticalAlign']>, string> = {
 // each other's layout, so two labels sharing an align just overlap.
 export function renderWidgetLabels(labels: WidgetLabel[], backgroundColor: string, variables: VariableMap): React.JSX.Element[] {
   return labels.map((label) => {
-    const textColor = label.textColor ?? pickLegibleTextColor(backgroundColor)
+    const resolvedTextColor = resolveTextColor(label, backgroundColor, variables)
     const labelStyle: React.CSSProperties = {
       padding: label.padding ?? DEFAULT_WIDGET_PADDING,
       fontFamily: resolveFont(label.fontFamily).cssFamily,
       fontSize: label.fontSize ?? DEFAULT_WIDGET_FONT_SIZE,
-      color: withOpacity(textColor, label.textOpacity ?? 1),
+      color: withOpacity(resolvedTextColor.color, resolvedTextColor.opacity ?? label.textOpacity ?? 1),
       justifyContent: JUSTIFY_CONTENT[label.align ?? 'center'],
       alignItems: ALIGN_ITEMS[label.verticalAlign ?? 'center'],
       textAlign: label.align ?? 'center'

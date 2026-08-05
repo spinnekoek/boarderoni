@@ -98,7 +98,11 @@ export function effectiveBlockAppearance(blocks: MorphBlock[], block: MorphBlock
 export function effectiveBlockColor(block: MorphBlock, state: WidgetState, variables: VariableMap): ColorAppearance {
   const override = block.perState[state.id] ?? {}
   return {
-    color: resolveColor(override, variables) ?? resolveColor(state, variables),
+    // Only the color half of resolveColor's result — a colorExpr returning
+    // an opacity override isn't wired up for morph blocks (no UI exposes
+    // that toggle here yet, unlike the plain button widget), so it's
+    // ignored rather than half-applied.
+    color: resolveColor(override, variables).color ?? resolveColor(state, variables).color,
     borderColor: override.borderColor ?? state.borderColor,
     backgroundOpacity: override.backgroundOpacity ?? state.backgroundOpacity,
     borderOpacity: override.borderOpacity ?? state.borderOpacity

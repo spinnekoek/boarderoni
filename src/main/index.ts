@@ -1,15 +1,26 @@
 import { app, BrowserWindow } from 'electron'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { readFile, readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
+import {
+  readFile,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  unlinkSync,
+  readdirSync,
+  rmSync,
+  copyFileSync
+} from 'node:fs'
 import { join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
-import { SERVER_PORT } from '../shared/constants'
+import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN } from '../shared/constants'
 import {
   DEFAULT_DASHBOARD,
   type ClientToServer,
   type Dashboard,
+  type DeckSummary,
   type DeviceInfo,
   type ServerToClient,
   type Variable,
@@ -85,37 +96,99 @@ function migrateWidget(widget: Widget & LegacyButtonWidget): Widget {
 // telling those apart, so this env var is the only trustworthy signal.
 const devServerUrl = process.env['ELECTRON_RENDERER_URL']
 const rendererDist = join(__dirname, '../renderer')
-const dashboardFile = join(app.getPath('userData'), 'dashboard.json')
-const backgroundImageFile = join(app.getPath('userData'), 'background-image')
+
+// Each deck lives in its own directory: decks/<id>/dashboard.json +
+// decks/<id>/background-image. Listing decks is a directory scan (see
+// listDeckSummaries) rather than a separate manifest file, so there's one
+// source of truth on disk.
+const decksDir = join(app.getPath('userData'), 'decks')
+// Pre-multi-deck layout — a single dashboard.json/background-image pair.
+// Migrated into decksDir on first launch after upgrade (see
+// migrateLegacyDashboard) and then left in place, untouched, as a harmless
+// backup / manual-recovery path.
+const legacyDashboardFile = join(app.getPath('userData'), 'dashboard.json')
+const legacyBackgroundImageFile = join(app.getPath('userData'), 'background-image')
+// Written only after migration fully succeeds — see migrateLegacyDashboard.
+const migratedSentinel = join(decksDir, '.migrated')
 const windowStateFile = join(app.getPath('userData'), 'window-state.json')
 
-let dashboard: Dashboard = loadDashboard()
-saveDashboard()
+// Deck ids are always server-generated via randomUUID(), but a deck id also
+// arrives as client-controlled input (the WS `?deck=` query param, the
+// `:id` HTTP route param) before it's ever used to build a filesystem path —
+// validate it looks UUID-shaped before any fs call touches it.
+const DECK_ID_PATTERN = /^[a-zA-Z0-9-]+$/
+function isValidDeckId(id: string): boolean {
+  return id.length > 0 && DECK_ID_PATTERN.test(id)
+}
 
-function loadDashboard(): Dashboard {
+function deckDir(deckId: string): string {
+  return join(decksDir, deckId)
+}
+function deckDashboardFile(deckId: string): string {
+  return join(deckDir(deckId), 'dashboard.json')
+}
+function deckBackgroundImageFile(deckId: string): string {
+  return join(deckDir(deckId), 'background-image')
+}
+
+function loadDeckDashboard(deckId: string): Dashboard | null {
   try {
-    if (existsSync(dashboardFile)) {
-      const loaded = JSON.parse(readFileSync(dashboardFile, 'utf-8')) as Dashboard & { backgroundImage?: string }
-      // Migrate off the old shape, which embedded the image as a data URL
-      // directly in the dashboard JSON (re-sent over the WebSocket on every
-      // single change — see backgroundImageVersion in shared/types.ts).
+    const file = deckDashboardFile(deckId)
+    if (!existsSync(file)) return null
+    const loaded = JSON.parse(readFileSync(file, 'utf-8')) as Dashboard & { backgroundImage?: string }
+    // Migrate off the old shape, which embedded the image as a data URL
+    // directly in the dashboard JSON (re-sent over the WebSocket on every
+    // single change — see backgroundImageVersion in shared/types.ts).
+    delete loaded.backgroundImage
+    loaded.widgets = loaded.widgets.map(migrateWidget)
+    // Dashboards saved before Variable existed have no `variables` key at
+    // all — normalize once here so nothing downstream needs `?? []`.
+    loaded.variables = loaded.variables ?? []
+    return loaded
+  } catch (err) {
+    // A single corrupted deck must not take down the picker list or the app —
+    // log and treat it as absent rather than throwing.
+    console.error(`[boarderoni] failed to load deck ${deckId}, treating as missing`, err)
+    return null
+  }
+}
+
+function saveDeckDashboard(room: DeckRoom): void {
+  mkdirSync(deckDir(room.id), { recursive: true })
+  writeFileSync(deckDashboardFile(room.id), JSON.stringify(room.dashboard, null, 2), 'utf-8')
+}
+
+// Runs once, at module load, before anything else touches decksDir. Migrates
+// the pre-multi-deck single dashboard.json/background-image (if present)
+// into the new decks/<id>/ layout as that user's first deck. A fresh install
+// with no legacy file gets zero decks — the picker's own "create" affordance
+// is the only entry point, rather than inventing a fake default deck.
+function migrateLegacyDashboard(): void {
+  if (existsSync(migratedSentinel)) return
+  try {
+    mkdirSync(decksDir, { recursive: true })
+    if (existsSync(legacyDashboardFile)) {
+      const loaded = JSON.parse(readFileSync(legacyDashboardFile, 'utf-8')) as Dashboard & { backgroundImage?: string }
       delete loaded.backgroundImage
       loaded.widgets = loaded.widgets.map(migrateWidget)
-      // Dashboards saved before Variable existed have no `variables` key at
-      // all — normalize once here so nothing downstream needs `?? []`.
       loaded.variables = loaded.variables ?? []
-      return loaded
+      const id = loaded.id || 'default'
+      mkdirSync(deckDir(id), { recursive: true })
+      writeFileSync(deckDashboardFile(id), JSON.stringify({ ...loaded, id }, null, 2), 'utf-8')
+      if (existsSync(legacyBackgroundImageFile)) {
+        copyFileSync(legacyBackgroundImageFile, deckBackgroundImageFile(id))
+      }
     }
+    // Written last, only once the dashboard (and background image, if any)
+    // write/copy above have both fully succeeded — using decksDir's mere
+    // existence as the guard instead would falsely mark a partially-failed
+    // migration (e.g. disk full mid-copy) as complete, silently losing data.
+    writeFileSync(migratedSentinel, '', 'utf-8')
   } catch (err) {
-    console.error('[boarderoni] failed to load saved dashboard, using default', err)
+    console.error('[boarderoni] failed to migrate legacy dashboard, will retry next launch', err)
   }
-  return structuredClone(DEFAULT_DASHBOARD)
 }
-
-function saveDashboard(): void {
-  mkdirSync(join(app.getPath('userData')), { recursive: true })
-  writeFileSync(dashboardFile, JSON.stringify(dashboard, null, 2), 'utf-8')
-}
+migrateLegacyDashboard()
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -141,34 +214,238 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): void {
       res.end('Not found')
       return
     }
-    res.writeHead(200, { 'Content-Type': MIME[extname(filePath)] ?? 'application/octet-stream' })
+    res.writeHead(200, {
+      'Content-Type': MIME[extname(filePath)] ?? 'application/octet-stream',
+      // Some kiosk-mode WebViews (Fully Kiosk Browser in particular) cache
+      // aggressively enough to survive even a full app restart when a
+      // server sends no cache directive at all — force every load to
+      // revalidate against this exact build rather than risk serving a
+      // stale bundle after an update.
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      Pragma: 'no-cache'
+    })
     res.end(data)
   })
 }
 
-function serveBackgroundImage(res: ServerResponse): void {
-  if (!dashboard.backgroundImageMime || !existsSync(backgroundImageFile)) {
+function serveBackgroundImage(res: ServerResponse, deckId: string): void {
+  const room = getOrLoadRoom(deckId)
+  if (!room || !room.dashboard.backgroundImageMime) {
     res.writeHead(404)
     res.end('No background image set')
     return
   }
-  readFile(backgroundImageFile, (err, data) => {
+  const file = deckBackgroundImageFile(room.id)
+  if (!existsSync(file)) {
+    res.writeHead(404)
+    res.end('No background image set')
+    return
+  }
+  readFile(file, (err, data) => {
     if (err) {
       res.writeHead(404)
       res.end('No background image set')
       return
     }
-    res.writeHead(200, { 'Content-Type': dashboard.backgroundImageMime!, 'Cache-Control': 'public, max-age=31536000, immutable' })
+    res.writeHead(200, { 'Content-Type': room.dashboard.backgroundImageMime!, 'Cache-Control': 'public, max-age=31536000, immutable' })
     res.end(data)
   })
 }
 
-const httpServer = createServer((req, res) => {
-  const url = new URL(req.url ?? '/', 'http://localhost')
-  if (url.pathname === '/background-image') {
-    serveBackgroundImage(res)
+interface DeckRoom {
+  id: string
+  dashboard: Dashboard
+  devices: Map<string, DeviceInfo>
+  sockets: Set<WebSocket>
+}
+// Keyed by deck id, lazily populated on first connection/reference (see
+// getOrLoadRoom) and never evicted — same always-resident philosophy the old
+// single-dashboard code used, just per-deck now.
+const rooms = new Map<string, DeckRoom>()
+
+interface SocketContext {
+  deckId: string
+  deviceId?: string
+}
+// Which room (and, once 'hello' arrives, which device) a given socket
+// belongs to — resolved from here on close/message, never from a global map,
+// so cleanup always targets the right room even if others have since been
+// deleted.
+const socketContext = new Map<WebSocket, SocketContext>()
+
+function getOrLoadRoom(deckId: string): DeckRoom | null {
+  const existing = rooms.get(deckId)
+  if (existing) return existing
+  if (!isValidDeckId(deckId)) return null
+  const dashboard = loadDeckDashboard(deckId)
+  if (!dashboard) return null
+  const room: DeckRoom = { id: deckId, dashboard, devices: new Map(), sockets: new Set() }
+  rooms.set(deckId, room)
+  return room
+}
+
+function deckExists(deckId: string): boolean {
+  return isValidDeckId(deckId) && existsSync(deckDashboardFile(deckId))
+}
+
+function listDeckSummaries(): DeckSummary[] {
+  let ids: string[]
+  try {
+    ids = readdirSync(decksDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+  } catch {
+    return []
+  }
+  const summaries: DeckSummary[] = []
+  for (const id of ids) {
+    const dashboard = rooms.get(id)?.dashboard ?? loadDeckDashboard(id)
+    if (dashboard) summaries.push({ id, name: dashboard.name })
+  }
+  summaries.sort((a, b) => a.name.localeCompare(b.name))
+  return summaries
+}
+
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = ''
+    req.on('data', (chunk) => (data += chunk))
+    req.on('end', () => resolve(data))
+    req.on('error', reject)
+  })
+}
+
+// The picker fetches this from the renderer, which in dev mode is served by
+// Vite on its own port (5173/5174), not this one — a genuine cross-origin
+// request from Chromium's point of view, unlike the existing WebSocket
+// connection or <img>/background-image loads, neither of which are subject
+// to CORS. `*` matches this app's existing no-auth, LAN-only posture (the WS
+// server already accepts any origin) — this isn't a new relaxation.
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type'
+}
+
+function sendJson(res: ServerResponse, status: number, body?: unknown): void {
+  if (status === 204) {
+    res.writeHead(204, CORS_HEADERS)
+    res.end()
     return
   }
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...CORS_HEADERS })
+  res.end(JSON.stringify(body))
+}
+
+async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+  const idMatch = /^\/api\/decks\/([^/]+)$/.exec(url.pathname)
+
+  if (url.pathname === '/api/decks' && req.method === 'GET') {
+    sendJson(res, 200, listDeckSummaries())
+    return
+  }
+
+  if (url.pathname === '/api/decks' && req.method === 'POST') {
+    let name = 'New Deck'
+    try {
+      const parsed = JSON.parse((await readBody(req)) || '{}')
+      if (typeof parsed.name === 'string' && parsed.name.trim()) name = parsed.name.trim()
+    } catch {
+      sendJson(res, 400, { error: 'Invalid JSON body' })
+      return
+    }
+    const id = randomUUID()
+    const dashboard: Dashboard = { ...structuredClone(DEFAULT_DASHBOARD), id, name }
+    mkdirSync(deckDir(id), { recursive: true })
+    writeFileSync(deckDashboardFile(id), JSON.stringify(dashboard, null, 2), 'utf-8')
+    sendJson(res, 201, { id, name } satisfies DeckSummary)
+    return
+  }
+
+  if (idMatch && req.method === 'PATCH') {
+    const deckId = idMatch[1]
+    if (!deckExists(deckId)) {
+      sendJson(res, 404, { error: 'Deck not found' })
+      return
+    }
+    let name: string
+    try {
+      const parsed = JSON.parse(await readBody(req))
+      if (typeof parsed.name !== 'string' || !parsed.name.trim()) {
+        sendJson(res, 400, { error: 'name is required' })
+        return
+      }
+      name = parsed.name.trim()
+    } catch {
+      sendJson(res, 400, { error: 'Invalid JSON body' })
+      return
+    }
+    const room = rooms.get(deckId)
+    if (room) {
+      room.dashboard = { ...room.dashboard, name }
+      saveDeckDashboard(room)
+      broadcastToRoom(room, { type: 'dashboard:sync', dashboard: room.dashboard })
+    } else {
+      const dashboard = loadDeckDashboard(deckId)
+      if (dashboard) {
+        dashboard.name = name
+        writeFileSync(deckDashboardFile(deckId), JSON.stringify(dashboard, null, 2), 'utf-8')
+      }
+    }
+    sendJson(res, 200, { id: deckId, name } satisfies DeckSummary)
+    return
+  }
+
+  if (idMatch && req.method === 'DELETE') {
+    const deckId = idMatch[1]
+    if (!deckExists(deckId)) {
+      sendJson(res, 404, { error: 'Deck not found' })
+      return
+    }
+    // Fully synchronous, no `await` between these steps — Node's
+    // single-threaded JS execution means no WS message handler can interleave
+    // and observe a half-deleted room as long as nothing here yields.
+    const room = rooms.get(deckId)
+    if (room) {
+      for (const socket of room.sockets) socket.close(DECK_CLOSE_CODE_UNKNOWN, 'Deck deleted')
+      rooms.delete(deckId)
+    }
+    rmSync(deckDir(deckId), { recursive: true, force: true })
+    sendJson(res, 204)
+    return
+  }
+
+  sendJson(res, 404, { error: 'Not found' })
+}
+
+const httpServer = createServer((req, res) => {
+  const url = new URL(req.url ?? '/', 'http://localhost')
+
+  if (url.pathname === '/background-image') {
+    serveBackgroundImage(res, url.searchParams.get('deck') ?? '')
+    return
+  }
+
+  // Checked before the devServerUrl guard below, same as /background-image
+  // above — otherwise `npm run dev` would swallow every /api/decks* request
+  // behind the "WS only in dev mode" placeholder text and the picker could
+  // never load anything while developing.
+  if (url.pathname === '/api/decks' || url.pathname.startsWith('/api/decks/')) {
+    // Chromium preflights the POST/PATCH JSON requests below (their
+    // `Content-Type: application/json` isn't CORS-safelisted) — answer it
+    // directly rather than routing it into handleDecksApi.
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, CORS_HEADERS)
+      res.end()
+      return
+    }
+    handleDecksApi(req, res, url).catch((err) => {
+      console.error('[boarderoni] /api/decks error', err)
+      if (!res.headersSent) sendJson(res, 500, { error: 'Internal error' })
+    })
+    return
+  }
+
   if (devServerUrl) {
     res.writeHead(200, { 'Content-Type': 'text/plain' })
     res.end('boarderoni dev server: WS only in dev mode, run "npm run build && npm start" to serve the dashboard UI')
@@ -178,16 +455,6 @@ const httpServer = createServer((req, res) => {
 })
 
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
-// Keyed by the view client's stable, self-reported deviceId (see id.ts's
-// getDeviceId on the renderer side) — not by WebSocket — so a device that
-// reconnects updates its existing entry instead of appearing as a new one.
-// Entries are never deleted, only flipped to connected: false, so the
-// editor's device dropdown selection survives a disconnect instead of
-// jumping to something else.
-const devices = new Map<string, DeviceInfo>()
-// Reverse lookup so a socket closing/dying knows which device entry to mark
-// offline.
-const socketDeviceId = new Map<WebSocket, string>()
 
 // A client that vanishes without a clean TCP close (network drop, app killed
 // in the background, WebView torn down) never fires the 'close' event on its
@@ -210,17 +477,17 @@ const heartbeat = setInterval(() => {
 
 wss.on('close', () => clearInterval(heartbeat))
 
-function broadcast(message: ServerToClient, exclude?: WebSocket): void {
+function broadcastToRoom(room: DeckRoom, message: ServerToClient, exclude?: WebSocket): void {
   const payload = JSON.stringify(message)
-  for (const client of wss.clients) {
+  for (const client of room.sockets) {
     if (client.readyState === WebSocket.OPEN && client !== exclude) {
       client.send(payload)
     }
   }
 }
 
-function broadcastDevices(): void {
-  broadcast({ type: 'devices:sync', devices: Array.from(devices.values()) })
+function broadcastDevices(room: DeckRoom): void {
+  broadcastToRoom(room, { type: 'devices:sync', devices: Array.from(room.devices.values()) })
 }
 
 function keyFromName(name: string): Key {
@@ -240,12 +507,13 @@ function coerceVariableValue(value: unknown): VariableValue {
 }
 
 // Evaluates an update-state action's code and merges whatever it returns
-// into dashboard.variables — creating new variables for names that don't
-// exist yet, same as assigning a new variable in a loose scripting
-// language. Runs server-side (not per-client) so every client's next
-// dashboard:sync already reflects the result, same as any other mutation.
-function runUpdateState(code: string): void {
-  const variableMap = toVariableMap(dashboard.variables ?? [])
+// into the room's dashboard.variables — creating new variables for names
+// that don't exist yet, same as assigning a new variable in a loose
+// scripting language. Runs server-side (not per-client) so every client's
+// next dashboard:sync already reflects the result, same as any other
+// mutation.
+function runUpdateState(room: DeckRoom, code: string): void {
+  const variableMap = toVariableMap(room.dashboard.variables ?? [])
   const result = tryEvaluateExpression(code, variableMap)
   // A genuine failure (syntax error, thrown exception, ...) surfaces to the
   // caller — triggerAction's catch turns it into an action:error the client
@@ -255,20 +523,20 @@ function runUpdateState(code: string): void {
   if (!result.value || typeof result.value !== 'object') return
 
   const updates = result.value as Record<string, unknown>
-  const existing = dashboard.variables ?? []
+  const existing = room.dashboard.variables ?? []
   const existingNames = new Set(existing.map((v) => v.name))
   const variables: Variable[] = existing.map((v) => (v.name in updates ? { ...v, value: coerceVariableValue(updates[v.name]) } : v))
   for (const [name, value] of Object.entries(updates)) {
     if (!existingNames.has(name)) variables.push({ id: randomUUID(), name, value: coerceVariableValue(value) })
   }
 
-  dashboard = { ...dashboard, variables }
-  saveDashboard()
-  broadcast({ type: 'dashboard:sync', dashboard })
+  room.dashboard = { ...room.dashboard, variables }
+  saveDeckDashboard(room)
+  broadcastToRoom(room, { type: 'dashboard:sync', dashboard: room.dashboard })
 }
 
-async function triggerAction(widgetId: string, ws: WebSocket): Promise<void> {
-  const widget = dashboard.widgets.find((w) => w.id === widgetId)
+async function triggerAction(room: DeckRoom, widgetId: string, ws: WebSocket): Promise<void> {
+  const widget = room.dashboard.widgets.find((w) => w.id === widgetId)
   if (!widget) {
     sendError(ws, widgetId, 'Widget not found')
     return
@@ -276,7 +544,7 @@ async function triggerAction(widgetId: string, ws: WebSocket): Promise<void> {
 
   if (widget.action.kind === 'update-state') {
     try {
-      runUpdateState(widget.action.code)
+      runUpdateState(room, widget.action.code)
     } catch (err) {
       sendError(ws, widgetId, err instanceof Error ? err.message : String(err))
     }
@@ -297,27 +565,54 @@ function sendError(ws: WebSocket, widgetId: string, message: string): void {
   ws.send(JSON.stringify(payload))
 }
 
-wss.on('connection', (ws: TrackedSocket) => {
+wss.on('connection', (ws: TrackedSocket, req) => {
+  const url = new URL(req.url ?? '', 'http://localhost')
+  const room = getOrLoadRoom(url.searchParams.get('deck') ?? '')
+  if (!room) {
+    ws.close(DECK_CLOSE_CODE_UNKNOWN, 'Unknown deck')
+    return
+  }
+
+  socketContext.set(ws, { deckId: room.id })
+  room.sockets.add(ws)
+
   ws.isAlive = true
   ws.on('pong', () => {
     ws.isAlive = true
   })
 
-  ws.send(JSON.stringify({ type: 'dashboard:sync', dashboard } satisfies ServerToClient))
-  ws.send(JSON.stringify({ type: 'devices:sync', devices: Array.from(devices.values()) } satisfies ServerToClient))
+  ws.send(JSON.stringify({ type: 'dashboard:sync', dashboard: room.dashboard } satisfies ServerToClient))
+  ws.send(JSON.stringify({ type: 'devices:sync', devices: Array.from(room.devices.values()) } satisfies ServerToClient))
 
   ws.on('close', () => {
-    const deviceId = socketDeviceId.get(ws)
-    socketDeviceId.delete(ws)
-    if (!deviceId) return
-    const existing = devices.get(deviceId)
-    if (existing) {
-      devices.set(deviceId, { ...existing, connected: false })
-      broadcastDevices()
+    const ctx = socketContext.get(ws)
+    socketContext.delete(ws)
+    if (!ctx) return
+    // The room may have been deleted (via DELETE /api/decks/:id) while this
+    // socket was still open — tolerate that rather than assuming it's there.
+    const activeRoom = rooms.get(ctx.deckId)
+    if (!activeRoom) return
+    activeRoom.sockets.delete(ws)
+    if (ctx.deviceId) {
+      const existing = activeRoom.devices.get(ctx.deviceId)
+      if (existing) {
+        activeRoom.devices.set(ctx.deviceId, { ...existing, connected: false })
+        broadcastDevices(activeRoom)
+      }
     }
   })
 
   ws.on('message', async (raw) => {
+    const ctx = socketContext.get(ws)
+    const activeRoom = ctx && rooms.get(ctx.deckId)
+    if (!ctx || !activeRoom) {
+      // The deck this socket was connected to no longer exists (deleted
+      // mid-session) — close with the same code the initial-connection
+      // rejection uses so the client falls back to the picker.
+      ws.close(DECK_CLOSE_CODE_UNKNOWN, 'Unknown deck')
+      return
+    }
+
     let message: ClientToServer
     try {
       message = JSON.parse(raw.toString())
@@ -327,21 +622,21 @@ wss.on('connection', (ws: TrackedSocket) => {
 
     switch (message.type) {
       case 'dashboard:update':
-        dashboard = message.dashboard
-        saveDashboard()
-        broadcast({ type: 'dashboard:sync', dashboard }, ws)
+        activeRoom.dashboard = message.dashboard
+        saveDeckDashboard(activeRoom)
+        broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard }, ws)
         break
       case 'action:trigger':
-        await triggerAction(message.widgetId, ws)
+        await triggerAction(activeRoom, message.widgetId, ws)
         break
       case 'hello':
         if (message.role === 'view' && message.viewport && message.deviceId) {
-          socketDeviceId.set(ws, message.deviceId)
+          ctx.deviceId = message.deviceId
           // Merge onto any existing entry — this also fires on every window
           // resize (see store.ts's sendHello), so a plain overwrite would
           // wipe out a previously-set customName each time.
-          const existing = devices.get(message.deviceId)
-          devices.set(message.deviceId, {
+          const existing = activeRoom.devices.get(message.deviceId)
+          activeRoom.devices.set(message.deviceId, {
             ...existing,
             id: message.deviceId,
             width: message.viewport.width,
@@ -349,14 +644,14 @@ wss.on('connection', (ws: TrackedSocket) => {
             userAgent: message.userAgent,
             connected: true
           })
-          broadcastDevices()
+          broadcastDevices(activeRoom)
         }
         break
       case 'device:rename': {
-        const existing = devices.get(message.deviceId)
+        const existing = activeRoom.devices.get(message.deviceId)
         if (existing) {
-          devices.set(message.deviceId, { ...existing, customName: message.name.trim() || undefined })
-          broadcastDevices()
+          activeRoom.devices.set(message.deviceId, { ...existing, customName: message.name.trim() || undefined })
+          broadcastDevices(activeRoom)
         }
         break
       }
@@ -364,18 +659,20 @@ wss.on('connection', (ws: TrackedSocket) => {
         const match = /^data:([\w/+.-]+);base64,(.+)$/.exec(message.dataUrl)
         if (!match) break
         const [, mime, base64] = match
-        writeFileSync(backgroundImageFile, Buffer.from(base64, 'base64'))
-        dashboard = { ...dashboard, backgroundImageMime: mime, backgroundImageVersion: Date.now() }
-        saveDashboard()
-        broadcast({ type: 'dashboard:sync', dashboard })
+        mkdirSync(deckDir(activeRoom.id), { recursive: true })
+        writeFileSync(deckBackgroundImageFile(activeRoom.id), Buffer.from(base64, 'base64'))
+        activeRoom.dashboard = { ...activeRoom.dashboard, backgroundImageMime: mime, backgroundImageVersion: Date.now() }
+        saveDeckDashboard(activeRoom)
+        broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
         break
       }
       case 'background-image:clear': {
-        if (existsSync(backgroundImageFile)) unlinkSync(backgroundImageFile)
-        const { backgroundImageMime: _mime, backgroundImageVersion: _version, ...rest } = dashboard
-        dashboard = rest
-        saveDashboard()
-        broadcast({ type: 'dashboard:sync', dashboard })
+        const file = deckBackgroundImageFile(activeRoom.id)
+        if (existsSync(file)) unlinkSync(file)
+        const { backgroundImageMime: _mime, backgroundImageVersion: _version, ...rest } = activeRoom.dashboard
+        activeRoom.dashboard = rest
+        saveDeckDashboard(activeRoom)
+        broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
         break
       }
     }

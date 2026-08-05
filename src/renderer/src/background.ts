@@ -40,8 +40,9 @@ export function backgroundImageStyle(fit: BackgroundFit, anchor: BackgroundAncho
 // The image bytes live server-side (see main/index.ts) and are fetched over
 // plain HTTP rather than embedded in the synced dashboard JSON — embedding it
 // there would mean every dashboard update, including per-frame widget drags,
-// re-sends the whole image to every connected client.
-export function backgroundImageUrl(version: number): string {
+// re-sends the whole image to every connected client. Scoped to a deck (the
+// server keeps one background image per deck) via the `deck` query param.
+export function backgroundImageUrl(deckId: string, version: number): string {
   const host = window.location.hostname || 'localhost'
-  return `http://${host}:${SERVER_PORT}/background-image?v=${version}`
+  return `http://${host}:${SERVER_PORT}/background-image?deck=${encodeURIComponent(deckId)}&v=${version}`
 }

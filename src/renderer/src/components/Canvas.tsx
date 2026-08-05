@@ -50,6 +50,7 @@ export function Canvas(): React.JSX.Element {
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
   const backgroundImageVersion = useDashboardStore((s) => s.dashboard.backgroundImageVersion)
+  const deckId = useDashboardStore((s) => s.deckId)
   const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
   const backgroundAnchor = useDashboardStore((s) => s.dashboard.backgroundAnchor)
   const devices = useDashboardStore((s) => s.devices)
@@ -212,12 +213,12 @@ export function Canvas(): React.JSX.Element {
               {activeDeviceLabel} — {activeDevice.width}×{activeDevice.height}
               {activeConnected && !activeConnected.connected ? ' (disconnected)' : ''}
             </span>
-            {backgroundImageVersion && (
+            {backgroundImageVersion && deckId && (
               <div className="canvas-device-bounds__clip">
                 <div
                   className="dashboard-wallpaper"
                   style={{
-                    backgroundImage: `url(${backgroundImageUrl(backgroundImageVersion)})`,
+                    backgroundImage: `url(${backgroundImageUrl(deckId, backgroundImageVersion)})`,
                     ...backgroundImageStyle(backgroundFit ?? 'cover', backgroundAnchor ?? 'center')
                   }}
                 />

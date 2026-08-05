@@ -1,5 +1,5 @@
 import { DEFAULT_WIDGET_COLOR, pickAutoBorderColor, withOpacity } from '@shared/color'
-import { resolveColor, type VariableMap } from '@shared/expr'
+import { resolveBorderColor, resolveColor, type VariableMap } from '@shared/expr'
 import type { ButtonWidget, WidgetState } from '@shared/types'
 import { actionTitle } from '@shared/actionTitle'
 import { renderWidgetLabels } from './labels'
@@ -20,13 +20,15 @@ export function ButtonWidgetContent({
   variables: VariableMap
   onTrigger?: () => void
 }): React.JSX.Element {
-  const backgroundColor = resolveColor(state, variables) ?? DEFAULT_WIDGET_COLOR
-  const borderColor = state.borderColor ?? pickAutoBorderColor(backgroundColor)
+  const resolvedColor = resolveColor(state, variables)
+  const backgroundColor = resolvedColor.color ?? DEFAULT_WIDGET_COLOR
+  const resolvedBorderColor = resolveBorderColor(state, variables)
+  const borderColor = resolvedBorderColor.color ?? pickAutoBorderColor(backgroundColor)
 
   const buttonStyle: React.CSSProperties = {
     ...boxStyle(state),
-    backgroundColor: withOpacity(backgroundColor, state.backgroundOpacity ?? 1),
-    borderColor: withOpacity(borderColor, state.borderOpacity ?? 1),
+    backgroundColor: withOpacity(backgroundColor, resolvedColor.opacity ?? state.backgroundOpacity ?? 1),
+    borderColor: withOpacity(borderColor, resolvedBorderColor.opacity ?? state.borderOpacity ?? 1),
     // Left unset, this stays 'auto' (CSS default) and the widget falls back
     // to plain paint order (see bringToFront/sendToBack in store.ts) —
     // explicit z-index here overrides that per-state, e.g. to pop a
