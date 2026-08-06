@@ -23,7 +23,7 @@ function ViewWidget({
   error?: string
 }): React.JSX.Element {
   const [pressed, setPressed] = useState(false)
-  const [defaultState, clickedState] = getEffectiveStates(widget)
+  const [defaultState, clickedState] = getEffectiveStates(widget, variables)
   const state = pressed && clickedState ? clickedState : defaultState
 
   function press(): void {

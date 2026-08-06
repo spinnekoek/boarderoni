@@ -166,6 +166,13 @@ export interface ButtonWidget {
   // and independently configurable in the properties panel.
   statesEnabled?: boolean
   states: WidgetState[]
+  // Optional JS expression (see shared/expr.ts) returning the exact `name`
+  // of the state that should be the "base" state on the view client — e.g.
+  // `return variables.BATTERY_SW === 0 ? 'Default' : 'Active';`. Only
+  // meaningful when statesEnabled is on; falls back to states[0] if unset,
+  // throws, or names a state that doesn't exist. Independent of isClicked —
+  // the resolved state still gets swapped for the Clicked one while pressed.
+  activeStateExpr?: string
 }
 
 // Grid-relative, NOT normalized to a 0-based origin — col/row 0 always maps
@@ -222,6 +229,7 @@ export interface MorphButtonWidget {
   action: WidgetAction
   statesEnabled?: boolean
   states: WidgetState[]
+  activeStateExpr?: string
 }
 
 export type Widget = ButtonWidget | MorphButtonWidget

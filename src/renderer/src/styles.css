@@ -1122,8 +1122,15 @@ button.deck-morph-cell:focus-visible {
 .state-tabs {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
   margin-bottom: 12px;
+}
+
+/* Pushes everything after it (the fx toggle) to the end of its flex line —
+   still correct if the pills wrap, since it only affects the line it's on. */
+.state-tabs__spacer {
+  flex: 1 0 auto;
 }
 
 .state-tab {

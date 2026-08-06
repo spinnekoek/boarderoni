@@ -13,6 +13,8 @@ import { ANCHOR_OPTIONS } from '../background'
 import { KeyCapture } from './KeyCapture'
 import { ColorPicker } from './ColorPicker'
 import { ColorPickerButton } from './ColorPickerButton'
+import { CodeEditor } from './CodeEditor'
+import { ExpressionEditorModal } from './ExpressionEditorModal'
 import type {
   BackgroundFit,
   HorizontalAlign,
@@ -25,6 +27,8 @@ import type {
   WidgetState
 } from '@shared/types'
 import type { DcsBiosCommandCatalogEntry, DcsBiosInputInterface } from '@shared/dcsBiosTypes'
+
+const ACTIVE_STATE_EXPR_PLACEHOLDER = "return variables.BATTERY_SW === 0 ? 'Default' : 'Active';"
 
 // One 3x3 grid replaces the old separate horizontal/vertical button rows —
 // each cell is a (h, v) pair, in reading order (top-left to bottom-right),
@@ -761,6 +765,7 @@ export function PropertiesPanel(): React.JSX.Element {
   const gridSize = useEditorSettings((s) => s.gridSize)
   const resizeState = useRef<ResizeState | null>(null)
   const dragStateIndex = useRef<number | null>(null)
+  const [activeStateExprExpanded, setActiveStateExprExpanded] = useState(false)
 
   const widget = selectedWidgetIds.length === 1 ? widgets.find((w) => w.id === selectedWidgetIds[0]) ?? null : null
 
@@ -1089,7 +1094,61 @@ export function PropertiesPanel(): React.JSX.Element {
           <button type="button" className="state-tab state-tab--add" onClick={handleAddState} title="Add state">
             +
           </button>
+          <div className="state-tabs__spacer" />
+          {widget.activeStateExpr !== undefined ? (
+            <button
+              type="button"
+              className="color-picker-button__clear"
+              title="Remove the state expression"
+              onClick={() => patch({ activeStateExpr: undefined })}
+            >
+              ×
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="color-picker-button__fx"
+              title="Pick the active state with an expression"
+              onClick={() => patch({ activeStateExpr: '' })}
+            >
+              ƒx
+            </button>
+          )}
         </div>
+      )}
+
+      {widget.statesEnabled && widget.activeStateExpr !== undefined && (
+        <div className="color-picker-button__expr-panel">
+          <p className="properties__hint">
+            Returns the exact name of the state that should be active. Falls back to the first state if it throws, returns
+            something else, or names a state that doesn't exist.
+          </p>
+          <div className="color-picker-button__expr-editor-wrap">
+            <CodeEditor
+              value={widget.activeStateExpr}
+              onChange={(code) => patch({ activeStateExpr: code })}
+              placeholder={ACTIVE_STATE_EXPR_PLACEHOLDER}
+              minimal
+            />
+            <button
+              type="button"
+              className="color-picker-button__expand"
+              title="Expand"
+              onClick={() => setActiveStateExprExpanded(true)}
+            >
+              ⤢
+            </button>
+          </div>
+        </div>
+      )}
+
+      {activeStateExprExpanded && (
+        <ExpressionEditorModal
+          value={widget.activeStateExpr ?? ''}
+          onChange={(code) => patch({ activeStateExpr: code })}
+          placeholder={ACTIVE_STATE_EXPR_PLACEHOLDER}
+          onClose={() => setActiveStateExprExpanded(false)}
+        />
       )}
 
       {widget.statesEnabled && (
