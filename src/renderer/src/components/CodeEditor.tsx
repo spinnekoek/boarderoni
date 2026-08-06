@@ -29,6 +29,10 @@ const theme = EditorView.theme(
     },
     '.cm-content': {
       fontFamily: "'JetBrains Mono', monospace",
+      // JetBrains Mono ligature-merges character pairs like "=>"/"!=="/"=="
+      // by default — disabled so every character stays visually distinct,
+      // which matters more here than the stylistic ligatures do.
+      fontVariantLigatures: 'none',
       caretColor: '#e8e8ea',
       padding: '8px 0'
     },

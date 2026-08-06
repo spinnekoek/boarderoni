@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useConfirmStore } from '../confirmStore'
@@ -8,6 +8,7 @@ import { DEFAULT_WIDGET_COLOR, pickAutoBorderColor, pickLegibleTextColor } from 
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
 import { deriveClickedState } from '@shared/states'
 import { blockMerge, type BlockMerge } from '@shared/morph'
+import { toVariableMap, tryEvaluateExpression } from '@shared/expr'
 import { ANCHOR_OPTIONS } from '../background'
 import { KeyCapture } from './KeyCapture'
 import { ColorPicker } from './ColorPicker'
@@ -17,11 +18,13 @@ import type {
   HorizontalAlign,
   MorphBlock,
   MorphBlockStateOverride,
+  SendDcsCommandAction,
   VerticalAlign,
   Widget,
   WidgetLabel,
   WidgetState
 } from '@shared/types'
+import type { DcsBiosCommandCatalogEntry, DcsBiosInputInterface } from '@shared/dcsBiosTypes'
 
 // One 3x3 grid replaces the old separate horizontal/vertical button rows —
 // each cell is a (h, v) pair, in reading order (top-left to bottom-right),
@@ -455,6 +458,274 @@ function MorphBlockFields({
   )
 }
 
+function interfaceLabel(iface: DcsBiosInputInterface): string {
+  switch (iface) {
+    case 'set_state':
+      return 'Set position'
+    case 'fixed_step':
+      return 'Step (INC/DEC)'
+    case 'action':
+      return 'Action'
+    case 'variable_step':
+      return 'Adjust by amount'
+  }
+}
+
+// Straight from the confirmed real "Input Interfaces" documentation (see
+// worker.ts/docParser.ts's own comments) — what a valid argument for this
+// specific command actually looks like.
+function commandValueHint(entry: DcsBiosCommandCatalogEntry): string {
+  switch (entry.interface) {
+    case 'set_state':
+      return `number, 0–${entry.maxValue ?? 0}`
+    case 'fixed_step':
+      return 'INC or DEC'
+    case 'action':
+      return `fixed value: ${entry.argument ?? ''}`
+    case 'variable_step':
+      return `+NUMBER or -NUMBER (try ±${entry.suggestedStep ?? 3200}), position range 0–${entry.maxValue ?? 0}`
+  }
+}
+
+function defaultArgumentFor(entry: DcsBiosCommandCatalogEntry): string {
+  switch (entry.interface) {
+    case 'set_state':
+      return '0'
+    case 'fixed_step':
+      return 'INC'
+    case 'action':
+      return entry.argument ?? ''
+    case 'variable_step':
+      return `+${entry.suggestedStep ?? 3200}`
+  }
+}
+
+function groupCommandsByCategory(entries: DcsBiosCommandCatalogEntry[]): { category: string; entries: DcsBiosCommandCatalogEntry[] }[] {
+  const byCategory = new Map<string, DcsBiosCommandCatalogEntry[]>()
+  for (const entry of entries) {
+    const list = byCategory.get(entry.category)
+    if (list) list.push(entry)
+    else byCategory.set(entry.category, [entry])
+  }
+  return Array.from(byCategory, ([category, categoryEntries]) => ({ category, entries: categoryEntries })).sort((a, b) =>
+    a.category.localeCompare(b.category)
+  )
+}
+
+// Editor for a ButtonWidget's SendDcsCommandAction — aircraft picker, then a
+// searchable single-select command browser (same category-grouped list
+// pattern as EventsModal's field browser, just single-select since a button
+// fires exactly one command), then a value box with the same fx/expression
+// toggle every other bindable value in this app uses (see MappingRow in
+// EventsModal.tsx). A "Test" button sends the CURRENTLY configured value
+// immediately, using this editor's own live dashboard.variables for
+// argumentExpr — useful for confirming a command actually does what's
+// expected before wiring it to a real button click.
+function SendDcsCommandActionEditor({
+  action,
+  onPatch
+}: {
+  action: SendDcsCommandAction
+  onPatch: (fields: Partial<SendDcsCommandAction>) => void
+}): React.JSX.Element {
+  const dcsBiosAircraft = useDashboardStore((s) => s.dcsBiosAircraft)
+  const requestDcsBiosAircraftList = useDashboardStore((s) => s.requestDcsBiosAircraftList)
+  const dcsBiosCommandCatalogs = useDashboardStore((s) => s.dcsBiosCommandCatalogs)
+  const requestDcsBiosCommandCatalog = useDashboardStore((s) => s.requestDcsBiosCommandCatalog)
+  const sendDcsBiosCommand = useDashboardStore((s) => s.sendDcsBiosCommand)
+  const dcsBiosSendCommandResult = useDashboardStore((s) => s.dcsBiosSendCommandResult)
+  const variables = useDashboardStore((s) => s.dashboard.variables) ?? []
+
+  const [browserOpen, setBrowserOpen] = useState(false)
+  const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    if (dcsBiosAircraft === null) requestDcsBiosAircraftList()
+  }, [dcsBiosAircraft, requestDcsBiosAircraftList])
+
+  useEffect(() => {
+    if (action.aircraft && dcsBiosCommandCatalogs[action.aircraft] === undefined) requestDcsBiosCommandCatalog(action.aircraft)
+  }, [action.aircraft, dcsBiosCommandCatalogs, requestDcsBiosCommandCatalog])
+
+  const catalogState = action.aircraft ? dcsBiosCommandCatalogs[action.aircraft] : undefined
+  const catalogEntries = useMemo(() => (Array.isArray(catalogState) ? catalogState : []), [catalogState])
+  const selected = catalogEntries.find((c) => c.identifier === action.identifier && c.interface === action.interface)
+
+  const filtered = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    if (!needle) return catalogEntries
+    return catalogEntries.filter(
+      (e) => e.label.toLowerCase().includes(needle) || e.identifier.toLowerCase().includes(needle) || e.category.toLowerCase().includes(needle)
+    )
+  }, [catalogEntries, search])
+  const groups = useMemo(() => groupCommandsByCategory(filtered), [filtered])
+  const hasSearch = search.trim().length > 0
+
+  const isExpr = action.argumentExpr !== undefined
+  const draftRef = useRef(action.argumentExpr ?? '')
+  useEffect(() => {
+    if (action.argumentExpr) draftRef.current = action.argumentExpr
+  }, [action.argumentExpr])
+
+  function pickAircraft(aircraft: string): void {
+    onPatch({ aircraft, identifier: '', interface: 'action', argument: '' })
+    setBrowserOpen(false)
+  }
+
+  function pickCommand(entry: DcsBiosCommandCatalogEntry): void {
+    onPatch({ identifier: entry.identifier, interface: entry.interface, argument: defaultArgumentFor(entry), argumentExpr: undefined })
+    setBrowserOpen(false)
+  }
+
+  function handleTest(): void {
+    if (isExpr && action.argumentExpr) {
+      const result = tryEvaluateExpression(action.argumentExpr, toVariableMap(variables))
+      if (result.ok) sendDcsBiosCommand(action.identifier, String(result.value))
+      return
+    }
+    sendDcsBiosCommand(action.identifier, action.argument)
+  }
+
+  return (
+    <>
+      <label className="properties__field">
+        <span>Aircraft</span>
+        {dcsBiosAircraft === null ? (
+          <span className="properties__hint-inline">Loading aircraft…</span>
+        ) : dcsBiosAircraft.length === 0 ? (
+          <span className="properties__hint-inline">No installed DCS-BIOS aircraft found — check the docs folder in Settings.</span>
+        ) : (
+          <select value={action.aircraft} onChange={(e) => pickAircraft(e.target.value)}>
+            <option value="">Pick an aircraft…</option>
+            {dcsBiosAircraft.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </label>
+
+      {action.aircraft && (
+        <label className="properties__field">
+          <span>Command</span>
+          <button type="button" className="properties__file-button" onClick={() => setBrowserOpen((o) => !o)}>
+            {selected ? `${selected.label} — ${interfaceLabel(selected.interface)}` : 'Pick a command…'}
+          </button>
+        </label>
+      )}
+
+      {browserOpen && (
+        <div className="events-modal__field-browser">
+          {catalogState === undefined || catalogState === 'loading' ? (
+            <p className="properties__hint">Loading commands…</p>
+          ) : !Array.isArray(catalogState) ? (
+            <p className="properties__hint dcsbios-settings__error">Failed to load commands: {catalogState.error}</p>
+          ) : (
+            <>
+              <input
+                className="variables-modal__search"
+                type="text"
+                placeholder={`Search ${catalogEntries.length} commands…`}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <div className="events-modal__field-groups">
+                {groups.map((group) => (
+                  <details key={group.category} className="events-modal__field-category" open={hasSearch}>
+                    <summary>
+                      <span>{group.category}</span>
+                      <span className="variables-modal__group-count">{group.entries.length}</span>
+                    </summary>
+                    <div className="events-modal__field-list">
+                      {group.entries.map((entry) => (
+                        <button
+                          type="button"
+                          key={`${entry.identifier}:${entry.interface}`}
+                          className="events-modal__field-row events-modal__field-row--button"
+                          onClick={() => pickCommand(entry)}
+                        >
+                          <span className="events-modal__field-label" title={entry.label}>
+                            {entry.label}
+                          </span>
+                          <span className="events-modal__field-key">
+                            {entry.identifier} · {interfaceLabel(entry.interface)}
+                          </span>
+                          <span className="events-modal__field-hint">{commandValueHint(entry)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </details>
+                ))}
+                {groups.length === 0 && <p className="properties__hint">No commands match &quot;{search}&quot;.</p>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {action.identifier && (
+        <>
+          <label className="properties__field">
+            <span>Value</span>
+            <div className="properties__file-row">
+              {isExpr ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input value={action.argument} onChange={(e) => onPatch({ argument: e.target.value })} />
+              )}
+              {isExpr ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed value instead"
+                  onClick={() => onPatch({ argumentExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the value with an expression"
+                  onClick={() => onPatch({ argumentExpr: draftRef.current })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {selected && <p className="properties__hint">{commandValueHint(selected)}</p>}
+
+          {isExpr && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={3}
+                placeholder={"return variables.my_variable > 0 ? 'ON' : 'OFF';"}
+                value={action.argumentExpr ?? ''}
+                onChange={(e) => onPatch({ argumentExpr: e.target.value })}
+              />
+            </label>
+          )}
+
+          <div className="properties__file-row">
+            <button type="button" className="properties__file-button" onClick={handleTest}>
+              Test
+            </button>
+            {dcsBiosSendCommandResult && (
+              <span className={dcsBiosSendCommandResult.ok ? 'properties__hint-inline' : 'dcsbios-settings__error'}>
+                {dcsBiosSendCommandResult.ok ? 'Sent' : `Failed: ${dcsBiosSendCommandResult.error}`}
+              </span>
+            )}
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
 export function PropertiesPanel(): React.JSX.Element {
   const dashboard = useDashboardStore((s) => s.dashboard)
   const widgets = dashboard.widgets
@@ -472,6 +743,17 @@ export function PropertiesPanel(): React.JSX.Element {
   const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
   const setActiveStateIndex = useDashboardStore((s) => s.setActiveStateIndex)
   const confirm = useConfirmStore((s) => s.confirm)
+
+  // Gates the "Send DCS command" action-kind option — defaults to enabled
+  // while the real setting is still loading (opt-out, not opt-in, matching
+  // appSettings.ts's own default), rather than flashing the option away and
+  // back once the fetch resolves.
+  const enabledDataSources = useDashboardStore((s) => s.enabledDataSources)
+  const requestAppSettings = useDashboardStore((s) => s.requestAppSettings)
+  useEffect(() => {
+    if (enabledDataSources === null) requestAppSettings()
+  }, [enabledDataSources, requestAppSettings])
+  const dcsBiosActionEnabled = enabledDataSources === null || enabledDataSources.includes('dcsbios')
 
   const propertiesWidth = useEditorSettings((s) => s.propertiesWidth)
   const setPropertiesWidth = useEditorSettings((s) => s.setPropertiesWidth)
@@ -978,14 +1260,18 @@ export function PropertiesPanel(): React.JSX.Element {
         <span>Action</span>
         <select
           value={widget.action.kind}
-          onChange={(e) =>
-            patch({
-              action: e.target.value === 'keypress' ? { kind: 'keypress', keys: [] } : { kind: 'update-state', code: '' }
-            })
-          }
+          onChange={(e) => {
+            const kind = e.target.value
+            if (kind === 'keypress') patch({ action: { kind: 'keypress', keys: [] } })
+            else if (kind === 'update-state') patch({ action: { kind: 'update-state', code: '' } })
+            else patch({ action: { kind: 'send-dcs-command', aircraft: '', identifier: '', interface: 'action', argument: '' } })
+          }}
         >
           <option value="keypress">Keypress</option>
           <option value="update-state">Update state</option>
+          {(dcsBiosActionEnabled || widget.action.kind === 'send-dcs-command') && (
+            <option value="send-dcs-command">Send DCS command</option>
+          )}
         </select>
       </label>
 
@@ -1007,7 +1293,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </label>
           <p className="properties__hint">Click the box, then press the key combo to bind. Click away to finish.</p>
         </>
-      ) : (
+      ) : widget.action.kind === 'update-state' ? (
         <>
           <label className="properties__field">
             <span>Code</span>
@@ -1024,6 +1310,15 @@ export function PropertiesPanel(): React.JSX.Element {
             <code>{'{ name: newValue }'}</code> pairs to update them (unknown names get created).
           </p>
         </>
+      ) : (
+        // Narrowed by the two kind checks above, but TS doesn't retain that
+        // narrowing inside the onPatch closure below (a callback could in
+        // principle run after `widget` changes) — the cast reflects what's
+        // already true at this point in the ternary, not a real unsafe leap.
+        <SendDcsCommandActionEditor
+          action={widget.action as SendDcsCommandAction}
+          onPatch={(fields) => patch({ action: { ...(widget.action as SendDcsCommandAction), ...fields } })}
+        />
       )}
 
       <div className="properties__divider" />

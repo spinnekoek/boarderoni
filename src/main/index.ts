@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import {
   readFile,
@@ -23,6 +23,7 @@ import {
   type DeckSummary,
   type DeviceInfo,
   type EventSource,
+  type SendDcsCommandAction,
   type ServerToClient,
   type Variable,
   type VariableValue,
@@ -30,6 +31,20 @@ import {
 } from '../shared/types'
 import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression } from '../shared/expr'
 import { EVENT_SOURCE_PRODUCERS } from './eventSourceProducers'
+import { getAppSettings, updateAppSettings } from './appSettings'
+import {
+  listInstalledAircraft,
+  getFieldCatalog,
+  getCommandCatalog,
+  sendCommand as sendDcsBiosCommand,
+  getSettings as getDcsBiosSettings,
+  updateSettings as updateDcsBiosSettings,
+  validateDocsDir,
+  getStatus as getDcsBiosStatus,
+  onStatusChange as onDcsBiosStatusChange,
+  getWorkerStats as getDcsBiosWorkerStats,
+  onStatsChange as onDcsBiosStatsChange
+} from './dcsBios/connectionManager'
 
 // Pre-multi-label shape: a single flat `label` string plus its own styling
 // fields (including a widget-level `padding`), before they moved into
@@ -596,6 +611,31 @@ function runUpdateState(room: DeckRoom, code: string): void {
   applyVariableUpdates(room, result.value as Record<string, unknown>, { immediate: true })
 }
 
+// argumentExpr (when set) is evaluated the same way UpdateStateAction.code
+// is — variables in scope, thrown/syntax errors surface to the caller as an
+// action:error — except the returned value becomes the literal argument
+// string sent, not a variables patch. No aircraft-matching is needed here
+// (unlike reading): DCS-BIOS just applies whatever identifier/argument pair
+// arrives to the currently active aircraft, silently ignoring it if that
+// identifier doesn't exist for that aircraft.
+async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction): Promise<void> {
+  // Same enabledDataSources gate syncEventSources already applies to the
+  // read side (see its own comment) — disabling DCS-BIOS in Settings should
+  // stop a button from firing commands too, not just stop reading fields.
+  if (!getAppSettings().enabledDataSources.includes('dcsbios')) {
+    throw new Error('DCS-BIOS is disabled in Settings')
+  }
+
+  let argument = action.argument
+  if (action.argumentExpr && action.argumentExpr.trim()) {
+    const variableMap = toVariableMap(room.dashboard.variables ?? [])
+    const result = tryEvaluateExpression(action.argumentExpr, variableMap)
+    if (!result.ok) throw new Error(result.error)
+    argument = String(result.value)
+  }
+  await sendDcsBiosCommand(action.identifier, argument)
+}
+
 function eventSourceSignature(source: EventSource): string {
   return JSON.stringify({ kind: source.kind, config: source.config ?? null })
 }
@@ -629,6 +669,12 @@ function syncEventSources(room: DeckRoom): void {
 
     const producer = EVENT_SOURCE_PRODUCERS[instance.kind]
     if (!producer) continue
+    // Disabling a kind in the Settings page (see appSettings.ts) stops its
+    // producer entirely rather than just hiding it from EventsModal's add-
+    // picker — this is what actually frees a high-intensity kind's
+    // underlying worker thread when nobody wants it running. The source's
+    // own configuration is untouched, so re-enabling resumes it as-is.
+    if (!getAppSettings().enabledDataSources.includes(instance.kind)) continue
 
     // Per-field values from this instance's previous tick, captured by this
     // closure (not stored on the eventSourceStops entry — that's only set
@@ -678,6 +724,14 @@ function syncEventSources(room: DeckRoom): void {
   }
 }
 
+// Re-evaluates every currently-loaded room's event sources against the
+// latest enabledDataSources gate — called after an app-settings:update so
+// toggling a kind off/on in the Settings page takes effect immediately,
+// not just on the next unrelated dashboard:update.
+function resyncAllRoomsEventSources(): void {
+  for (const room of rooms.values()) syncEventSources(room)
+}
+
 async function triggerAction(room: DeckRoom, widgetId: string, ws: WebSocket): Promise<void> {
   const widget = room.dashboard.widgets.find((w) => w.id === widgetId)
   if (!widget) {
@@ -688,6 +742,15 @@ async function triggerAction(room: DeckRoom, widgetId: string, ws: WebSocket): P
   if (widget.action.kind === 'update-state') {
     try {
       runUpdateState(room, widget.action.code)
+    } catch (err) {
+      sendError(ws, widgetId, err instanceof Error ? err.message : String(err))
+    }
+    return
+  }
+
+  if (widget.action.kind === 'send-dcs-command') {
+    try {
+      await runSendDcsCommand(room, widget.action)
     } catch (err) {
       sendError(ws, widgetId, err instanceof Error ? err.message : String(err))
     }
@@ -726,6 +789,13 @@ wss.on('connection', (ws: TrackedSocket, req) => {
 
   ws.send(JSON.stringify({ type: 'dashboard:sync', dashboard: room.dashboard } satisfies ServerToClient))
   ws.send(JSON.stringify({ type: 'devices:sync', devices: Array.from(room.devices.values()) } satisfies ServerToClient))
+  // Both genuinely process-wide (one DCS-BIOS connection for the whole
+  // app), so a freshly-connected client gets the current cached value right
+  // away rather than waiting for the next change (see the proactive
+  // onDcsBiosStatusChange/onDcsBiosStatsChange broadcasts below).
+  ws.send(JSON.stringify({ type: 'dcsbios:status', ...getDcsBiosStatus() } satisfies ServerToClient))
+  const initialDcsBiosStats = getDcsBiosWorkerStats()
+  if (initialDcsBiosStats) ws.send(JSON.stringify({ type: 'dcsbios:stats', ...initialDcsBiosStats } satisfies ServerToClient))
 
   ws.on('close', () => {
     const ctx = socketContext.get(ws)
@@ -819,8 +889,105 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
         break
       }
+      case 'dcsbios:list-aircraft': {
+        const aircraft = await listInstalledAircraft()
+        ws.send(JSON.stringify({ type: 'dcsbios:aircraft-list', aircraft } satisfies ServerToClient))
+        break
+      }
+      case 'dcsbios:field-catalog': {
+        try {
+          const fields = await getFieldCatalog(message.aircraft)
+          ws.send(JSON.stringify({ type: 'dcsbios:field-catalog', aircraft: message.aircraft, fields } satisfies ServerToClient))
+        } catch (err) {
+          ws.send(
+            JSON.stringify({
+              type: 'dcsbios:field-catalog-error',
+              aircraft: message.aircraft,
+              message: err instanceof Error ? err.message : String(err)
+            } satisfies ServerToClient)
+          )
+        }
+        break
+      }
+      case 'dcsbios:get-settings': {
+        ws.send(JSON.stringify({ type: 'dcsbios:settings', ...getDcsBiosSettings() } satisfies ServerToClient))
+        break
+      }
+      case 'dcsbios:update-settings': {
+        const settings = await updateDcsBiosSettings(message.settings)
+        ws.send(JSON.stringify({ type: 'dcsbios:settings', ...settings } satisfies ServerToClient))
+        break
+      }
+      case 'dcsbios:validate-docs-dir': {
+        const result = validateDocsDir(message.docsDir)
+        ws.send(
+          JSON.stringify({ type: 'dcsbios:docs-dir-validation', docsDir: message.docsDir, ...result } satisfies ServerToClient)
+        )
+        break
+      }
+      case 'dcsbios:pick-docs-folder': {
+        const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+        const path = !result.canceled && result.filePaths.length > 0 ? result.filePaths[0] : null
+        ws.send(JSON.stringify({ type: 'dcsbios:docs-folder-picked', path } satisfies ServerToClient))
+        break
+      }
+      case 'dcsbios:command-catalog': {
+        try {
+          const commands = await getCommandCatalog(message.aircraft)
+          ws.send(JSON.stringify({ type: 'dcsbios:command-catalog', aircraft: message.aircraft, commands } satisfies ServerToClient))
+        } catch (err) {
+          ws.send(
+            JSON.stringify({
+              type: 'dcsbios:command-catalog-error',
+              aircraft: message.aircraft,
+              message: err instanceof Error ? err.message : String(err)
+            } satisfies ServerToClient)
+          )
+        }
+        break
+      }
+      case 'dcsbios:send-command': {
+        try {
+          await sendDcsBiosCommand(message.identifier, message.argument)
+          ws.send(JSON.stringify({ type: 'dcsbios:send-command-result', ok: true } satisfies ServerToClient))
+        } catch (err) {
+          ws.send(
+            JSON.stringify({
+              type: 'dcsbios:send-command-result',
+              ok: false,
+              error: err instanceof Error ? err.message : String(err)
+            } satisfies ServerToClient)
+          )
+        }
+        break
+      }
+      case 'app-settings:get': {
+        ws.send(JSON.stringify({ type: 'app-settings:settings', ...getAppSettings() } satisfies ServerToClient))
+        break
+      }
+      case 'app-settings:update': {
+        const settings = updateAppSettings({ enabledDataSources: message.enabledDataSources })
+        ws.send(JSON.stringify({ type: 'app-settings:settings', ...settings } satisfies ServerToClient))
+        // Toggling a kind takes effect immediately, not just on the next
+        // unrelated dashboard:update — see resyncAllRoomsEventSources.
+        resyncAllRoomsEventSources()
+        break
+      }
     }
   })
+})
+
+// Both genuinely process-wide (one DCS-BIOS connection for the whole app,
+// not per-room), so pushed proactively to every room's clients on change —
+// same "server pushes, client doesn't poll" pattern devices:sync already
+// uses — rather than requiring a client to ask.
+onDcsBiosStatusChange((status) => {
+  const payload: ServerToClient = { type: 'dcsbios:status', ...status }
+  for (const room of rooms.values()) broadcastToRoom(room, payload)
+})
+onDcsBiosStatsChange((stats) => {
+  const payload: ServerToClient = { type: 'dcsbios:stats', ...stats }
+  for (const room of rooms.values()) broadcastToRoom(room, payload)
 })
 
 httpServer.listen(SERVER_PORT, () => {

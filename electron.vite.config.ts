@@ -25,7 +25,20 @@ function cacheBustEntryScript(): Plugin {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        // The DCS-BIOS worker is a second, independently-loadable main-
+        // process entry point (spawned at runtime via worker_threads.Worker,
+        // not imported) — see src/main/workerHost.ts and
+        // src/main/dcsBios/connectionManager.ts, which resolve it by path
+        // via join(__dirname, 'dcsBiosWorker.js').
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+          dcsBiosWorker: resolve(__dirname, 'src/main/dcsBios/worker.ts')
+        }
+      }
+    }
   },
   preload: {
     plugins: [externalizeDepsPlugin()]

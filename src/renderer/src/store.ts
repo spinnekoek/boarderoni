@@ -1,7 +1,16 @@
 import { create } from 'zustand'
 import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN } from '@shared/constants'
 import { DEFAULT_DASHBOARD, type ClientToServer, type Dashboard, type DeviceInfo, type ServerToClient, type Widget } from '@shared/types'
+import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSettings, DcsBiosStatus, DcsBiosWorkerStats } from '@shared/dcsBiosTypes'
 import { getDeviceId, setLastDeckId, clearLastDeckId } from './id'
+
+// A field catalog fetch is either not yet requested (absent from the map),
+// in flight, resolved, or failed — EventsModal's field browser (see
+// components/EventsModal.tsx) renders a different state for each.
+export type DcsBiosFieldCatalogState = 'loading' | { error: string } | DcsBiosFieldCatalogEntry[]
+// Same idea, for a "Send DCS command" action's command browser (see
+// PropertiesPanel.tsx's SendDcsCommandActionEditor).
+export type DcsBiosCommandCatalogState = 'loading' | { error: string } | DcsBiosCommandCatalogEntry[]
 
 type Mode = 'edit' | 'view'
 
@@ -22,6 +31,36 @@ interface DashboardStore {
   // properties panel tab) — reset to 0 (Default) on every selection change.
   activeStateIndex: number
   devices: DeviceInfo[]
+  // DCS-BIOS event source support — all null/empty until first requested,
+  // fetched once app-wide and cached rather than per EventSource instance
+  // (see EventsModal.tsx). null means "not yet requested," distinct from
+  // an empty result.
+  dcsBiosAircraft: { id: string; name: string }[] | null
+  dcsBiosFieldCatalogs: Record<string, DcsBiosFieldCatalogState>
+  dcsBiosCommandCatalogs: Record<string, DcsBiosCommandCatalogState>
+  dcsBiosStatus: DcsBiosStatus | null
+  dcsBiosStats: DcsBiosWorkerStats | null
+  dcsBiosSettings: DcsBiosSettings | null
+  // Result of the most recent "Browse…"/inline validation call in the
+  // DCS-BIOS settings panel — transient UI feedback, not persisted.
+  dcsBiosDocsDirValidation: { docsDir: string; valid: boolean; aircraftCount: number } | null
+  dcsBiosPickedFolder: string | null
+  // Result of the most recent "Test" send from a Send DCS command action's
+  // editor (see PropertiesPanel.tsx) — transient UI feedback, not persisted.
+  dcsBiosSendCommandResult: { ok: boolean; error?: string } | null
+  // "Enabled data sources" gate (see appSettings.ts) — null until first
+  // requested. EventsModal's add-picker filters EVENT_SOURCE_TYPES by this.
+  enabledDataSources: string[] | null
+  requestDcsBiosAircraftList: () => void
+  requestDcsBiosFieldCatalog: (aircraft: string) => void
+  requestDcsBiosCommandCatalog: (aircraft: string) => void
+  sendDcsBiosCommand: (identifier: string, argument: string) => void
+  requestDcsBiosSettings: () => void
+  updateDcsBiosSettings: (settings: Partial<DcsBiosSettings>) => void
+  requestDcsBiosDocsDirValidation: (docsDir: string) => void
+  pickDcsBiosDocsFolder: () => void
+  requestAppSettings: () => void
+  updateEnabledDataSources: (enabledDataSources: string[]) => void
   connect: (mode: Mode, deckId: string) => void
   // Tears down the current connection and returns to the deck picker (the
   // "← Decks" button in edit mode, "Change deck" in the view-mode device
@@ -111,6 +150,58 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   selectedBlockId: null,
   activeStateIndex: 0,
   devices: [],
+  dcsBiosAircraft: null,
+  dcsBiosFieldCatalogs: {},
+  dcsBiosCommandCatalogs: {},
+  dcsBiosStatus: null,
+  dcsBiosStats: null,
+  dcsBiosSettings: null,
+  dcsBiosDocsDirValidation: null,
+  dcsBiosPickedFolder: null,
+  dcsBiosSendCommandResult: null,
+  enabledDataSources: null,
+
+  requestDcsBiosAircraftList: () => {
+    send({ type: 'dcsbios:list-aircraft' })
+  },
+
+  requestDcsBiosFieldCatalog: (aircraft) => {
+    set((s) => ({ dcsBiosFieldCatalogs: { ...s.dcsBiosFieldCatalogs, [aircraft]: 'loading' } }))
+    send({ type: 'dcsbios:field-catalog', aircraft })
+  },
+
+  requestDcsBiosCommandCatalog: (aircraft) => {
+    set((s) => ({ dcsBiosCommandCatalogs: { ...s.dcsBiosCommandCatalogs, [aircraft]: 'loading' } }))
+    send({ type: 'dcsbios:command-catalog', aircraft })
+  },
+
+  sendDcsBiosCommand: (identifier, argument) => {
+    send({ type: 'dcsbios:send-command', identifier, argument })
+  },
+
+  requestDcsBiosSettings: () => {
+    send({ type: 'dcsbios:get-settings' })
+  },
+
+  updateDcsBiosSettings: (settings) => {
+    send({ type: 'dcsbios:update-settings', settings })
+  },
+
+  requestDcsBiosDocsDirValidation: (docsDir) => {
+    send({ type: 'dcsbios:validate-docs-dir', docsDir })
+  },
+
+  pickDcsBiosDocsFolder: () => {
+    send({ type: 'dcsbios:pick-docs-folder' })
+  },
+
+  requestAppSettings: () => {
+    send({ type: 'app-settings:get' })
+  },
+
+  updateEnabledDataSources: (enabledDataSources) => {
+    send({ type: 'app-settings:update', enabledDataSources })
+  },
 
   connect: (mode, deckId) => {
     set({ mode, deckId })
@@ -153,6 +244,34 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set((s) => ({ errors: { ...s.errors, [message.widgetId]: message.message } }))
       } else if (message.type === 'devices:sync') {
         set({ devices: message.devices })
+      } else if (message.type === 'dcsbios:aircraft-list') {
+        set({ dcsBiosAircraft: message.aircraft })
+      } else if (message.type === 'dcsbios:field-catalog') {
+        set((s) => ({ dcsBiosFieldCatalogs: { ...s.dcsBiosFieldCatalogs, [message.aircraft]: message.fields } }))
+      } else if (message.type === 'dcsbios:field-catalog-error') {
+        set((s) => ({ dcsBiosFieldCatalogs: { ...s.dcsBiosFieldCatalogs, [message.aircraft]: { error: message.message } } }))
+      } else if (message.type === 'dcsbios:status') {
+        const { type: _type, ...status } = message
+        set({ dcsBiosStatus: status })
+      } else if (message.type === 'dcsbios:stats') {
+        const { type: _type, ...stats } = message
+        set({ dcsBiosStats: stats })
+      } else if (message.type === 'dcsbios:settings') {
+        const { type: _type, ...settings } = message
+        set({ dcsBiosSettings: settings })
+      } else if (message.type === 'dcsbios:docs-dir-validation') {
+        const { type: _type, ...validation } = message
+        set({ dcsBiosDocsDirValidation: validation })
+      } else if (message.type === 'dcsbios:docs-folder-picked') {
+        set({ dcsBiosPickedFolder: message.path })
+      } else if (message.type === 'dcsbios:command-catalog') {
+        set((s) => ({ dcsBiosCommandCatalogs: { ...s.dcsBiosCommandCatalogs, [message.aircraft]: message.commands } }))
+      } else if (message.type === 'dcsbios:command-catalog-error') {
+        set((s) => ({ dcsBiosCommandCatalogs: { ...s.dcsBiosCommandCatalogs, [message.aircraft]: { error: message.message } } }))
+      } else if (message.type === 'dcsbios:send-command-result') {
+        set({ dcsBiosSendCommandResult: { ok: message.ok, error: message.error } })
+      } else if (message.type === 'app-settings:settings') {
+        set({ enabledDataSources: message.enabledDataSources })
       }
     })
 

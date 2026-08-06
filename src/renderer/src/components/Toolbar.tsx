@@ -5,6 +5,7 @@ import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
 import { VariablesModal } from './VariablesModal'
 import { EventsModal } from './EventsModal'
+import { SettingsModal } from './SettingsModal'
 
 export function Toolbar(): React.JSX.Element {
   const [variablesOpen, setVariablesOpen] = useState(false)
@@ -15,6 +16,12 @@ export function Toolbar(): React.JSX.Element {
   const setGridSize = useEditorSettings((s) => s.setGridSize)
   const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
   const setSelectedDeviceId = useEditorSettings((s) => s.setSelectedDeviceId)
+  // Reads/writes the store, not local useState, so components other than
+  // this toolbar (e.g. EventsModal's DCS-BIOS status banner) can also open
+  // this modal, optionally focused on one data source's panel.
+  const settingsOpen = useEditorSettings((s) => s.settingsModalOpen)
+  const openSettings = useEditorSettings((s) => s.openSettings)
+  const closeSettings = useEditorSettings((s) => s.closeSettings)
 
   const devices = useDashboardStore((s) => s.devices)
 
@@ -70,8 +77,12 @@ export function Toolbar(): React.JSX.Element {
       <button type="button" className="toolbar__button" onClick={() => setEventsOpen(true)}>
         Events
       </button>
+      <button type="button" className="toolbar__button" onClick={() => openSettings()}>
+        Settings
+      </button>
       {variablesOpen && <VariablesModal onClose={() => setVariablesOpen(false)} />}
       {eventsOpen && <EventsModal onClose={() => setEventsOpen(false)} />}
+      {settingsOpen && <SettingsModal onClose={closeSettings} />}
     </div>
   )
 }

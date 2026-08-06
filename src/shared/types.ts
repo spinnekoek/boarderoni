@@ -1,3 +1,12 @@
+import type {
+  DcsBiosFieldCatalogEntry,
+  DcsBiosCommandCatalogEntry,
+  DcsBiosInputInterface,
+  DcsBiosSettings,
+  DcsBiosStatus,
+  DcsBiosWorkerStats
+} from './dcsBiosTypes'
+
 export interface KeypressAction {
   kind: 'keypress'
   keys: string[]
@@ -15,7 +24,31 @@ export interface UpdateStateAction {
   code: string
 }
 
-export type WidgetAction = KeypressAction | UpdateStateAction
+// Only offered in the properties panel while 'dcsbios' is enabled in
+// Settings (see appSettings.ts) — or if a widget already has one configured,
+// so disabling the kind later doesn't silently break existing buttons.
+// `aircraft` scopes which aircraft's command catalog this was picked from
+// (independent of any EventSource — a button isn't tied to one), so
+// re-opening the editor can re-fetch/highlight the same command.
+// `interface` is carried alongside `identifier` since the same identifier
+// can expose more than one interface (e.g. a switch commonly has both
+// `action`/TOGGLE and `set_state`/an explicit position) — each is a wholly
+// separate selectable command with its own argument shape.
+// `argument` is the static value sent unless `argumentExpr` is set, in which
+// case that's evaluated (see shared/expr.ts's tryEvaluateExpression, same
+// mechanism as UpdateStateAction.code) with `variables` in scope and the
+// result sent instead — same fx-toggle pattern as an EventSourceMapping's
+// own `expr`.
+export interface SendDcsCommandAction {
+  kind: 'send-dcs-command'
+  aircraft: string
+  identifier: string
+  interface: DcsBiosInputInterface
+  argument: string
+  argumentExpr?: string
+}
+
+export type WidgetAction = KeypressAction | UpdateStateAction | SendDcsCommandAction
 
 // x/y/w/h are absolute CSS pixels on the dashboard canvas — not grid units.
 // A widget is always rendered at exactly this pixel size on every client, no
@@ -322,11 +355,33 @@ export type ClientToServer =
   | { type: 'background-image:upload'; dataUrl: string }
   | { type: 'background-image:clear' }
   | { type: 'device:rename'; deviceId: string; name: string }
+  | { type: 'dcsbios:list-aircraft' }
+  | { type: 'dcsbios:field-catalog'; aircraft: string }
+  | { type: 'dcsbios:get-settings' }
+  | { type: 'dcsbios:update-settings'; settings: Partial<DcsBiosSettings> }
+  | { type: 'dcsbios:validate-docs-dir'; docsDir: string }
+  | { type: 'dcsbios:pick-docs-folder' }
+  | { type: 'dcsbios:command-catalog'; aircraft: string }
+  | { type: 'dcsbios:send-command'; identifier: string; argument: string }
+  | { type: 'app-settings:get' }
+  | { type: 'app-settings:update'; enabledDataSources: string[] }
 
 export type ServerToClient =
   | { type: 'dashboard:sync'; dashboard: Dashboard }
   | { type: 'action:error'; widgetId: string; message: string }
   | { type: 'devices:sync'; devices: DeviceInfo[] }
+  | { type: 'dcsbios:aircraft-list'; aircraft: { id: string; name: string }[] }
+  | { type: 'dcsbios:field-catalog'; aircraft: string; fields: DcsBiosFieldCatalogEntry[] }
+  | { type: 'dcsbios:field-catalog-error'; aircraft: string; message: string }
+  | ({ type: 'dcsbios:status' } & DcsBiosStatus)
+  | ({ type: 'dcsbios:stats' } & DcsBiosWorkerStats)
+  | ({ type: 'dcsbios:settings' } & DcsBiosSettings)
+  | { type: 'dcsbios:docs-dir-validation'; docsDir: string; valid: boolean; aircraftCount: number }
+  | { type: 'dcsbios:docs-folder-picked'; path: string | null }
+  | { type: 'dcsbios:command-catalog'; aircraft: string; commands: DcsBiosCommandCatalogEntry[] }
+  | { type: 'dcsbios:command-catalog-error'; aircraft: string; message: string }
+  | { type: 'dcsbios:send-command-result'; ok: boolean; error?: string }
+  | { type: 'app-settings:settings'; enabledDataSources: string[] }
 
 export const DEFAULT_DASHBOARD: Dashboard = {
   id: 'default',

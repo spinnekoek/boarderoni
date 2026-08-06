@@ -1,4 +1,5 @@
 import type { EventSource } from '../shared/types'
+import { subscribeAircraft } from './dcsBios/connectionManager'
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const MONTH_NAMES = [
@@ -73,6 +74,20 @@ export const EVENT_SOURCE_PRODUCERS: Record<string, EventSourceProducer> = {
       tick()
       const intervalId = setInterval(tick, 1000)
       return () => clearInterval(intervalId)
+    }
+  },
+  // Thin adapter — all batching/throttling already happened in the DCS-BIOS
+  // worker (fixed ~20Hz ceiling) and in connectionManager.subscribeAircraft
+  // (this instance's own configurable rate), so this just plugs straight
+  // into the existing per-field-diffing emit path in main/index.ts. Both
+  // config.aircraft and config.updateHz changes already restart this
+  // producer for free via syncEventSources' existing signature diffing.
+  dcsbios: {
+    start(instance, emit) {
+      const aircraft = typeof instance.config?.aircraft === 'string' ? instance.config.aircraft : ''
+      if (!aircraft) return () => {}
+      const updateHz = typeof instance.config?.updateHz === 'number' ? instance.config.updateHz : undefined
+      return subscribeAircraft(aircraft, emit, { updateHz })
     }
   }
 }

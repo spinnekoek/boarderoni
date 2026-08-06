@@ -13,6 +13,13 @@ export interface EventSourceTypeMeta {
   kind: string
   label: string
   fields: EventSourceField[]
+  // True when this kind's fields aren't statically known (see 'dcsbios') —
+  // EventsModal.tsx checks this to render a dynamic aircraft/field-browser
+  // UI instead of the generic static-list field picker. An explicit flag
+  // rather than inferring from `fields.length === 0`, since an empty array
+  // is ambiguous (could just mean "not configured yet" for a still-static
+  // kind added later).
+  dynamicFields?: boolean
 }
 
 // Computed in the main process's local timezone (plain `Date`) — same
@@ -40,6 +47,18 @@ export const EVENT_SOURCE_TYPES: EventSourceTypeMeta[] = [
       { key: 'unixMs', label: 'Unix timestamp (ms)' },
       { key: 'unixSeconds', label: 'Unix timestamp (s)' }
     ]
+  },
+  // Fields are dynamic — depend on what's installed on this machine and
+  // which aircraft module is picked (see EventsModal.tsx's field browser
+  // and main/dcsBios/*). This static entry only exists so the kind shows up
+  // in the "add event source" picker; the main-process producer lives in
+  // main/eventSourceProducers.ts, keyed by config.aircraft, not by any
+  // field list here.
+  {
+    kind: 'dcsbios',
+    label: 'DCS-BIOS',
+    fields: [],
+    dynamicFields: true
   }
 ]
 
