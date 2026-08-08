@@ -2,7 +2,7 @@ import { useDashboardStore } from '../store'
 import { DEFAULT_FONT_ID } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR } from '@shared/color'
 import { nextId } from '../id'
-import type { AdjusterWidget, ButtonWidget, GaugeWidget, MorphButtonWidget } from '@shared/types'
+import type { AdjusterWidget, ButtonWidget, DialSwitchWidget, EncoderWidget, GaugeWidget, MorphButtonWidget, RockerSwitchWidget } from '@shared/types'
 
 export function Palette(): React.JSX.Element {
   const addWidget = useDashboardStore((s) => s.addWidget)
@@ -16,7 +16,7 @@ export function Palette(): React.JSX.Element {
       y: 40,
       w: 160,
       h: 80,
-      action: { kind: 'keypress', keys: [] },
+      events: { press: [], release: [] },
       statesEnabled: false,
       states: [
         {
@@ -39,7 +39,7 @@ export function Palette(): React.JSX.Element {
       cellW: 160,
       cellH: 80,
       blocks: [{ id: nextId(), col: 0, row: 0, perState: {} }],
-      action: { kind: 'keypress', keys: [] },
+      events: { press: [], release: [] },
       statesEnabled: false,
       states: [
         {
@@ -86,10 +86,77 @@ export function Palette(): React.JSX.Element {
       orientation: 'vertical',
       min: 0,
       max: 100,
-      action: { kind: 'keypress', keys: [] },
+      events: { press: [], release: [], move: [] },
       fill: { color: '#5b8def' },
       track: { color: DEFAULT_WIDGET_COLOR },
       labels: []
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
+  function handleAddEncoder(): void {
+    const widget: EncoderWidget = {
+      id: nextId(),
+      type: 'encoder',
+      x: 40,
+      y: 40,
+      w: 80,
+      h: 80,
+      stepDegrees: 15,
+      events: { increment: [], decrement: [], press: [], release: [] },
+      fill: { color: '#5b8def' },
+      track: { color: DEFAULT_WIDGET_COLOR },
+      labels: []
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
+  function defaultPositions(): RockerSwitchWidget['positions'] {
+    return [
+      {
+        id: nextId(),
+        name: 'Position 1',
+        labels: [{ id: nextId(), text: '1', fontFamily: DEFAULT_FONT_ID, align: 'center', verticalAlign: 'center' }],
+        onSelect: []
+      },
+      {
+        id: nextId(),
+        name: 'Position 2',
+        labels: [{ id: nextId(), text: '2', fontFamily: DEFAULT_FONT_ID, align: 'center', verticalAlign: 'center' }],
+        onSelect: []
+      }
+    ]
+  }
+
+  function handleAddRockerSwitch(): void {
+    const widget: RockerSwitchWidget = {
+      id: nextId(),
+      type: 'switch-rocker',
+      x: 40,
+      y: 40,
+      w: 60,
+      h: 160,
+      orientation: 'vertical',
+      positions: defaultPositions(),
+      track: { color: DEFAULT_WIDGET_COLOR }
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
+  function handleAddDialSwitch(): void {
+    const widget: DialSwitchWidget = {
+      id: nextId(),
+      type: 'switch-dial',
+      x: 40,
+      y: 40,
+      w: 120,
+      h: 120,
+      positions: defaultPositions(),
+      track: { color: DEFAULT_WIDGET_COLOR },
+      fill: { color: '#5b8def' }
     }
     addWidget(widget)
     selectWidget(widget.id)
@@ -110,13 +177,28 @@ export function Palette(): React.JSX.Element {
       <button className="palette__item" onClick={handleAddAdjuster}>
         + Adjuster
       </button>
+      <button className="palette__item" onClick={handleAddEncoder}>
+        + Encoder
+      </button>
+      <button className="palette__item" onClick={handleAddRockerSwitch}>
+        + Rocker switch
+      </button>
+      <button className="palette__item" onClick={handleAddDialSwitch}>
+        + Dial switch
+      </button>
       <p className="palette__hint">Click a widget on the canvas to edit its label, keybind, and position in the properties panel.</p>
       <p className="palette__hint">
         Morph buttons: select one, then use the + handles on its edges to extend it into other base blocks — connected blocks act as
         one button. Hold Ctrl to remove instead.
       </p>
       <p className="palette__hint">
-        Gauges display a variable; Adjusters (slider/knob) drag to set one — see its Action field in Properties, same as a button's.
+        Gauges display a variable; Adjusters (slider/knob) drag to set one — see its Actions section in Properties for Press/Release/Move.
+      </p>
+      <p className="palette__hint">
+        Encoders spin (drag in a circle) to fire Turn CW/CCW steps — good for DCS-BIOS INC/DEC knobs with no fixed range. Rocker/Dial
+        switches have 2+ tappable positions, each with its own action — good for DCS-BIOS set-position controls (gear, mode
+        selectors, ...). Which position looks active is local to each device unless you wire an "Active position" expression to a
+        shared variable.
       </p>
     </aside>
   )

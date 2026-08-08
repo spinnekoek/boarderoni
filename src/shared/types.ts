@@ -10,6 +10,14 @@ import type {
 export interface KeypressAction {
   kind: 'keypress'
   keys: string[]
+  // 'press' (default when omitted): atomic press-then-release — the only
+  // behavior that existed before this field, still what every existing
+  // widget does. 'down'/'up' press or release only, with nothing pairing
+  // them automatically — pairing a 'down' step with a later 'up' step
+  // (typically with a DelayStep between them, see SequenceStep) is how an
+  // "advanced" held-key sequence is built, using the same generic sequence
+  // mechanism as any other multi-step action rather than a separate editor.
+  mode?: 'press' | 'down' | 'up'
 }
 
 // JS function body, evaluated (see shared/expr.ts) with `states` — the
@@ -49,6 +57,48 @@ export interface SendDcsCommandAction {
 }
 
 export type WidgetAction = KeypressAction | UpdateStateAction | SendDcsCommandAction
+
+// A pause between two steps in an event's sequence (see SequenceStep) —
+// not a field on the following action step, so it can be added/removed/
+// reordered as its own list entry, independent of whatever action (if any)
+// comes after it.
+export interface DelayStep {
+  kind: 'delay'
+  id: string
+  delayMs: number
+}
+
+// One WidgetAction embedded in an event's sequence. `id` is independent of
+// anything inside `action` — stable list identity for the properties
+// panel's reorder/delete, same convention as WidgetLabel.id/WidgetState.id.
+export interface ActionStep {
+  kind: 'action'
+  id: string
+  action: WidgetAction
+}
+
+// One interaction event's full sequence is SequenceStep[], run in array
+// order by runSequence (main/index.ts), aborting at the first step that
+// throws. Deliberately a flat, explicit, timestamp-free list — a future
+// macro recorder can just push {kind:'action',...}/{kind:'delay',...}
+// entries onto this same array as it records, with no separate data model
+// to reconcile.
+export type SequenceStep = DelayStep | ActionStep
+
+// Which interaction moments a widget can attach a sequence to. Only
+// AdjusterWidget uses 'move' (continuous, while dragging); only EncoderWidget
+// uses 'increment'/'decrement' (one per completed step of rotation, see
+// EncoderWidget below). 'select' is a switch widget's (RockerSwitchWidget/
+// DialSwitchWidget) own trigger moment, but deliberately NOT resolved through
+// eventKindsFor/getEventSteps below — unlike every other kind here, which
+// position's sequence runs depends on which position was picked, so it's
+// carried as the 'action:trigger' message's own `value` (the target
+// position's index) and dispatched specially in triggerAction (main/index.ts)
+// instead. It's still a member of this union so that message's `event` field
+// can legally carry it. See eventKindsFor/getEventSteps in
+// shared/widgetEvents.ts, the single source of truth for which of the rest
+// apply to which widget type.
+export type WidgetEventKind = 'press' | 'release' | 'move' | 'increment' | 'decrement' | 'select'
 
 // x/y/w/h are absolute CSS pixels on the dashboard canvas — not grid units.
 // A widget is always rendered at exactly this pixel size on every client, no
@@ -160,7 +210,10 @@ export interface ButtonWidget {
   y: number
   w: number
   h: number
-  action: WidgetAction
+  // Two interaction moments a button can fire a sequence from — press
+  // (pointerdown) and release (pointerup/cancel/leave). See SequenceStep;
+  // either can be empty (no steps configured for that moment).
+  events: { press: SequenceStep[]; release: SequenceStep[] }
   // Off (default): only "states[0]" is editable; a lightened version of its
   // color stands in for "clicked" automatically. On: every state is exposed
   // and independently configurable in the properties panel.
@@ -226,7 +279,9 @@ export interface MorphButtonWidget {
   cellW: number
   cellH: number
   blocks: MorphBlock[]
-  action: WidgetAction
+  // Same press/release event model as ButtonWidget — shared by the whole
+  // fused-block widget, one pair of sequences for all blocks.
+  events: { press: SequenceStep[]; release: SequenceStep[] }
   statesEnabled?: boolean
   states: WidgetState[]
   activeStateExpr?: string
@@ -275,13 +330,13 @@ export interface GaugeWidget {
 }
 
 // A drag-to-set-a-value control — a slider (linear drag) or knob (rotary
-// drag). Reuses the exact same `action: WidgetAction` shape/editor as
-// ButtonWidget (keypress/update-state/send-dcs-command are all equally
-// available — nothing here is specific to any one data source), just with
-// the live drag position additionally exposed as `variables.$value` while
-// dragging (see evaluateMappingExpression in shared/expr.ts, the same
-// convention an EventSourceMapping's own `expr` already uses) for whichever
-// expression field the chosen action kind reads.
+// drag). Reuses the exact same WidgetAction kinds/editor as ButtonWidget
+// (keypress/update-state/send-dcs-command are all equally available —
+// nothing here is specific to any one data source), just with the live drag
+// position additionally exposed as `variables.$value` while dragging (see
+// evaluateMappingExpression in shared/expr.ts, the same convention an
+// EventSourceMapping's own `expr` already uses) for whichever expression
+// field the chosen action kind reads.
 export interface AdjusterWidget {
   id: string
   type: 'adjuster'
@@ -299,7 +354,11 @@ export interface AdjusterWidget {
   // reflect a variable back into the visual) — same mechanism as Gauge's
   // valueExpr. Falls back to `min` if unset/unresolved.
   valueExpr?: string
-  action: WidgetAction
+  // Same press/release model as ButtonWidget, plus 'move' — fires
+  // continuously (throttled) while dragging, with the live position exposed
+  // as `variables.$value` same as press/release get for their own moment
+  // (initial touch position for press, final settled position for release).
+  events: { press: SequenceStep[]; release: SequenceStep[]; move: SequenceStep[] }
   fill: ColorAppearance
   track: ColorAppearance
   labels: WidgetLabel[]
@@ -319,17 +378,178 @@ export interface AdjusterWidget {
   zIndex?: number
 }
 
-export type Widget = ButtonWidget | MorphButtonWidget | GaugeWidget | AdjusterWidget
+// A relative rotary control for DCS-BIOS's `fixed_step` interface (INC/DEC)
+// — radio frequency knobs, altimeter pressure, radar range/gain, and any
+// other control with no fixed endpoint. Unlike AdjusterWidget, this owns no
+// absolute position: dragging in a circular motion (see useEncoderDrag.ts)
+// accumulates rotation and fires `increment`/`decrement` once per
+// `stepDegrees` crossed, exactly mirroring how a real encoder just reports
+// "turned one detent" rather than "now at X." A tap that never crosses the
+// threshold instead fires `press`/`release` — many real encoders (CDU data
+// knob, HSI course knob) are also push-buttons.
+export interface EncoderWidget {
+  id: string
+  type: 'encoder'
+  x: number
+  y: number
+  w: number
+  h: number
+  // Degrees of accumulated drag rotation that fire one increment/decrement
+  // step — smaller is more sensitive. Default 15 (see useEncoderDrag.ts).
+  stepDegrees?: number
+  // Rest-position fallback for the grip marker while not being dragged —
+  // same mechanism as AdjusterWidget's own valueExpr, just returning degrees
+  // (0 = up, clockwise) instead of a min..max value, since this widget has no
+  // fixed range of its own. Typical use: pair with an increment/decrement
+  // action that nudges a Variable by stepDegrees, so the grip visually
+  // tracks it. Falls back to 0 if unset/unresolved.
+  valueExpr?: string
+  events: { increment: SequenceStep[]; decrement: SequenceStep[]; press: SequenceStep[]; release: SequenceStep[] }
+  fill: ColorAppearance // grip/marker color
+  track: ColorAppearance // dial face color
+  labels: WidgetLabel[]
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+  zIndex?: number
+}
+
+// One selectable position of a switch widget — its own look and its own
+// command, since (unlike a plain button's WidgetState) each position is a
+// real, independently-triggerable target, not just a visual variant. `id` is
+// stable list identity for the properties panel's reorder/delete, same
+// convention as WidgetState.id.
+export interface SwitchPosition extends ColorAppearance {
+  id: string
+  name: string
+  labels: WidgetLabel[]
+  // Runs once, server-side, when this position is tapped (see triggerAction's
+  // switch branch in main/index.ts) — same SequenceStep[] mechanism as a
+  // button's press/release, just keyed by position instead of by event kind.
+  onSelect: SequenceStep[]
+}
+
+// Shared by RockerSwitchWidget/DialSwitchWidget below — everything about a
+// discrete N-position switch (2+) for DCS-BIOS's `set_state` interface EXCEPT
+// its visual shape, which the two concrete widget types (a segmented rocker
+// vs. a labeled rotary dial are different enough widgets, not style variants
+// of one — see their own comments) provide independently.
+//
+// Unlike ButtonWidget's states, each SwitchPosition is directly selectable
+// (not just a visual look). Tapping one always fires its own onSelect
+// sequence server-side — but which position then LOOKS active is otherwise
+// deliberately client-local, not persisted/broadcast dashboard state: a
+// physical switch on one tablet shouldn't visually flip on someone else's
+// phone just because they share a deck, unless the user explicitly wires
+// that up. `activePositionExpr`, when set, names the active position by
+// `name` — same convention as ButtonWidget.activeStateExpr — evaluated
+// against the (globally-synced) Variables, so a switch only shows the same
+// position everywhere when its position is deliberately derived from shared
+// state. Unset (the default), each connected client just remembers whichever
+// position it last tapped, locally (see useSwitchPosition.ts) — exactly like
+// a real switch's position is a property of the physical panel in front of
+// you, not something every other panel in the cockpit shares. What's
+// deliberately still NOT here: which position is "current" — see above.
+interface SwitchWidgetBase {
+  positions: SwitchPosition[] // at least 2, in throw/rotation order
+  activePositionExpr?: string
+  zIndex?: number
+}
+
+// A segmented rocker/toggle switch — gear lever, master arm, band switch.
+// Positions render as adjoining segments stacked along `orientation`.
+export interface RockerSwitchWidget extends SwitchWidgetBase {
+  id: string
+  type: 'switch-rocker'
+  x: number
+  y: number
+  w: number
+  h: number
+  orientation?: 'horizontal' | 'vertical' // default 'vertical'
+  track: ColorAppearance // base container behind the segments
+  radiusTopLeft?: number
+  radiusTopRight?: number
+  radiusBottomLeft?: number
+  radiusBottomRight?: number
+  borderWidthTop?: number
+  borderWidthRight?: number
+  borderWidthBottom?: number
+  borderWidthLeft?: number
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+}
+
+// A rotary dial switch — HSI/ADI mode selector, ignition/mag switch.
+// Positions render as labeled detents around startAngle..endAngle, with a
+// needle pointing at whichever one is active.
+export interface DialSwitchWidget extends SwitchWidgetBase {
+  id: string
+  type: 'switch-dial'
+  x: number
+  y: number
+  w: number
+  h: number
+  startAngle?: number // degrees, default 135
+  endAngle?: number // degrees, default 405
+  // 'tap' (default): tap a detent directly to select it. 'drag': press
+  // anywhere on the widget and drag in the direction of the position you
+  // want (can go past the widget's own bounds) — the needle snaps live to
+  // whichever position is nearest the drag angle so you can see what
+  // releasing would select, same as turning a real rotary switch. Both
+  // still fire the same 'select' action:trigger on commit — see
+  // useDialSwitchDrag.ts and useSwitchPosition.ts.
+  interactionMode?: 'tap' | 'drag'
+  track: ColorAppearance // dial face
+  fill: ColorAppearance // needle/pointer color
+  // Where each position's label sits relative to its detent dot. Unset (the
+  // default) places it radially outward along that detent's own angle — just
+  // past the dial's rim, on whichever side that particular detent is on, so
+  // every label reads correctly around the ring with zero configuration.
+  // Any fixed direction instead pins every label to that same side
+  // regardless of angle (matching a single earlier "always below" layout,
+  // generalized to 4 choices) — useful if radial placement collides with
+  // something else on the dashboard.
+  labelAnchor?: 'top' | 'bottom' | 'left' | 'right'
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+}
+
+export type Widget =
+  | ButtonWidget
+  | MorphButtonWidget
+  | GaugeWidget
+  | AdjusterWidget
+  | EncoderWidget
+  | RockerSwitchWidget
+  | DialSwitchWidget
 
 // A plain draggable/resizable x/y/w/h rectangle in the editor (unlike
 // MorphButtonWidget's cellW/cellH+blocks shape) — shared prop type for
 // CanvasWidget's generalized drag/resize wrapper.
-export type BoxWidget = ButtonWidget | GaugeWidget | AdjusterWidget
+export type BoxWidget = ButtonWidget | GaugeWidget | AdjusterWidget | EncoderWidget | RockerSwitchWidget | DialSwitchWidget
 
 // Widgets driven by the WidgetState/statesEnabled/activeStateExpr machinery
 // — used to narrow getEffectiveStates now that Widget includes types
 // without those fields.
 export type StatefulWidget = ButtonWidget | MorphButtonWidget
+
+// Widgets that can fire an event's SequenceStep[] — used to narrow Widget
+// for triggerAction, eventKindsFor/getEventSteps (shared/widgetEvents.ts),
+// actionTitle, and the properties panel's event-sequence editor. GaugeWidget
+// is deliberately excluded — it stays fully actionless. The switch widgets
+// are ALSO excluded despite being triggerable — their sequences are keyed by
+// position, not by a static per-type set of event kinds, so they can't be
+// resolved through getEventSteps's (widget, event) -> steps shape; they're
+// handled as their own branch in triggerAction instead. Mirrors StatefulWidget's
+// own narrowing convention immediately above.
+export type EventfulWidget = ButtonWidget | MorphButtonWidget | AdjusterWidget | EncoderWidget
+
+// The two switch widget types, narrowed together wherever code (triggerAction,
+// the properties panel's shared positions editor, ...) treats them
+// identically via SwitchWidgetBase's common fields.
+export type SwitchWidget = RockerSwitchWidget | DialSwitchWidget
 
 // 'cover'/'contain'/'stretch' scale the image proportionally or not, 'tile'
 // repeats it at native size, 'none' places it at native size unscaled — the
@@ -461,20 +681,23 @@ export type ClientToServer =
       deviceId?: string
     }
   | { type: 'dashboard:update'; dashboard: Dashboard }
+  // event selects which of the widget's events[...] sequences to run (see
+  // getEventSteps in shared/widgetEvents.ts) — required, not optional: this
+  // app's editor/view clients and server always ship from the same build,
+  // so there's no legacy-client wire compatibility to preserve here.
   // value is set only while an AdjusterWidget is being dragged — the live
-  // position, exposed as `variables.$value` when the widget's action is
-  // evaluated (see triggerAction in main/index.ts). Absent for a plain
-  // button/morph click.
+  // position, exposed as `variables.$value` when a sequence step is
+  // evaluated (see triggerAction/runSequence in main/index.ts). Absent for a
+  // plain button/morph press or release.
   // final is false for every in-flight drag tick (useAdjusterDrag's
-  // rAF-throttled sends) and true for a plain click or the drag's own
-  // pointer-up — see runUpdateState's immediate/debounced save split, which
-  // this drives: an in-flight tick's variable update still broadcasts live
-  // but its disk save is debounced rather than synchronous, the same way an
-  // event-source tick's already is, so a fast drag isn't doing a blocking
-  // disk write on every single frame. Omitted (rather than defaulted to
-  // false) is treated the same as true, so older clients/messages without it
-  // keep the old always-immediate behavior.
-  | { type: 'action:trigger'; widgetId: string; value?: number; final?: boolean }
+  // rAF-throttled 'move' sends) and true for a press/release event or the
+  // drag's own final 'move' tick — see runUpdateState's immediate/debounced
+  // save split, which this drives: an in-flight tick's variable update
+  // still broadcasts live but its disk save is debounced rather than
+  // synchronous, the same way an event-source tick's already is, so a fast
+  // drag isn't doing a blocking disk write on every single frame. Omitted
+  // (rather than defaulted to false) is treated the same as true.
+  | { type: 'action:trigger'; widgetId: string; event: WidgetEventKind; value?: number; final?: boolean }
   | { type: 'background-image:upload'; dataUrl: string }
   | { type: 'background-image:clear' }
   | { type: 'device:rename'; deviceId: string; name: string }
@@ -500,7 +723,11 @@ export type ServerToClient =
   // devices/background image, which don't change here and would otherwise
   // get re-serialized and re-diffed on every single tick for no reason.
   | { type: 'variables:sync'; variables: Variable[] }
-  | { type: 'action:error'; widgetId: string; message: string }
+  // detail is only present when the failure happened mid-sequence (a
+  // DelayStep/ActionStep threw inside runSequence) — omitted (not a
+  // sentinel value) for a pre-sequence error like "Widget not found" or
+  // "cannot fire this event", which has no step context.
+  | { type: 'action:error'; widgetId: string; message: string; detail?: { event: WidgetEventKind; stepIndex: number; stepKind: SequenceStep['kind'] } }
   | { type: 'devices:sync'; devices: DeviceInfo[] }
   | { type: 'dcsbios:aircraft-list'; aircraft: { id: string; name: string }[] }
   | { type: 'dcsbios:field-catalog'; aircraft: string; fields: DcsBiosFieldCatalogEntry[] }

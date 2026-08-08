@@ -5,6 +5,10 @@ import { useWidgetDrag } from '../useWidgetDrag'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
 import { GaugeWidgetContent } from './widgets/GaugeWidget'
 import { AdjusterWidgetContent } from './widgets/AdjusterWidget'
+import { EncoderWidgetContent } from './widgets/EncoderWidget'
+import { RockerSwitchWidgetContent } from './widgets/RockerSwitchWidget'
+import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
+import { resolveActivePositionIndex } from '@shared/switchPosition'
 import type { VariableMap } from '@shared/expr'
 import type { BoxWidget } from '@shared/types'
 
@@ -103,6 +107,23 @@ export function CanvasWidget({
       )}
       {widget.type === 'gauge' && <GaugeWidgetContent widget={widget} variables={variables} />}
       {widget.type === 'adjuster' && <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} />}
+      {widget.type === 'encoder' && <EncoderWidgetContent widget={widget} variables={variables} interactive={false} />}
+      {widget.type === 'switch-rocker' && (
+        <RockerSwitchWidgetContent
+          widget={widget}
+          variables={variables}
+          interactive={false}
+          activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? 0}
+        />
+      )}
+      {widget.type === 'switch-dial' && (
+        <DialSwitchWidgetContent
+          widget={widget}
+          variables={variables}
+          interactive={false}
+          activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? 0}
+        />
+      )}
       {resizing && (
         <div className="canvas-widget__size-label" style={{ transform: `scale(${1 / zoom})` }}>
           {Math.round(widget.w)} × {Math.round(widget.h)}

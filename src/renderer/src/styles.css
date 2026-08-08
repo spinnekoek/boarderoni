@@ -499,6 +499,139 @@ button.deck-button:focus-visible {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
+.deck-encoder {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: grab;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.deck-encoder--static {
+  cursor: default;
+}
+
+.deck-encoder__dial {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.deck-rocker-switch {
+  position: absolute;
+  inset: 0;
+}
+
+.deck-rocker-switch--static .deck-rocker-switch__segment {
+  cursor: default;
+}
+
+.deck-rocker-switch__body {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.deck-rocker-switch__segment {
+  position: relative;
+  flex: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: filter 80ms ease;
+}
+
+.deck-rocker-switch__body--vertical .deck-rocker-switch__segment + .deck-rocker-switch__segment {
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+}
+
+.deck-rocker-switch__body--horizontal .deck-rocker-switch__segment + .deck-rocker-switch__segment {
+  border-left: 1px solid rgba(0, 0, 0, 0.35);
+}
+
+.deck-rocker-switch__segment--active {
+  filter: brightness(1.35);
+}
+
+.deck-dial-switch {
+  position: absolute;
+  inset: 0;
+}
+
+.deck-dial-switch--static .deck-dial-switch__detent,
+.deck-dial-switch--static .deck-dial-switch__detent-label {
+  cursor: default;
+}
+
+/* Drag interaction mode (see useDialSwitchDrag.ts) — the whole widget is one
+   drag surface, not a set of individually-tappable detents, so it needs the
+   same "don't let the browser turn this into a scroll/pan gesture" treatment
+   AdjusterWidget/EncoderWidget already use. The cursor override on the
+   detents/labels below keeps the whole surface reading as one grabbable
+   thing — without it, hovering exactly over a 10px dot would locally show
+   the tap-mode "pointer" cursor those elements set for themselves. */
+.deck-dial-switch--drag {
+  touch-action: none;
+  cursor: grab;
+}
+
+.deck-dial-switch--drag .deck-dial-switch__detent,
+.deck-dial-switch--drag .deck-dial-switch__detent-label {
+  cursor: grab;
+}
+
+.deck-dial-switch__dial {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.deck-dial-switch__detent {
+  position: absolute;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.deck-dial-switch__detent--active {
+  filter: brightness(1.35);
+}
+
+.deck-dial-switch__detent-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 60px;
+  height: 22px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The shared label span (see .deck-button__label above, and labels.tsx)
+   normally fills its container via position:absolute + inset:0 — for an
+   absolutely-positioned element with width:auto, that derives the used width
+   from an equation involving `padding` (left+padding+width+padding+right =
+   container width). That's fine for a button/gauge/adjuster's own box, but
+   this wrapper's box is small enough that a large `padding` value pushed the
+   equation negative, which past a threshold made the browser's over-
+   constraint resolution visibly drift the label instead of just centering
+   it. Overriding to a plain fixed size (matching the wrapper above) with
+   box-sizing:border-box sidesteps that equation entirely — padding is
+   subtracted from the content area of an already-fixed box instead of being
+   solved for, so it can never push the box's own size/position around, no
+   matter how large — while still leaving real room for padding/align (both
+   inherited from the base rule below) to do something visible. */
+.deck-dial-switch__detent-label .deck-button__label {
+  position: static;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
 .deck-morph {
   position: relative;
   width: 100%;
@@ -566,6 +699,63 @@ button.deck-morph-cell:focus-visible {
   pointer-events: none;
 }
 
+.toast-stack {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  width: min(90%, 420px);
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: toast-in 150ms ease-out;
+}
+
+.toast--error {
+  background: #3a1f22;
+  border: 1px solid #6b2b2b;
+  color: #f0d8d8;
+}
+
+.toast__title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.toast__detail {
+  font-size: 11px;
+  color: #e2b0b0;
+  margin-bottom: 4px;
+}
+
+.toast__message {
+  font-size: 12px;
+  color: #f0d8d8;
+  word-break: break-word;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .properties {
   position: relative;
   flex-shrink: 0;
@@ -595,6 +785,13 @@ button.deck-morph-cell:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #9098a8;
+  margin: 0 0 4px;
+}
+
+.properties__widget-type {
+  font-size: 15px;
+  font-weight: 600;
+  color: #e8e8ea;
   margin: 0 0 12px;
 }
 
@@ -759,6 +956,9 @@ button.deck-morph-cell:focus-visible {
 }
 
 .color-picker-button__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 1;
   min-width: 0;
   height: 30px;
@@ -1166,18 +1366,87 @@ button.deck-morph-cell:focus-visible {
   cursor: pointer;
 }
 
+/* A nicer boolean control than a native checkbox for a setting that flips
+   a whole section's worth of fields on/off (e.g. "Enable states") — same
+   idea as the native input, just with a track+thumb drawn from the
+   adjacent <span>, toggled via the sibling-selector on :checked below. */
+.properties__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #e8e8ea;
+  margin-bottom: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.properties__toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.properties__toggle-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: #14161b;
+  border: 1px solid #3a3f4a;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.properties__toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #9098a8;
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease;
+}
+
+.properties__toggle input:checked + .properties__toggle-track {
+  background: rgba(91, 141, 239, 0.2);
+  border-color: #5b8def;
+}
+
+.properties__toggle input:checked + .properties__toggle-track::after {
+  transform: translateX(14px);
+  background: #5b8def;
+}
+
+.properties__toggle input:focus-visible + .properties__toggle-track {
+  border-color: #7ea2f2;
+}
+
+/* The pill strip's "textbox" frame — matches ColorPickerButton's own
+   trigger box (same border/bg), sitting as the flex:1 sibling of the
+   fx/clear button in a shared .color-picker-button__row, same layout every
+   other fx-toggleable field in this panel already uses. */
+.state-tabs-box {
+  flex: 1;
+  min-width: 0;
+  background: #14161b;
+  border: 1px solid #3a3f4a;
+  border-radius: 4px;
+  padding: 5px;
+}
+
 .state-tabs {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  margin-bottom: 12px;
-}
-
-/* Pushes everything after it (the fx toggle) to the end of its flex line —
-   still correct if the pills wrap, since it only affects the line it's on. */
-.state-tabs__spacer {
-  flex: 1 0 auto;
 }
 
 .state-tab {
@@ -1256,6 +1525,43 @@ button.deck-morph-cell:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* A joined segmented pair for the two layer-order commands — same idea as
+   .properties__file-row's two buttons, just visually merged into one
+   control since "front"/"back" are really opposite ends of a single axis,
+   not two unrelated actions. */
+.properties__layer-row {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.properties__layer-button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: #14161b;
+  border: 1px solid #3a3f4a;
+  color: #cfd3db;
+  padding: 8px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.properties__layer-button:first-child {
+  border-radius: 4px 0 0 4px;
+  border-right: none;
+}
+
+.properties__layer-button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.properties__layer-button:hover {
+  background: #1c2028;
+  color: #e8e8ea;
 }
 
 .properties__file-button {
@@ -1347,20 +1653,61 @@ button.deck-morph-cell:focus-visible {
   margin: 8px 0 16px;
 }
 
-.properties__advanced {
-  margin-bottom: 16px;
+.properties-section {
+  border: 1px solid #2a2e37;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: #1c2028;
 }
 
-.properties__advanced summary {
-  font-size: 13px;
-  color: #9098a8;
+.properties-section summary {
   cursor: pointer;
-  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cfd3db;
+  list-style: none;
   user-select: none;
 }
 
-.properties__advanced summary:hover {
+.properties-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.properties-section summary:hover {
   color: #e8e8ea;
+}
+
+.properties-section__body {
+  margin-top: 10px;
+}
+
+.sequence-step {
+  border: 1px solid #2a2e37;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+  cursor: grab;
+  background: #1c2028;
+}
+
+.sequence-step:active {
+  cursor: grabbing;
+}
+
+.sequence-step__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.sequence-step__row--action {
+  align-items: flex-start;
+}
+
+.sequence-step__fields {
+  flex: 1;
+  min-width: 0;
 }
 
 .properties__delete {

@@ -97,13 +97,17 @@ export function resolveBorderColor(box: ColorAppearance, variables: VariableMap)
 }
 
 // This label's effective display text — textExpr evaluated (coerced to a
-// string) where set, else just `text`.
+// string) once it's set at all (even ''  — freshly switched to expression
+// mode, nothing typed yet), else just `text`. Unlike resolveColor/
+// resolveBorderColor, an expression in progress or failing does NOT fall
+// back to `text` — `text` is stale leftover static content from before
+// switching to expression mode, and silently showing it back would read as
+// the expression "working" when it isn't.
 export function resolveLabelText(label: WidgetLabel, variables: VariableMap): string {
-  if (label.textExpr) {
-    const result = tryEvaluateExpression(label.textExpr, variables)
-    if (result.ok) return typeof result.value === 'string' ? result.value : String(result.value)
-  }
-  return label.text
+  if (label.textExpr === undefined) return label.text
+  const result = tryEvaluateExpression(label.textExpr, variables)
+  if (!result.ok) return ''
+  return typeof result.value === 'string' ? result.value : String(result.value)
 }
 
 // This label's effective text color (+ optional opacity override) against

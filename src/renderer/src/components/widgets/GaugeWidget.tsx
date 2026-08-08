@@ -59,8 +59,10 @@ function GaugeArc({
   )
 }
 
-// Passive — no pointer handlers, no `onTrigger`. Shared as-is between the
-// editor preview (CanvasWidget) and the deployed view client (ViewCanvas).
+// Passive — no pointer handlers, no `events` field at all (see EventfulWidget
+// in shared/types.ts, which deliberately excludes GaugeWidget). Shared as-is
+// between the editor preview (CanvasWidget) and the deployed view client
+// (ViewCanvas).
 export function GaugeWidgetContent({ widget, variables }: { widget: GaugeWidget; variables: VariableMap }): React.JSX.Element {
   const raw = resolveNumericExpr(widget.valueExpr, variables) ?? widget.min
   const span = widget.max - widget.min

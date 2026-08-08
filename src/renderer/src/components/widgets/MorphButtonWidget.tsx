@@ -13,7 +13,6 @@ export function MorphButtonWidgetContent({
   interactive,
   error,
   variables,
-  onTrigger,
   onPress,
   onRelease,
   selectedBlockId,
@@ -28,7 +27,11 @@ export function MorphButtonWidgetContent({
   interactive: boolean
   error?: string
   variables: VariableMap
-  onTrigger?: () => void
+  // onPress/onRelease double as the real server triggers (see
+  // ViewCanvas.tsx's TriggerableViewWidget) — the per-block onClick below
+  // fires both back to back only for keyboard/assistive-tech activation
+  // (e.detail === 0, a synthetic click with no pointer events), matching
+  // ButtonWidget.tsx's own onKeyboardActivate reasoning.
   onPress?: () => void
   onRelease?: () => void
   // Editor-only: highlights whichever block the properties panel's
@@ -95,8 +98,13 @@ export function MorphButtonWidgetContent({
           <button
             className="deck-morph-cell"
             style={cellStyle}
-            title={actionTitle(widget.action)}
-            onClick={onTrigger}
+            title={actionTitle(widget)}
+            onClick={(e) => {
+              if (e.detail === 0) {
+                onPress?.()
+                onRelease?.()
+              }
+            }}
             onPointerDown={(e) => {
               onPress?.()
               try {

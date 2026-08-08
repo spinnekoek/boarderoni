@@ -15,14 +15,23 @@ import { ColorPickerButton } from './ColorPickerButton'
 import { CodeEditor } from './CodeEditor'
 import { ExpressionEditorModal } from './ExpressionEditorModal'
 import type {
+  ActionStep,
   AdjusterWidget,
   BackgroundFit,
+  DelayStep,
+  DialSwitchWidget,
+  EncoderWidget,
+  EventfulWidget,
   GaugeWidget,
   HorizontalAlign,
+  KeypressAction,
   MorphBlock,
   MorphBlockStateOverride,
+  RockerSwitchWidget,
   SendDcsCommandAction,
+  SequenceStep,
   StatefulWidget,
+  SwitchPosition,
   VerticalAlign,
   Widget,
   WidgetAction,
@@ -32,6 +41,22 @@ import type {
 import type { DcsBiosCommandCatalogEntry, DcsBiosInputInterface } from '@shared/dcsBiosTypes'
 
 const ACTIVE_STATE_EXPR_PLACEHOLDER = "return variables.BATTERY_SW === 0 ? 'Default' : 'Active';"
+const ACTIVE_POSITION_EXPR_PLACEHOLDER = "return variables.GEAR_HANDLE === 1 ? 'Down' : 'Up';"
+const LABEL_TEXT_EXPR_PLACEHOLDER = 'return "Count: " + variables.my_variable;'
+
+// Header shown at the top of the properties panel for whichever widget is
+// selected, so switching between widgets (especially two that look similar
+// mid-edit, like a rocker switch and an adjuster slider) is never ambiguous
+// about which kind of widget you're looking at.
+const WIDGET_TYPE_LABELS: Record<Widget['type'], string> = {
+  button: 'Button',
+  morph: 'Morph button',
+  gauge: 'Gauge',
+  adjuster: 'Adjuster',
+  encoder: 'Encoder',
+  'switch-rocker': 'Rocker switch',
+  'switch-dial': 'Dial switch'
+}
 
 // One 3x3 grid replaces the old separate horizontal/vertical button rows —
 // each cell is a (h, v) pair, in reading order (top-left to bottom-right),
@@ -68,6 +93,36 @@ interface SideFieldProps {
   min: number
   disabled?: boolean
   onChange: (value: number) => void
+}
+
+// Shared collapsible section wrapper — every group of related fields in this
+// panel (Style/Value, Colors, Border, Labels, States, Position & Size, ...)
+// renders as one of these, so the panel reads as a consistent stack of
+// clearly-separated cards instead of a flat list of fields divided only by
+// thin <hr> lines. `open` is forwarded straight through rather than treated
+// as an uncontrolled defaultOpen — some callers (e.g. a per-event action
+// sequence) recompute it live across re-renders (open once populated), not
+// just on mount, so this stays a plain stateless wrapper around that.
+function PropertiesSection({
+  title,
+  badge,
+  open,
+  children
+}: {
+  title: string
+  badge?: number
+  open: boolean
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <details className="properties-section" open={open}>
+      <summary>
+        {title}
+        {badge ? ` (${badge})` : ''}
+      </summary>
+      <div className="properties-section__body">{children}</div>
+    </details>
+  )
 }
 
 // A "box model" style 4-input layout (top/left/right/bottom arranged around
@@ -168,6 +223,17 @@ function CornersInputGrid({
   )
 }
 
+// Header for one label's own collapsible sub-section (see every `labels.map`
+// call site below) — the label's own text reads as a much more useful
+// at-a-glance identifier than a generic "Label 1"/"Label 2", especially once
+// there are several. Falls back to naming the mechanism when there's no
+// literal text to show (an expression-driven label, or a genuinely blank
+// one) rather than showing nothing.
+function labelSectionTitle(label: WidgetLabel): string {
+  if (label.text.trim()) return label.text
+  return label.textExpr !== undefined ? 'ƒx label' : 'Untitled label'
+}
+
 function LabelFields({
   label,
   backgroundColor,
@@ -182,30 +248,59 @@ function LabelFields({
   const isTextColorExpr = label.textColorExpr !== undefined
   const isAutoTextColor = label.textColor == null && !isTextColorExpr
   const isTextExpr = label.textExpr !== undefined
+  const [textExprExpanded, setTextExprExpanded] = useState(false)
 
   return (
     <>
-      <label className="properties__field">
+      {/* A plain div, not a <label> — the CodeEditor below nests its own
+          focusable/labelable input, and clicking into it inside a <label>
+          would also synthesize a click on the field's first labelable
+          descendant (the fx/clear button), instantly exiting expression
+          mode the moment you tried to type — same pitfall as
+          ColorPickerButton's own popover, see its call site's comment. */}
+      <div className="properties__field">
         <span>Text</span>
-        {isTextExpr ? (
-          <textarea
-            className="properties__code"
-            rows={4}
-            placeholder={'return "Count: " + variables.my_variable;'}
-            value={label.textExpr}
-            onChange={(e) => onChange({ textExpr: e.target.value })}
-          />
-        ) : (
-          <input value={label.text} onChange={(e) => onChange({ text: e.target.value })} />
+        <div className="color-picker-button__row">
+          {isTextExpr ? (
+            <div className="color-picker-button__trigger color-picker-button__trigger--expr">ƒx</div>
+          ) : (
+            <input value={label.text} onChange={(e) => onChange({ text: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+          )}
+          {isTextExpr ? (
+            <button type="button" className="color-picker-button__clear" title="Use static text" onClick={() => onChange({ textExpr: undefined })}>
+              ×
+            </button>
+          ) : (
+            <button type="button" className="color-picker-button__fx" title="Use an expression" onClick={() => onChange({ textExpr: '' })}>
+              ƒx
+            </button>
+          )}
+        </div>
+        {isTextExpr && (
+          <div className="color-picker-button__expr-panel">
+            <div className="color-picker-button__expr-editor-wrap">
+              <CodeEditor
+                value={label.textExpr ?? ''}
+                onChange={(code) => onChange({ textExpr: code })}
+                placeholder={LABEL_TEXT_EXPR_PLACEHOLDER}
+                minimal
+              />
+              <button type="button" className="color-picker-button__expand" title="Expand" onClick={() => setTextExprExpanded(true)}>
+                ⤢
+              </button>
+            </div>
+          </div>
         )}
-      </label>
-      <button
-        type="button"
-        className="properties__file-button"
-        onClick={() => onChange({ textExpr: isTextExpr ? undefined : '' })}
-      >
-        {isTextExpr ? 'Use static text' : 'Use expression'}
-      </button>
+      </div>
+
+      {textExprExpanded && (
+        <ExpressionEditorModal
+          value={label.textExpr ?? ''}
+          onChange={(code) => onChange({ textExpr: code })}
+          placeholder={LABEL_TEXT_EXPR_PLACEHOLDER}
+          onClose={() => setTextExprExpanded(false)}
+        />
+      )}
 
       <label className="properties__field">
         <span>Font</span>
@@ -331,18 +426,36 @@ function ActionFields({
           <label className="properties__field">
             <span>Keys</span>
             <div className="properties__file-row">
-              <KeyCapture keys={action.keys} onChange={(keys) => onChange({ kind: 'keypress', keys })} />
+              <KeyCapture keys={action.keys} onChange={(keys) => onChange({ ...action, keys })} />
               <button
                 type="button"
                 className="properties__file-remove"
                 disabled={action.keys.length === 0}
-                onClick={() => onChange({ kind: 'keypress', keys: [] })}
+                onClick={() => onChange({ ...action, keys: [] })}
               >
                 Unbind
               </button>
             </div>
           </label>
           <p className="properties__hint">Click the box, then press the key combo to bind. Click away to finish.</p>
+
+          <label className="properties__field">
+            <span>Mode</span>
+            <select
+              value={action.mode ?? 'press'}
+              onChange={(e) => onChange({ ...action, mode: e.target.value as KeypressAction['mode'] })}
+            >
+              <option value="press">Press and release</option>
+              <option value="down">Down only (hold)</option>
+              <option value="up">Up only (release)</option>
+            </select>
+          </label>
+          {action.mode && action.mode !== 'press' && (
+            <p className="properties__hint">
+              Pair a "Down only" step with a later "Up only" step (typically with a Delay step between them) to hold this key across a
+              sequence — see the Actions section below.
+            </p>
+          )}
         </>
       ) : action.kind === 'update-state' ? (
         <>
@@ -372,6 +485,123 @@ function ActionFields({
         />
       )}
     </>
+  )
+}
+
+// One step within an event's sequence — either a plain WidgetAction (via
+// ActionFields, unchanged) or a Delay step (a single ms field). Both share
+// the same remove control; only the action variant needs the full
+// ActionFields sub-editor.
+function SequenceStepFields({
+  step,
+  onChange,
+  onRemove,
+  dcsBiosActionEnabled
+}: {
+  step: SequenceStep
+  onChange: (step: SequenceStep) => void
+  onRemove: () => void
+  dcsBiosActionEnabled: boolean
+}): React.JSX.Element {
+  if (step.kind === 'delay') {
+    return (
+      <div className="sequence-step__row">
+        <label className="properties__field">
+          <span>Delay (ms)</span>
+          <input
+            type="number"
+            min={0}
+            value={step.delayMs}
+            onChange={(e) => onChange({ ...step, delayMs: Math.max(0, Math.round(Number(e.target.value))) })}
+          />
+        </label>
+        <button type="button" className="properties__file-remove" onClick={onRemove}>
+          Remove
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="sequence-step__row sequence-step__row--action">
+      <div className="sequence-step__fields">
+        <ActionFields action={step.action} onChange={(action) => onChange({ ...step, action })} dcsBiosActionEnabled={dcsBiosActionEnabled} />
+      </div>
+      <button type="button" className="properties__file-remove" onClick={onRemove}>
+        Remove step
+      </button>
+    </div>
+  )
+}
+
+// One interaction event's reorderable SequenceStep[] — self-contained
+// drag-reorder state (dragStepIndex), same interaction pattern as the
+// widget-states tabs' dragStateIndex/handleReorderState below, scoped per
+// instance rather than shared, since Press/Release/Move each reorder
+// independently.
+function EventSequenceEditor({
+  title,
+  steps,
+  onChange,
+  dcsBiosActionEnabled
+}: {
+  title: string
+  steps: SequenceStep[]
+  onChange: (steps: SequenceStep[]) => void
+  dcsBiosActionEnabled: boolean
+}): React.JSX.Element {
+  const dragStepIndex = useRef<number | null>(null)
+
+  function patchStep(index: number, step: SequenceStep): void {
+    onChange(steps.map((s, i) => (i === index ? step : s)))
+  }
+  function removeStep(index: number): void {
+    onChange(steps.filter((_, i) => i !== index))
+  }
+  function addActionStep(): void {
+    onChange([...steps, { kind: 'action', id: nextId(), action: { kind: 'keypress', keys: [] } } satisfies ActionStep])
+  }
+  function addDelayStep(): void {
+    onChange([...steps, { kind: 'delay', id: nextId(), delayMs: 250 } satisfies DelayStep])
+  }
+  function handleReorderStep(dropIndex: number): void {
+    const dragIndex = dragStepIndex.current
+    dragStepIndex.current = null
+    if (dragIndex === null || dragIndex === dropIndex) return
+    const next = [...steps]
+    const [moved] = next.splice(dragIndex, 1)
+    next.splice(dropIndex > dragIndex ? dropIndex - 1 : dropIndex, 0, moved)
+    onChange(next)
+  }
+
+  return (
+    <PropertiesSection title={title} badge={steps.length} open={steps.length > 0}>
+      {steps.length === 0 && <p className="properties__hint">No actions on this event.</p>}
+      {steps.map((step, index) => (
+        <div
+          key={step.id}
+          className="sequence-step"
+          draggable
+          onDragStart={() => (dragStepIndex.current = index)}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={() => handleReorderStep(index)}
+        >
+          <SequenceStepFields
+            step={step}
+            onChange={(s) => patchStep(index, s)}
+            onRemove={() => removeStep(index)}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+        </div>
+      ))}
+      <div className="properties__file-row">
+        <button type="button" className="properties__file-button" onClick={addActionStep}>
+          + Add action
+        </button>
+        <button type="button" className="properties__file-button" onClick={addDelayStep}>
+          + Add delay
+        </button>
+      </div>
+    </PropertiesSection>
   )
 }
 
@@ -815,6 +1045,257 @@ function SendDcsCommandActionEditor({
   )
 }
 
+// Shared between RockerSwitchWidget's and DialSwitchWidget's branches below
+// — positions/reorder/rename/color/labels editing plus the "Active position"
+// expression (see shared/switchPosition.ts) is identical for both; only the
+// widget's own shape (segments vs. angles/needle) differs, handled by each
+// branch itself. All UI state (which tab is being edited, drag-reorder,
+// expression-modal-expanded) lives in the parent PropertiesPanel and is
+// passed in, same reasoning as activeStateIndex living in the store for
+// Button/Morph — it must survive this component unmounting/remounting as the
+// selected widget changes type.
+function SwitchPositionsEditor({
+  positions,
+  activePositionExpr,
+  onPatchPositions,
+  onPatchActivePositionExpr,
+  dcsBiosActionEnabled,
+  activePositionIndex,
+  setActivePositionIndex,
+  dragPositionIndex,
+  activePositionExprExpanded,
+  setActivePositionExprExpanded,
+  confirm
+}: {
+  positions: SwitchPosition[]
+  activePositionExpr?: string
+  onPatchPositions: (positions: SwitchPosition[]) => void
+  onPatchActivePositionExpr: (expr: string | undefined) => void
+  dcsBiosActionEnabled: boolean
+  activePositionIndex: number
+  setActivePositionIndex: (indexOrUpdater: number | ((current: number) => number)) => void
+  dragPositionIndex: React.MutableRefObject<number | null>
+  activePositionExprExpanded: boolean
+  setActivePositionExprExpanded: (expanded: boolean) => void
+  confirm: (message: string, options?: { confirmLabel?: string }) => Promise<boolean>
+}): React.JSX.Element {
+  const positionIndex = Math.min(activePositionIndex, positions.length - 1)
+  const activePosition = positions[positionIndex] ?? positions[0]
+  const isPositionColorExpr = activePosition.colorExpr !== undefined
+
+  function patchPosition(fields: Partial<SwitchPosition>): void {
+    onPatchPositions(positions.map((p, i) => (i === positionIndex ? { ...p, ...fields } : p)))
+  }
+
+  function patchPositionLabel(labelId: string, fields: Partial<WidgetLabel>): void {
+    patchPosition({ labels: activePosition.labels.map((l) => (l.id === labelId ? { ...l, ...fields } : l)) })
+  }
+
+  function addPositionLabel(): void {
+    patchPosition({ labels: [...activePosition.labels, { id: nextId(), text: 'New Label', align: 'center', verticalAlign: 'center' }] })
+  }
+
+  async function confirmRemovePositionLabel(labelId: string): Promise<void> {
+    const ok = await confirm('Remove this label? This cannot be undone.', { confirmLabel: 'Remove' })
+    if (ok) patchPosition({ labels: activePosition.labels.filter((l) => l.id !== labelId) })
+  }
+
+  function handleAddPosition(): void {
+    const newPosition: SwitchPosition = { id: nextId(), name: `Position ${positions.length + 1}`, labels: [], onSelect: [] }
+    onPatchPositions([...positions, newPosition])
+    setActivePositionIndex(positions.length)
+  }
+
+  function renamePosition(index: number, name: string): void {
+    onPatchPositions(positions.map((p, i) => (i === index ? { ...p, name } : p)))
+  }
+
+  function indexAfterDelete(index: number, deletedIndex: number): number {
+    if (index === deletedIndex) return Math.max(0, deletedIndex - 1)
+    if (index > deletedIndex) return index - 1
+    return index
+  }
+
+  async function confirmDeletePosition(index: number): Promise<void> {
+    if (positions.length <= 2) return
+    const ok = await confirm(`Delete the "${positions[index].name}" position? This cannot be undone.`, { confirmLabel: 'Delete' })
+    if (!ok) return
+    onPatchPositions(positions.filter((_, i) => i !== index))
+    setActivePositionIndex((current) => indexAfterDelete(current, index))
+  }
+
+  function handleReorderPosition(dropIndex: number): void {
+    const dragIndex = dragPositionIndex.current
+    dragPositionIndex.current = null
+    if (dragIndex === null || dragIndex === dropIndex) return
+    const reordered = [...positions]
+    const [moved] = reordered.splice(dragIndex, 1)
+    const target = dropIndex > dragIndex ? dropIndex - 1 : dropIndex
+    reordered.splice(target, 0, moved)
+    onPatchPositions(reordered)
+    setActivePositionIndex(target)
+  }
+
+  return (
+    <>
+      <PropertiesSection title="Positions" badge={positions.length} open>
+        <p className="properties__hint">
+          Each position is directly selectable (tap a segment/detent on the deployed switch) and fires its own action — see "Actions"
+          below. Which one LOOKS active is normally just whichever this device last tapped; set "Active position" below to derive it
+          from a shared variable instead.
+        </p>
+        <div className="properties__field">
+          <span>Positions</span>
+          <div className="color-picker-button__row">
+            <div className="state-tabs-box">
+              <div className="state-tabs">
+                {positions.map((p, index) => (
+                  <div
+                    key={p.id}
+                    className={`state-tab${index === positionIndex ? ' state-tab--active' : ''}`}
+                    draggable
+                    onDragStart={() => (dragPositionIndex.current = index)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => handleReorderPosition(index)}
+                    onClick={() => setActivePositionIndex(index)}
+                  >
+                    <span className="state-tab__name">{p.name}</span>
+                    {positions.length > 2 && (
+                      <button
+                        type="button"
+                        className="state-tab__remove"
+                        title="Delete position"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          confirmDeletePosition(index)
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button type="button" className="state-tab state-tab--add" onClick={handleAddPosition} title="Add position">
+                  +
+                </button>
+              </div>
+            </div>
+            {activePositionExpr !== undefined ? (
+              <button
+                type="button"
+                className="color-picker-button__clear"
+                title="Stop deriving the active position from an expression"
+                onClick={() => onPatchActivePositionExpr(undefined)}
+              >
+                ×
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="color-picker-button__fx"
+                title="Derive the active position with an expression"
+                onClick={() => onPatchActivePositionExpr('')}
+              >
+                ƒx
+              </button>
+            )}
+          </div>
+        </div>
+
+        {activePositionExpr !== undefined && (
+          <div className="color-picker-button__expr-panel">
+            <p className="properties__hint">
+              Returns the exact name of the position that should be active. Falls back to whichever position this device last tapped
+              if it throws, returns something else, or names a position that doesn't exist.
+            </p>
+            <div className="color-picker-button__expr-editor-wrap">
+              <CodeEditor
+                value={activePositionExpr}
+                onChange={onPatchActivePositionExpr}
+                placeholder={ACTIVE_POSITION_EXPR_PLACEHOLDER}
+                minimal
+              />
+              <button
+                type="button"
+                className="color-picker-button__expand"
+                title="Expand"
+                onClick={() => setActivePositionExprExpanded(true)}
+              >
+                ⤢
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activePositionExprExpanded && (
+          <ExpressionEditorModal
+            value={activePositionExpr ?? ''}
+            onChange={onPatchActivePositionExpr}
+            placeholder={ACTIVE_POSITION_EXPR_PLACEHOLDER}
+            onClose={() => setActivePositionExprExpanded(false)}
+          />
+        )}
+
+        <label className="properties__field">
+          <span>Position name</span>
+          <input value={activePosition.name} onChange={(e) => renamePosition(positionIndex, e.target.value)} />
+        </label>
+
+        <div className="properties__divider" />
+
+        <span className="properties__section-label">Color</span>
+        <div className="properties__field">
+          <span>Color</span>
+          <ColorPickerButton
+            value={activePosition.color ?? DEFAULT_WIDGET_COLOR}
+            onChange={(color) => patchPosition({ color, colorExpr: undefined })}
+            isExpr={isPositionColorExpr}
+            exprValue={activePosition.colorExpr ?? ''}
+            onExprChange={(code) => patchPosition({ colorExpr: code })}
+            onEnterExpr={() => patchPosition({ colorExpr: activePosition.colorExpr ?? '' })}
+            onClearExpr={() => patchPosition({ colorExpr: undefined })}
+            opacity={activePosition.backgroundOpacity ?? 1}
+            onOpacityChange={(v) => patchPosition({ backgroundOpacity: v })}
+          />
+        </div>
+
+        <div className="properties__divider" />
+
+        <span className="properties__section-label">Labels</span>
+        {activePosition.labels.map((label) => (
+          <PropertiesSection key={label.id} title={labelSectionTitle(label)} open={false}>
+            <LabelFields
+              label={label}
+              backgroundColor={activePosition.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(fields) => patchPositionLabel(label.id, fields)}
+              onRemove={() => confirmRemovePositionLabel(label.id)}
+            />
+          </PropertiesSection>
+        ))}
+        <button type="button" className="properties__file-button" onClick={addPositionLabel}>
+          + Add label
+        </button>
+      </PropertiesSection>
+
+      <PropertiesSection title="Actions" badge={positions.length} open>
+        <p className="properties__hint">
+          Every position's own sequence — each runs once, server-side, whenever that position is tapped. Editing here is independent
+          of which position tab is selected above for color/label editing.
+        </p>
+        {positions.map((position, index) => (
+          <EventSequenceEditor
+            key={position.id}
+            title={position.name}
+            steps={position.onSelect}
+            onChange={(steps) => onPatchPositions(positions.map((p, i) => (i === index ? { ...p, onSelect: steps } : p)))}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+        ))}
+      </PropertiesSection>
+    </>
+  )
+}
+
 export function PropertiesPanel(): React.JSX.Element {
   const dashboard = useDashboardStore((s) => s.dashboard)
   const widgets = dashboard.widgets
@@ -851,6 +1332,16 @@ export function PropertiesPanel(): React.JSX.Element {
   const resizeState = useRef<ResizeState | null>(null)
   const dragStateIndex = useRef<number | null>(null)
   const [activeStateExprExpanded, setActiveStateExprExpanded] = useState(false)
+  // Which of a switch widget's positions the panel below is editing (color/
+  // labels/name) — independent of which position actually looks "live" on
+  // any given client (see useSwitchPosition.ts), same split as Button's
+  // activeStateIndex vs. isClicked. Declared unconditionally here (not
+  // inside the switch branches below) so its hook order never changes across
+  // a selection change from a switch widget to some other type — see
+  // PropertiesSection/EventSequenceEditor's own hooks for the same reasoning.
+  const [activePositionIndex, setActivePositionIndex] = useState(0)
+  const dragPositionIndex = useRef<number | null>(null)
+  const [activePositionExprExpanded, setActivePositionExprExpanded] = useState(false)
 
   const widget = selectedWidgetIds.length === 1 ? widgets.find((w) => w.id === selectedWidgetIds[0]) ?? null : null
 
@@ -895,12 +1386,12 @@ export function PropertiesPanel(): React.JSX.Element {
         <p className="properties__hint">
           {selectedWidgetIds.length} widgets selected — select just one to edit its properties.
         </p>
-        <div className="properties__file-row">
-          <button type="button" className="properties__file-button" onClick={() => bringToFront(selectedWidgetIds)}>
-            Bring to front
+        <div className="properties__layer-row">
+          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
+            <span aria-hidden="true">⬆</span> Bring to front
           </button>
-          <button type="button" className="properties__file-button" onClick={() => sendToBack(selectedWidgetIds)}>
-            Send to back
+          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
+            <span aria-hidden="true">⬇</span> Send to back
           </button>
         </div>
         <div className="properties__divider" />
@@ -949,9 +1440,7 @@ export function PropertiesPanel(): React.JSX.Element {
 
         <div className="properties__divider" />
 
-        <details className="properties__advanced">
-          <summary>Background image</summary>
-
+        <PropertiesSection title="Background image" open={false}>
           <label className="properties__field">
             <span>Image</span>
             <div className="properties__file-row">
@@ -1000,7 +1489,7 @@ export function PropertiesPanel(): React.JSX.Element {
               </label>
             </>
           )}
-        </details>
+        </PropertiesSection>
       </aside>
     )
   }
@@ -1045,94 +1534,102 @@ export function PropertiesPanel(): React.JSX.Element {
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
         <h2 className="properties__title">Properties</h2>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[gauge.type]}</p>
 
-        <label className="properties__field">
-          <span>Style</span>
-          <select value={gauge.style} onChange={(e) => patchGauge({ style: e.target.value as GaugeWidget['style'] })}>
-            <option value="bar">Bar</option>
-            <option value="arc">Arc</option>
-          </select>
-        </label>
+        <div className="properties__layer-row">
+          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
+            <span aria-hidden="true">⬆</span> Bring to front
+          </button>
+          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
+            <span aria-hidden="true">⬇</span> Send to back
+          </button>
+        </div>
 
-        {gauge.style === 'bar' ? (
+        <PropertiesSection title="Style & Value" open>
           <label className="properties__field">
-            <span>Orientation</span>
-            <select value={gauge.orientation ?? 'horizontal'} onChange={(e) => patchGauge({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
-              <option value="horizontal">Horizontal</option>
-              <option value="vertical">Vertical</option>
+            <span>Style</span>
+            <select value={gauge.style} onChange={(e) => patchGauge({ style: e.target.value as GaugeWidget['style'] })}>
+              <option value="bar">Bar</option>
+              <option value="arc">Arc</option>
             </select>
           </label>
-        ) : (
+
+          {gauge.style === 'bar' ? (
+            <label className="properties__field">
+              <span>Orientation</span>
+              <select value={gauge.orientation ?? 'horizontal'} onChange={(e) => patchGauge({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
+                <option value="horizontal">Horizontal</option>
+                <option value="vertical">Vertical</option>
+              </select>
+            </label>
+          ) : (
+            <div className="properties__grid2">
+              <label className="properties__field">
+                <span>Start angle</span>
+                <input type="number" value={gauge.startAngle ?? 135} onChange={(e) => patchGauge({ startAngle: Number(e.target.value) })} />
+              </label>
+              <label className="properties__field">
+                <span>End angle</span>
+                <input type="number" value={gauge.endAngle ?? 405} onChange={(e) => patchGauge({ endAngle: Number(e.target.value) })} />
+              </label>
+            </div>
+          )}
+
           <div className="properties__grid2">
             <label className="properties__field">
-              <span>Start angle</span>
-              <input type="number" value={gauge.startAngle ?? 135} onChange={(e) => patchGauge({ startAngle: Number(e.target.value) })} />
+              <span>Min</span>
+              <input type="number" value={gauge.min} onChange={(e) => patchGauge({ min: Number(e.target.value) })} />
             </label>
             <label className="properties__field">
-              <span>End angle</span>
-              <input type="number" value={gauge.endAngle ?? 405} onChange={(e) => patchGauge({ endAngle: Number(e.target.value) })} />
+              <span>Max</span>
+              <input type="number" value={gauge.max} onChange={(e) => patchGauge({ max: Number(e.target.value) })} />
             </label>
           </div>
-        )}
 
-        <div className="properties__grid2">
           <label className="properties__field">
-            <span>Min</span>
-            <input type="number" value={gauge.min} onChange={(e) => patchGauge({ min: Number(e.target.value) })} />
+            <span>Value</span>
+            <textarea
+              className="properties__code"
+              rows={3}
+              placeholder="return variables.my_variable ?? 0;"
+              value={gauge.valueExpr}
+              onChange={(e) => patchGauge({ valueExpr: e.target.value })}
+            />
           </label>
-          <label className="properties__field">
-            <span>Max</span>
-            <input type="number" value={gauge.max} onChange={(e) => patchGauge({ max: Number(e.target.value) })} />
-          </label>
-        </div>
+          <p className="properties__hint">
+            JS function body — <code>variables</code> holds every variable&rsquo;s current value. Must return a number; anything else
+            falls back to Min.
+          </p>
+        </PropertiesSection>
 
-        <label className="properties__field">
-          <span>Value</span>
-          <textarea
-            className="properties__code"
-            rows={3}
-            placeholder="return variables.my_variable ?? 0;"
-            value={gauge.valueExpr}
-            onChange={(e) => patchGauge({ valueExpr: e.target.value })}
-          />
-        </label>
-        <p className="properties__hint">
-          JS function body — <code>variables</code> holds every variable&rsquo;s current value. Must return a number; anything else
-          falls back to Min.
-        </p>
+        <PropertiesSection title="Colors" open>
+          <div className="properties__field">
+            <span>Fill color</span>
+            <ColorPickerButton
+              value={gauge.fill.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchGauge({ fill: { ...gauge.fill, color, colorExpr: undefined } })}
+              isExpr={isFillExpr}
+              exprValue={gauge.fill.colorExpr ?? ''}
+              onExprChange={(code) => patchGauge({ fill: { ...gauge.fill, colorExpr: code } })}
+              onEnterExpr={() => patchGauge({ fill: { ...gauge.fill, colorExpr: gauge.fill.colorExpr ?? '' } })}
+              onClearExpr={() => patchGauge({ fill: { ...gauge.fill, colorExpr: undefined } })}
+            />
+          </div>
 
-        <div className="properties__divider" />
+          <div className="properties__field">
+            <span>Track color</span>
+            <ColorPickerButton
+              value={gauge.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchGauge({ track: { ...gauge.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={gauge.track.colorExpr ?? ''}
+              onExprChange={(code) => patchGauge({ track: { ...gauge.track, colorExpr: code } })}
+              onEnterExpr={() => patchGauge({ track: { ...gauge.track, colorExpr: gauge.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchGauge({ track: { ...gauge.track, colorExpr: undefined } })}
+            />
+          </div>
 
-        <div className="properties__field">
-          <span>Fill color</span>
-          <ColorPickerButton
-            value={gauge.fill.color ?? DEFAULT_WIDGET_COLOR}
-            onChange={(color) => patchGauge({ fill: { ...gauge.fill, color, colorExpr: undefined } })}
-            isExpr={isFillExpr}
-            exprValue={gauge.fill.colorExpr ?? ''}
-            onExprChange={(code) => patchGauge({ fill: { ...gauge.fill, colorExpr: code } })}
-            onEnterExpr={() => patchGauge({ fill: { ...gauge.fill, colorExpr: gauge.fill.colorExpr ?? '' } })}
-            onClearExpr={() => patchGauge({ fill: { ...gauge.fill, colorExpr: undefined } })}
-          />
-        </div>
-
-        <div className="properties__field">
-          <span>Track color</span>
-          <ColorPickerButton
-            value={gauge.track.color ?? DEFAULT_WIDGET_COLOR}
-            onChange={(color) => patchGauge({ track: { ...gauge.track, color, colorExpr: undefined } })}
-            isExpr={isTrackExpr}
-            exprValue={gauge.track.colorExpr ?? ''}
-            onExprChange={(code) => patchGauge({ track: { ...gauge.track, colorExpr: code } })}
-            onEnterExpr={() => patchGauge({ track: { ...gauge.track, colorExpr: gauge.track.colorExpr ?? '' } })}
-            onClearExpr={() => patchGauge({ track: { ...gauge.track, colorExpr: undefined } })}
-          />
-        </div>
-
-        <div className="properties__divider" />
-
-        {gauge.style === 'bar' ? (
-          <>
+          {gauge.style === 'bar' && (
             <div className="properties__field">
               <span>Border color</span>
               <ColorPickerButton
@@ -1147,55 +1644,52 @@ export function PropertiesPanel(): React.JSX.Element {
                 onOpacityChange={(v) => patchGauge({ borderOpacity: v })}
               />
             </div>
+          )}
+        </PropertiesSection>
 
-            <div className="properties__divider" />
+        <PropertiesSection title="Border shape" open={false}>
+          {gauge.style === 'bar' ? (
+            <>
+              <span className="properties__section-label">Border radius</span>
+              <CornersInputGrid
+                topLeft={{ value: gauge.radiusTopLeft ?? 4, min: 0, onChange: (v) => patchGauge({ radiusTopLeft: v }) }}
+                topRight={{ value: gauge.radiusTopRight ?? 4, min: 0, onChange: (v) => patchGauge({ radiusTopRight: v }) }}
+                bottomLeft={{ value: gauge.radiusBottomLeft ?? 4, min: 0, onChange: (v) => patchGauge({ radiusBottomLeft: v }) }}
+                bottomRight={{ value: gauge.radiusBottomRight ?? 4, min: 0, onChange: (v) => patchGauge({ radiusBottomRight: v }) }}
+              />
 
-            <span className="properties__section-label">Border radius</span>
-            <CornersInputGrid
-              topLeft={{ value: gauge.radiusTopLeft ?? 4, min: 0, onChange: (v) => patchGauge({ radiusTopLeft: v }) }}
-              topRight={{ value: gauge.radiusTopRight ?? 4, min: 0, onChange: (v) => patchGauge({ radiusTopRight: v }) }}
-              bottomLeft={{ value: gauge.radiusBottomLeft ?? 4, min: 0, onChange: (v) => patchGauge({ radiusBottomLeft: v }) }}
-              bottomRight={{ value: gauge.radiusBottomRight ?? 4, min: 0, onChange: (v) => patchGauge({ radiusBottomRight: v }) }}
-            />
+              <div className="properties__divider" />
 
-            <div className="properties__divider" />
+              <span className="properties__section-label">Border thickness</span>
+              <SidesInputGrid
+                top={{ value: gauge.borderWidthTop ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthTop: v }) }}
+                right={{ value: gauge.borderWidthRight ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthRight: v }) }}
+                bottom={{ value: gauge.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthBottom: v }) }}
+                left={{ value: gauge.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthLeft: v }) }}
+              />
+            </>
+          ) : (
+            <p className="properties__hint">Border radius/thickness/color only apply to the Bar style.</p>
+          )}
+        </PropertiesSection>
 
-            <span className="properties__section-label">Border thickness</span>
-            <SidesInputGrid
-              top={{ value: gauge.borderWidthTop ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthTop: v }) }}
-              right={{ value: gauge.borderWidthRight ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthRight: v }) }}
-              bottom={{ value: gauge.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthBottom: v }) }}
-              left={{ value: gauge.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthLeft: v }) }}
-            />
-          </>
-        ) : (
-          <p className="properties__hint">Border radius/thickness/color only apply to the Bar style.</p>
-        )}
-
-        <div className="properties__divider" />
-
-        {gauge.labels.map((label) => (
-          <div key={label.id}>
-            <details className="properties__advanced" open>
-              <summary>Label</summary>
+        <PropertiesSection title="Labels" badge={gauge.labels.length} open>
+          {gauge.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} open={false}>
               <LabelFields
                 label={label}
                 backgroundColor={gauge.track.color ?? DEFAULT_WIDGET_COLOR}
                 onChange={(fields) => patchGaugeLabel(label.id, fields)}
                 onRemove={() => confirmRemoveGaugeLabel(label.id)}
               />
-            </details>
-            <div className="properties__divider" />
-          </div>
-        ))}
-        <button type="button" className="properties__file-button" onClick={addGaugeLabel}>
-          + Add label
-        </button>
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addGaugeLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
 
-        <div className="properties__divider" />
-
-        <details className="properties__advanced">
-          <summary>Advanced</summary>
+        <PropertiesSection title="Position & Size" open={false}>
           <div className="properties__grid2">
             <label className="properties__field">
               <span>X</span>
@@ -1221,9 +1715,7 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={gauge.zIndex ?? 0} onChange={(e) => patchGauge({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
-        </details>
-
-        <div className="properties__divider" />
+        </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteGauge}>
           Delete widget
@@ -1268,93 +1760,101 @@ export function PropertiesPanel(): React.JSX.Element {
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
         <h2 className="properties__title">Properties</h2>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[adjuster.type]}</p>
 
-        <label className="properties__field">
-          <span>Style</span>
-          <select value={adjuster.style} onChange={(e) => patchAdjuster({ style: e.target.value as AdjusterWidget['style'] })}>
-            <option value="slider">Slider</option>
-            <option value="knob">Knob</option>
-          </select>
-        </label>
+        <div className="properties__layer-row">
+          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
+            <span aria-hidden="true">⬆</span> Bring to front
+          </button>
+          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
+            <span aria-hidden="true">⬇</span> Send to back
+          </button>
+        </div>
 
-        {adjuster.style === 'slider' ? (
+        <PropertiesSection title="Style & Value" open>
           <label className="properties__field">
-            <span>Orientation</span>
-            <select value={adjuster.orientation ?? 'vertical'} onChange={(e) => patchAdjuster({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
-              <option value="vertical">Vertical</option>
-              <option value="horizontal">Horizontal</option>
+            <span>Style</span>
+            <select value={adjuster.style} onChange={(e) => patchAdjuster({ style: e.target.value as AdjusterWidget['style'] })}>
+              <option value="slider">Slider</option>
+              <option value="knob">Knob</option>
             </select>
           </label>
-        ) : (
+
+          {adjuster.style === 'slider' ? (
+            <label className="properties__field">
+              <span>Orientation</span>
+              <select value={adjuster.orientation ?? 'vertical'} onChange={(e) => patchAdjuster({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
+                <option value="vertical">Vertical</option>
+                <option value="horizontal">Horizontal</option>
+              </select>
+            </label>
+          ) : (
+            <div className="properties__grid2">
+              <label className="properties__field">
+                <span>Start angle</span>
+                <input type="number" value={adjuster.startAngle ?? 135} onChange={(e) => patchAdjuster({ startAngle: Number(e.target.value) })} />
+              </label>
+              <label className="properties__field">
+                <span>End angle</span>
+                <input type="number" value={adjuster.endAngle ?? 405} onChange={(e) => patchAdjuster({ endAngle: Number(e.target.value) })} />
+              </label>
+            </div>
+          )}
+
           <div className="properties__grid2">
             <label className="properties__field">
-              <span>Start angle</span>
-              <input type="number" value={adjuster.startAngle ?? 135} onChange={(e) => patchAdjuster({ startAngle: Number(e.target.value) })} />
+              <span>Min</span>
+              <input type="number" value={adjuster.min} onChange={(e) => patchAdjuster({ min: Number(e.target.value) })} />
             </label>
             <label className="properties__field">
-              <span>End angle</span>
-              <input type="number" value={adjuster.endAngle ?? 405} onChange={(e) => patchAdjuster({ endAngle: Number(e.target.value) })} />
+              <span>Max</span>
+              <input type="number" value={adjuster.max} onChange={(e) => patchAdjuster({ max: Number(e.target.value) })} />
             </label>
           </div>
-        )}
 
-        <div className="properties__grid2">
           <label className="properties__field">
-            <span>Min</span>
-            <input type="number" value={adjuster.min} onChange={(e) => patchAdjuster({ min: Number(e.target.value) })} />
+            <span>Rest value (optional)</span>
+            <textarea
+              className="properties__code"
+              rows={2}
+              placeholder="return variables.my_variable;"
+              value={adjuster.valueExpr ?? ''}
+              onChange={(e) => patchAdjuster({ valueExpr: e.target.value || undefined })}
+            />
           </label>
-          <label className="properties__field">
-            <span>Max</span>
-            <input type="number" value={adjuster.max} onChange={(e) => patchAdjuster({ max: Number(e.target.value) })} />
-          </label>
-        </div>
+          <p className="properties__hint">
+            Where the handle sits while not being dragged — e.g. reflect a variable back into the visual. Falls back to Min if unset.
+          </p>
+        </PropertiesSection>
 
-        <label className="properties__field">
-          <span>Rest value (optional)</span>
-          <textarea
-            className="properties__code"
-            rows={2}
-            placeholder="return variables.my_variable;"
-            value={adjuster.valueExpr ?? ''}
-            onChange={(e) => patchAdjuster({ valueExpr: e.target.value || undefined })}
-          />
-        </label>
-        <p className="properties__hint">
-          Where the handle sits while not being dragged — e.g. reflect a variable back into the visual. Falls back to Min if unset.
-        </p>
+        <PropertiesSection title="Colors" open>
+          <div className="properties__field">
+            <span>Fill color</span>
+            <ColorPickerButton
+              value={adjuster.fill.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ fill: { ...adjuster.fill, color, colorExpr: undefined } })}
+              isExpr={isFillExpr}
+              exprValue={adjuster.fill.colorExpr ?? ''}
+              onExprChange={(code) => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: code } })}
+              onEnterExpr={() => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: adjuster.fill.colorExpr ?? '' } })}
+              onClearExpr={() => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: undefined } })}
+            />
+          </div>
 
-        <div className="properties__divider" />
+          <div className="properties__field">
+            <span>Track color</span>
+            <ColorPickerButton
+              value={adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ track: { ...adjuster.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={adjuster.track.colorExpr ?? ''}
+              onExprChange={(code) => patchAdjuster({ track: { ...adjuster.track, colorExpr: code } })}
+              onEnterExpr={() => patchAdjuster({ track: { ...adjuster.track, colorExpr: adjuster.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchAdjuster({ track: { ...adjuster.track, colorExpr: undefined } })}
+            />
+          </div>
 
-        <div className="properties__field">
-          <span>Fill color</span>
-          <ColorPickerButton
-            value={adjuster.fill.color ?? DEFAULT_WIDGET_COLOR}
-            onChange={(color) => patchAdjuster({ fill: { ...adjuster.fill, color, colorExpr: undefined } })}
-            isExpr={isFillExpr}
-            exprValue={adjuster.fill.colorExpr ?? ''}
-            onExprChange={(code) => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: code } })}
-            onEnterExpr={() => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: adjuster.fill.colorExpr ?? '' } })}
-            onClearExpr={() => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: undefined } })}
-          />
-        </div>
-
-        <div className="properties__field">
-          <span>Track color</span>
-          <ColorPickerButton
-            value={adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
-            onChange={(color) => patchAdjuster({ track: { ...adjuster.track, color, colorExpr: undefined } })}
-            isExpr={isTrackExpr}
-            exprValue={adjuster.track.colorExpr ?? ''}
-            onExprChange={(code) => patchAdjuster({ track: { ...adjuster.track, colorExpr: code } })}
-            onEnterExpr={() => patchAdjuster({ track: { ...adjuster.track, colorExpr: adjuster.track.colorExpr ?? '' } })}
-            onClearExpr={() => patchAdjuster({ track: { ...adjuster.track, colorExpr: undefined } })}
-          />
-        </div>
-
-        <div className="properties__divider" />
-
-        {adjuster.style === 'slider' ? (
-          <>
+          {adjuster.style === 'slider' && (
             <div className="properties__field">
               <span>Border color</span>
               <ColorPickerButton
@@ -1369,63 +1869,78 @@ export function PropertiesPanel(): React.JSX.Element {
                 onOpacityChange={(v) => patchAdjuster({ borderOpacity: v })}
               />
             </div>
+          )}
+        </PropertiesSection>
 
-            <div className="properties__divider" />
+        <PropertiesSection title="Border shape" open={false}>
+          {adjuster.style === 'slider' ? (
+            <>
+              <span className="properties__section-label">Border radius</span>
+              <CornersInputGrid
+                topLeft={{ value: adjuster.radiusTopLeft ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusTopLeft: v }) }}
+                topRight={{ value: adjuster.radiusTopRight ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusTopRight: v }) }}
+                bottomLeft={{ value: adjuster.radiusBottomLeft ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusBottomLeft: v }) }}
+                bottomRight={{ value: adjuster.radiusBottomRight ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusBottomRight: v }) }}
+              />
 
-            <span className="properties__section-label">Border radius</span>
-            <CornersInputGrid
-              topLeft={{ value: adjuster.radiusTopLeft ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusTopLeft: v }) }}
-              topRight={{ value: adjuster.radiusTopRight ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusTopRight: v }) }}
-              bottomLeft={{ value: adjuster.radiusBottomLeft ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusBottomLeft: v }) }}
-              bottomRight={{ value: adjuster.radiusBottomRight ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusBottomRight: v }) }}
-            />
+              <div className="properties__divider" />
 
-            <div className="properties__divider" />
+              <span className="properties__section-label">Border thickness</span>
+              <SidesInputGrid
+                top={{ value: adjuster.borderWidthTop ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthTop: v }) }}
+                right={{ value: adjuster.borderWidthRight ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthRight: v }) }}
+                bottom={{ value: adjuster.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthBottom: v }) }}
+                left={{ value: adjuster.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthLeft: v }) }}
+              />
+            </>
+          ) : (
+            <p className="properties__hint">Border radius/thickness/color only apply to the Slider style.</p>
+          )}
+        </PropertiesSection>
 
-            <span className="properties__section-label">Border thickness</span>
-            <SidesInputGrid
-              top={{ value: adjuster.borderWidthTop ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthTop: v }) }}
-              right={{ value: adjuster.borderWidthRight ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthRight: v }) }}
-              bottom={{ value: adjuster.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthBottom: v }) }}
-              left={{ value: adjuster.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthLeft: v }) }}
-            />
-          </>
-        ) : (
-          <p className="properties__hint">Border radius/thickness/color only apply to the Slider style.</p>
-        )}
+        <PropertiesSection title="Actions" badge={3} open>
+          <EventSequenceEditor
+            title="Press"
+            steps={adjuster.events.press}
+            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, press: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <EventSequenceEditor
+            title="Release"
+            steps={adjuster.events.release}
+            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, release: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <EventSequenceEditor
+            title="Move (while dragging)"
+            steps={adjuster.events.move}
+            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, move: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <p className="properties__hint">
+            Move fires continuously (throttled) while dragging — <code>variables.$value</code> is the live position ({adjuster.min}–
+            {adjuster.max}). Press/Release fire once each, at the start/end of a drag gesture, with the same{' '}
+            <code>variables.$value</code> available.
+          </p>
+        </PropertiesSection>
 
-        <div className="properties__divider" />
-
-        <ActionFields action={adjuster.action} onChange={(action) => patchAdjuster({ action })} dcsBiosActionEnabled={dcsBiosActionEnabled} />
-        <p className="properties__hint">
-          Fires continuously while dragging — <code>variables.$value</code> is the live position ({adjuster.min}–{adjuster.max}), in
-          addition to every existing variable.
-        </p>
-
-        <div className="properties__divider" />
-
-        {adjuster.labels.map((label) => (
-          <div key={label.id}>
-            <details className="properties__advanced" open>
-              <summary>Label</summary>
+        <PropertiesSection title="Labels" badge={adjuster.labels.length} open>
+          {adjuster.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} open={false}>
               <LabelFields
                 label={label}
                 backgroundColor={adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
                 onChange={(fields) => patchAdjusterLabel(label.id, fields)}
                 onRemove={() => confirmRemoveAdjusterLabel(label.id)}
               />
-            </details>
-            <div className="properties__divider" />
-          </div>
-        ))}
-        <button type="button" className="properties__file-button" onClick={addAdjusterLabel}>
-          + Add label
-        </button>
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addAdjusterLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
 
-        <div className="properties__divider" />
-
-        <details className="properties__advanced">
-          <summary>Advanced</summary>
+        <PropertiesSection title="Position & Size" open={false}>
           <div className="properties__grid2">
             <label className="properties__field">
               <span>X</span>
@@ -1451,9 +1966,7 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={adjuster.zIndex ?? 0} onChange={(e) => patchAdjuster({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
-        </details>
-
-        <div className="properties__divider" />
+        </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteAdjuster}>
           Delete widget
@@ -1462,12 +1975,536 @@ export function PropertiesPanel(): React.JSX.Element {
     )
   }
 
-  // Only reached once gauge/adjuster have returned early above, so widget is
-  // known to be a ButtonWidget | MorphButtonWidget here — captured into a
-  // const for the same reason as the gauge/adjuster branches' own capture
+  if (widget.type === 'encoder') {
+    const encoder = widget
+    const minSize = snapToGrid ? gridSize : 1
+    const isFillExpr = encoder.fill.colorExpr !== undefined
+    const isTrackExpr = encoder.track.colorExpr !== undefined
+    const isBorderExpr = encoder.borderColorExpr !== undefined
+
+    function patchEncoder(fields: Partial<EncoderWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === encoder.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    function patchEncoderLabel(labelId: string, fields: Partial<WidgetLabel>): void {
+      patchEncoder({ labels: encoder.labels.map((l) => (l.id === labelId ? { ...l, ...fields } : l)) })
+    }
+
+    function addEncoderLabel(): void {
+      patchEncoder({ labels: [...encoder.labels, { id: nextId(), text: 'New Label', align: 'center', verticalAlign: 'center' }] })
+    }
+
+    async function confirmRemoveEncoderLabel(labelId: string): Promise<void> {
+      const ok = await confirm('Remove this label? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchEncoder({ labels: encoder.labels.filter((l) => l.id !== labelId) })
+    }
+
+    async function handleDeleteEncoder(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(encoder.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <h2 className="properties__title">Properties</h2>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[encoder.type]}</p>
+
+        <div className="properties__layer-row">
+          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
+            <span aria-hidden="true">⬆</span> Bring to front
+          </button>
+          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
+            <span aria-hidden="true">⬇</span> Send to back
+          </button>
+        </div>
+
+        <PropertiesSection title="Step" open>
+          <label className="properties__field">
+            <span>Degrees per step</span>
+            <input
+              type="number"
+              min={1}
+              value={encoder.stepDegrees ?? 15}
+              onChange={(e) => patchEncoder({ stepDegrees: Math.max(1, Math.round(Number(e.target.value))) })}
+            />
+          </label>
+          <p className="properties__hint">
+            How far (in degrees) a circular drag has to travel before firing one Turn CW/CCW step — smaller is more sensitive. This
+            widget has no fixed range: DCS owns the real position, this just reports "turned one detent" (fixed_step INC/DEC).
+          </p>
+
+          <label className="properties__field">
+            <span>Rest value (optional)</span>
+            <textarea
+              className="properties__code"
+              rows={2}
+              placeholder="return variables.my_variable;"
+              value={encoder.valueExpr ?? ''}
+              onChange={(e) => patchEncoder({ valueExpr: e.target.value || undefined })}
+            />
+          </label>
+          <p className="properties__hint">
+            Where the grip points (in degrees, 0 = up) while not being dragged — e.g. reflect a variable back into the visual. Pair
+            with a Turn CW/CCW action below that nudges that same variable by the step size. Falls back to 0 if unset.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Colors" open>
+          <div className="properties__field">
+            <span>Grip color</span>
+            <ColorPickerButton
+              value={encoder.fill.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchEncoder({ fill: { ...encoder.fill, color, colorExpr: undefined } })}
+              isExpr={isFillExpr}
+              exprValue={encoder.fill.colorExpr ?? ''}
+              onExprChange={(code) => patchEncoder({ fill: { ...encoder.fill, colorExpr: code } })}
+              onEnterExpr={() => patchEncoder({ fill: { ...encoder.fill, colorExpr: encoder.fill.colorExpr ?? '' } })}
+              onClearExpr={() => patchEncoder({ fill: { ...encoder.fill, colorExpr: undefined } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Dial face color</span>
+            <ColorPickerButton
+              value={encoder.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchEncoder({ track: { ...encoder.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={encoder.track.colorExpr ?? ''}
+              onExprChange={(code) => patchEncoder({ track: { ...encoder.track, colorExpr: code } })}
+              onEnterExpr={() => patchEncoder({ track: { ...encoder.track, colorExpr: encoder.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchEncoder({ track: { ...encoder.track, colorExpr: undefined } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={encoder.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchEncoder({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={encoder.borderColorExpr ?? ''}
+              onExprChange={(code) => patchEncoder({ borderColorExpr: code })}
+              onEnterExpr={() => patchEncoder({ borderColorExpr: encoder.borderColorExpr ?? '' })}
+              onClearExpr={() => patchEncoder({ borderColorExpr: undefined })}
+              opacity={encoder.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchEncoder({ borderOpacity: v })}
+            />
+          </div>
+        </PropertiesSection>
+
+        <PropertiesSection title="Actions" badge={4} open>
+          <EventSequenceEditor
+            title="Press"
+            steps={encoder.events.press}
+            onChange={(steps) => patchEncoder({ events: { ...encoder.events, press: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <EventSequenceEditor
+            title="Release"
+            steps={encoder.events.release}
+            onChange={(steps) => patchEncoder({ events: { ...encoder.events, release: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <EventSequenceEditor
+            title="Turn CW (increment)"
+            steps={encoder.events.increment}
+            onChange={(steps) => patchEncoder({ events: { ...encoder.events, increment: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <EventSequenceEditor
+            title="Turn CCW (decrement)"
+            steps={encoder.events.decrement}
+            onChange={(steps) => patchEncoder({ events: { ...encoder.events, decrement: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <p className="properties__hint">
+            Press/Release fire once each on a tap or the start/end of a drag — good for a push-encoder's button function. Turn CW/CCW
+            fire once per step crossed while dragging in a circle, in either direction.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Labels" badge={encoder.labels.length} open>
+          {encoder.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} open={false}>
+              <LabelFields
+                label={label}
+                backgroundColor={encoder.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchEncoderLabel(label.id, fields)}
+                onRemove={() => confirmRemoveEncoderLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addEncoderLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
+
+        <PropertiesSection title="Position & Size" open={false}>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={encoder.x} onChange={(e) => patchEncoder({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={encoder.y} onChange={(e) => patchEncoder({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>W</span>
+              <input type="number" min={minSize} value={encoder.w} onChange={(e) => patchEncoder({ w: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+            <label className="properties__field">
+              <span>H</span>
+              <input type="number" min={minSize} value={encoder.h} onChange={(e) => patchEncoder({ h: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={encoder.zIndex ?? 0} onChange={(e) => patchEncoder({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteEncoder}>
+          Delete widget
+        </button>
+      </aside>
+    )
+  }
+
+  if (widget.type === 'switch-rocker') {
+    const sw = widget
+    const minSize = snapToGrid ? gridSize : 1
+    const isTrackExpr = sw.track.colorExpr !== undefined
+    const isBorderExpr = sw.borderColorExpr !== undefined
+
+    function patchSwitch(fields: Partial<RockerSwitchWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === sw.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    async function handleDeleteSwitch(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(sw.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <h2 className="properties__title">Properties</h2>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
+
+        <div className="properties__layer-row">
+          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
+            <span aria-hidden="true">⬆</span> Bring to front
+          </button>
+          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
+            <span aria-hidden="true">⬇</span> Send to back
+          </button>
+        </div>
+
+        <PropertiesSection title="Style" open>
+          <label className="properties__field">
+            <span>Orientation</span>
+            <select value={sw.orientation ?? 'vertical'} onChange={(e) => patchSwitch({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
+              <option value="vertical">Vertical</option>
+              <option value="horizontal">Horizontal</option>
+            </select>
+          </label>
+        </PropertiesSection>
+
+        <PropertiesSection title="Colors" open>
+          <div className="properties__field">
+            <span>Base color</span>
+            <ColorPickerButton
+              value={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ track: { ...sw.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={sw.track.colorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ track: { ...sw.track, colorExpr: code } })}
+              onEnterExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: sw.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: undefined } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={sw.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={sw.borderColorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ borderColorExpr: code })}
+              onEnterExpr={() => patchSwitch({ borderColorExpr: sw.borderColorExpr ?? '' })}
+              onClearExpr={() => patchSwitch({ borderColorExpr: undefined })}
+              opacity={sw.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ borderOpacity: v })}
+            />
+          </div>
+
+          <div className="properties__divider" />
+
+          <span className="properties__section-label">Border radius</span>
+          <CornersInputGrid
+            topLeft={{ value: sw.radiusTopLeft ?? 6, min: 0, onChange: (v) => patchSwitch({ radiusTopLeft: v }) }}
+            topRight={{ value: sw.radiusTopRight ?? 6, min: 0, onChange: (v) => patchSwitch({ radiusTopRight: v }) }}
+            bottomLeft={{ value: sw.radiusBottomLeft ?? 6, min: 0, onChange: (v) => patchSwitch({ radiusBottomLeft: v }) }}
+            bottomRight={{ value: sw.radiusBottomRight ?? 6, min: 0, onChange: (v) => patchSwitch({ radiusBottomRight: v }) }}
+          />
+
+          <div className="properties__divider" />
+
+          <span className="properties__section-label">Border thickness</span>
+          <SidesInputGrid
+            top={{ value: sw.borderWidthTop ?? 1, min: 0, onChange: (v) => patchSwitch({ borderWidthTop: v }) }}
+            right={{ value: sw.borderWidthRight ?? 1, min: 0, onChange: (v) => patchSwitch({ borderWidthRight: v }) }}
+            bottom={{ value: sw.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchSwitch({ borderWidthBottom: v }) }}
+            left={{ value: sw.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchSwitch({ borderWidthLeft: v }) }}
+          />
+        </PropertiesSection>
+
+        <SwitchPositionsEditor
+          positions={sw.positions}
+          activePositionExpr={sw.activePositionExpr}
+          onPatchPositions={(positions) => patchSwitch({ positions })}
+          onPatchActivePositionExpr={(activePositionExpr) => patchSwitch({ activePositionExpr })}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
+          activePositionIndex={activePositionIndex}
+          setActivePositionIndex={setActivePositionIndex}
+          dragPositionIndex={dragPositionIndex}
+          activePositionExprExpanded={activePositionExprExpanded}
+          setActivePositionExprExpanded={setActivePositionExprExpanded}
+          confirm={confirm}
+        />
+
+        <PropertiesSection title="Advanced" open={false}>
+          <span className="properties__section-label">Position & Size</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={sw.x} onChange={(e) => patchSwitch({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={sw.y} onChange={(e) => patchSwitch({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>W</span>
+              <input type="number" min={minSize} value={sw.w} onChange={(e) => patchSwitch({ w: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+            <label className="properties__field">
+              <span>H</span>
+              <input type="number" min={minSize} value={sw.h} onChange={(e) => patchSwitch({ h: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={sw.zIndex ?? 0} onChange={(e) => patchSwitch({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteSwitch}>
+          Delete widget
+        </button>
+      </aside>
+    )
+  }
+
+  if (widget.type === 'switch-dial') {
+    const sw = widget
+    const minSize = snapToGrid ? gridSize : 1
+    const isTrackExpr = sw.track.colorExpr !== undefined
+    const isFillExpr = sw.fill.colorExpr !== undefined
+    const isBorderExpr = sw.borderColorExpr !== undefined
+
+    function patchSwitch(fields: Partial<DialSwitchWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === sw.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    async function handleDeleteSwitch(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(sw.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <h2 className="properties__title">Properties</h2>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
+
+        <div className="properties__layer-row">
+          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
+            <span aria-hidden="true">⬆</span> Bring to front
+          </button>
+          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
+            <span aria-hidden="true">⬇</span> Send to back
+          </button>
+        </div>
+
+        <PropertiesSection title="Style" open>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Start angle</span>
+              <input type="number" value={sw.startAngle ?? 135} onChange={(e) => patchSwitch({ startAngle: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>End angle</span>
+              <input type="number" value={sw.endAngle ?? 405} onChange={(e) => patchSwitch({ endAngle: Number(e.target.value) })} />
+            </label>
+          </div>
+
+          <label className="properties__field">
+            <span>Label anchor</span>
+            <select
+              value={sw.labelAnchor ?? 'auto'}
+              onChange={(e) => patchSwitch({ labelAnchor: e.target.value === 'auto' ? undefined : (e.target.value as DialSwitchWidget['labelAnchor']) })}
+            >
+              <option value="auto">Auto (radial — points outward from each detent)</option>
+              <option value="top">Top</option>
+              <option value="bottom">Bottom</option>
+              <option value="left">Left</option>
+              <option value="right">Right</option>
+            </select>
+          </label>
+          <p className="properties__hint">
+            Auto places each label just outside the dial, pointing away from center along that detent's own angle — usually the right
+            choice. A fixed side pins every label there instead, regardless of angle.
+          </p>
+
+          <label className="properties__field">
+            <span>Interaction</span>
+            <select
+              value={sw.interactionMode ?? 'tap'}
+              onChange={(e) => patchSwitch({ interactionMode: e.target.value === 'tap' ? undefined : (e.target.value as DialSwitchWidget['interactionMode']) })}
+            >
+              <option value="tap">Tap a detent</option>
+              <option value="drag">Press and drag toward a position</option>
+            </select>
+          </label>
+          <p className="properties__hint">
+            {(sw.interactionMode ?? 'tap') === 'tap'
+              ? 'Tap directly on a detent (or its label) to select it.'
+              : "Press anywhere on the dial and drag in the direction you want — you can drag past the widget's own edges. The needle snaps live to whichever position is nearest, so you can see what releasing will select."}
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Colors" open>
+          <div className="properties__field">
+            <span>Dial face color</span>
+            <ColorPickerButton
+              value={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ track: { ...sw.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={sw.track.colorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ track: { ...sw.track, colorExpr: code } })}
+              onEnterExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: sw.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: undefined } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Needle color</span>
+            <ColorPickerButton
+              value={sw.fill.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ fill: { ...sw.fill, color, colorExpr: undefined } })}
+              isExpr={isFillExpr}
+              exprValue={sw.fill.colorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ fill: { ...sw.fill, colorExpr: code } })}
+              onEnterExpr={() => patchSwitch({ fill: { ...sw.fill, colorExpr: sw.fill.colorExpr ?? '' } })}
+              onClearExpr={() => patchSwitch({ fill: { ...sw.fill, colorExpr: undefined } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={sw.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={sw.borderColorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ borderColorExpr: code })}
+              onEnterExpr={() => patchSwitch({ borderColorExpr: sw.borderColorExpr ?? '' })}
+              onClearExpr={() => patchSwitch({ borderColorExpr: undefined })}
+              opacity={sw.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ borderOpacity: v })}
+            />
+          </div>
+        </PropertiesSection>
+
+        <SwitchPositionsEditor
+          positions={sw.positions}
+          activePositionExpr={sw.activePositionExpr}
+          onPatchPositions={(positions) => patchSwitch({ positions })}
+          onPatchActivePositionExpr={(activePositionExpr) => patchSwitch({ activePositionExpr })}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
+          activePositionIndex={activePositionIndex}
+          setActivePositionIndex={setActivePositionIndex}
+          dragPositionIndex={dragPositionIndex}
+          activePositionExprExpanded={activePositionExprExpanded}
+          setActivePositionExprExpanded={setActivePositionExprExpanded}
+          confirm={confirm}
+        />
+
+        <PropertiesSection title="Advanced" open={false}>
+          <span className="properties__section-label">Position & Size</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={sw.x} onChange={(e) => patchSwitch({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={sw.y} onChange={(e) => patchSwitch({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>W</span>
+              <input type="number" min={minSize} value={sw.w} onChange={(e) => patchSwitch({ w: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+            <label className="properties__field">
+              <span>H</span>
+              <input type="number" min={minSize} value={sw.h} onChange={(e) => patchSwitch({ h: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={sw.zIndex ?? 0} onChange={(e) => patchSwitch({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteSwitch}>
+          Delete widget
+        </button>
+      </aside>
+    )
+  }
+
+  // Only reached once gauge/adjuster/encoder/switch have returned early
+  // above, so widget is known to be a ButtonWidget | MorphButtonWidget here —
+  // captured into a const for the same reason as those branches' own capture
   // above (TS doesn't retain narrowing inside nested closures like the
   // functions below).
   const statefulWidget = widget as StatefulWidget
+  // Same narrowing-loss reasoning as statefulWidget above, for the new
+  // `events` field — EventfulWidget, not StatefulWidget, since events isn't
+  // part of the WidgetState/statesEnabled/activeStateExpr machinery.
+  const eventfulWidget = widget as EventfulWidget
 
   function patch(fields: Partial<Widget>): void {
     // fields' shape always matches widget's actual type at each call site
@@ -1593,291 +2630,289 @@ export function PropertiesPanel(): React.JSX.Element {
     <aside className="properties" style={{ width: propertiesWidth }}>
       {resizeHandle}
       <h2 className="properties__title">Properties</h2>
+      <p className="properties__widget-type">{WIDGET_TYPE_LABELS[statefulWidget.type]}</p>
 
-      <div className="properties__file-row">
-        <button type="button" className="properties__file-button" onClick={() => bringToFront(selectedWidgetIds)}>
-          Bring to front
+      <div className="properties__layer-row">
+        <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
+          <span aria-hidden="true">⬆</span> Bring to front
         </button>
-        <button type="button" className="properties__file-button" onClick={() => sendToBack(selectedWidgetIds)}>
-          Send to back
+        <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
+          <span aria-hidden="true">⬇</span> Send to back
         </button>
       </div>
-      <div className="properties__divider" />
 
-      <label className="properties__checkbox">
-        <input
-          type="checkbox"
-          checked={widget.statesEnabled ?? false}
-          onChange={(e) => handleToggleStatesEnabled(e.target.checked)}
-        />
-        Enable states
-      </label>
-      <p className="properties__hint">
-        {widget.statesEnabled
-          ? 'Every state below is independent — labels, color, border, everything except keys and placement.'
-          : 'This widget has one look, and its clicked/pressed color is worked out automatically from it.'}
-      </p>
-
-      {widget.statesEnabled && (
-        <div className="state-tabs">
-          {widget.states.map((s, index) => (
-            <div
-              key={s.id}
-              className={`state-tab${index === stateIndex ? ' state-tab--active' : ''}${index === 0 ? ' state-tab--solo' : ''}`}
-              draggable={index !== 0}
-              onDragStart={() => (dragStateIndex.current = index)}
-              onDragOver={(e) => {
-                if (index !== 0) e.preventDefault()
-              }}
-              onDrop={() => handleReorderState(index)}
-              onClick={() => setActiveStateIndex(index)}
-            >
-              <span className="state-tab__name">{s.name}</span>
-              {index !== 0 && (
-                <button
-                  type="button"
-                  className="state-tab__remove"
-                  title="Delete state"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    confirmDeleteState(index)
-                  }}
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          ))}
-          <button type="button" className="state-tab state-tab--add" onClick={handleAddState} title="Add state">
-            +
-          </button>
-          <div className="state-tabs__spacer" />
-          {widget.activeStateExpr !== undefined ? (
-            <button
-              type="button"
-              className="color-picker-button__clear"
-              title="Remove the state expression"
-              onClick={() => patch({ activeStateExpr: undefined })}
-            >
-              ×
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="color-picker-button__fx"
-              title="Pick the active state with an expression"
-              onClick={() => patch({ activeStateExpr: '' })}
-            >
-              ƒx
-            </button>
-          )}
-        </div>
-      )}
-
-      {widget.statesEnabled && widget.activeStateExpr !== undefined && (
-        <div className="color-picker-button__expr-panel">
-          <p className="properties__hint">
-            Returns the exact name of the state that should be active. Falls back to the first state if it throws, returns
-            something else, or names a state that doesn't exist.
-          </p>
-          <div className="color-picker-button__expr-editor-wrap">
-            <CodeEditor
-              value={widget.activeStateExpr}
-              onChange={(code) => patch({ activeStateExpr: code })}
-              placeholder={ACTIVE_STATE_EXPR_PLACEHOLDER}
-              minimal
-            />
-            <button
-              type="button"
-              className="color-picker-button__expand"
-              title="Expand"
-              onClick={() => setActiveStateExprExpanded(true)}
-            >
-              ⤢
-            </button>
-          </div>
-        </div>
-      )}
-
-      {activeStateExprExpanded && (
-        <ExpressionEditorModal
-          value={widget.activeStateExpr ?? ''}
-          onChange={(code) => patch({ activeStateExpr: code })}
-          placeholder={ACTIVE_STATE_EXPR_PLACEHOLDER}
-          onClose={() => setActiveStateExprExpanded(false)}
-        />
-      )}
-
-      {widget.statesEnabled && (
-        <label className="properties__field">
-          <span>State name</span>
+      <PropertiesSection title="States" open>
+        <label className="properties__toggle">
           <input
-            value={activeState.name}
-            disabled={stateIndex === 0 || activeState.isClicked}
-            onChange={(e) => renameState(stateIndex, e.target.value)}
+            type="checkbox"
+            checked={widget.statesEnabled ?? false}
+            onChange={(e) => handleToggleStatesEnabled(e.target.checked)}
           />
+          <span className="properties__toggle-track" />
+          Enable states
         </label>
-      )}
+        <p className="properties__hint">
+          {widget.statesEnabled
+            ? 'Every state below is independent — labels, color, border, everything except keys and placement.'
+            : 'This widget has one look, and its clicked/pressed color is worked out automatically from it.'}
+        </p>
 
-      <div className="properties__divider" />
+        {widget.statesEnabled && (
+          <>
+            <div className="properties__field">
+              <span>States</span>
+              <div className="color-picker-button__row">
+                <div className="state-tabs-box">
+                  <div className="state-tabs">
+                    {widget.states.map((s, index) => (
+                      <div
+                        key={s.id}
+                        className={`state-tab${index === stateIndex ? ' state-tab--active' : ''}${index === 0 ? ' state-tab--solo' : ''}`}
+                        draggable={index !== 0}
+                        onDragStart={() => (dragStateIndex.current = index)}
+                        onDragOver={(e) => {
+                          if (index !== 0) e.preventDefault()
+                        }}
+                        onDrop={() => handleReorderState(index)}
+                        onClick={() => setActiveStateIndex(index)}
+                      >
+                        <span className="state-tab__name">{s.name}</span>
+                        {index !== 0 && (
+                          <button
+                            type="button"
+                            className="state-tab__remove"
+                            title="Delete state"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              confirmDeleteState(index)
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button type="button" className="state-tab state-tab--add" onClick={handleAddState} title="Add state">
+                      +
+                    </button>
+                  </div>
+                </div>
+                {widget.activeStateExpr !== undefined ? (
+                  <button
+                    type="button"
+                    className="color-picker-button__clear"
+                    title="Remove the state expression"
+                    onClick={() => patch({ activeStateExpr: undefined })}
+                  >
+                    ×
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="color-picker-button__fx"
+                    title="Pick the active state with an expression"
+                    onClick={() => patch({ activeStateExpr: '' })}
+                  >
+                    ƒx
+                  </button>
+                )}
+              </div>
+            </div>
 
-      {activeState.labels.map((label, index) => (
-        <div key={label.id}>
-          <details className="properties__advanced" open>
-            <summary>Label {index + 1}</summary>
+            <button type="button" className="properties__file-button" onClick={handleResetStates}>
+              Reset states
+            </button>
+          </>
+        )}
+
+        {widget.statesEnabled && widget.activeStateExpr !== undefined && (
+          <div className="color-picker-button__expr-panel">
+            <p className="properties__hint">
+              Returns the exact name of the state that should be active. Falls back to the first state if it throws, returns
+              something else, or names a state that doesn't exist.
+            </p>
+            <div className="color-picker-button__expr-editor-wrap">
+              <CodeEditor
+                value={widget.activeStateExpr}
+                onChange={(code) => patch({ activeStateExpr: code })}
+                placeholder={ACTIVE_STATE_EXPR_PLACEHOLDER}
+                minimal
+              />
+              <button
+                type="button"
+                className="color-picker-button__expand"
+                title="Expand"
+                onClick={() => setActiveStateExprExpanded(true)}
+              >
+                ⤢
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeStateExprExpanded && (
+          <ExpressionEditorModal
+            value={widget.activeStateExpr ?? ''}
+            onChange={(code) => patch({ activeStateExpr: code })}
+            placeholder={ACTIVE_STATE_EXPR_PLACEHOLDER}
+            onClose={() => setActiveStateExprExpanded(false)}
+          />
+        )}
+
+        {widget.statesEnabled && (
+          <label className="properties__field">
+            <span>State name</span>
+            <input
+              value={activeState.name}
+              disabled={stateIndex === 0 || activeState.isClicked}
+              onChange={(e) => renameState(stateIndex, e.target.value)}
+            />
+          </label>
+        )}
+      </PropertiesSection>
+
+      <PropertiesSection title="Labels" badge={activeState.labels.length} open>
+        {activeState.labels.map((label) => (
+          <PropertiesSection key={label.id} title={labelSectionTitle(label)} open={false}>
             <LabelFields
               label={label}
               backgroundColor={effectiveColor}
               onChange={(fields) => patchLabel(label.id, fields)}
               onRemove={() => confirmRemoveLabel(label.id)}
             />
-          </details>
-          <div className="properties__divider" />
-        </div>
-      ))}
-      <button type="button" className="properties__file-button" onClick={addLabel}>
-        + Add label
-      </button>
+          </PropertiesSection>
+        ))}
+        <button type="button" className="properties__file-button" onClick={addLabel}>
+          + Add label
+        </button>
+      </PropertiesSection>
 
-      <div className="properties__divider" />
+      <PropertiesSection title="Color" open>
+        {widget.type === 'button' || selectedBlockId === null ? (
+          <>
+            {/* A plain div, not a <label> — ColorPickerButton's popover nests
+                OpacityField, which renders its own <label>, and a <label>
+                nested inside another <label> is invalid HTML that browsers
+                handle inconsistently (clicks inside the inner one could also
+                re-trigger the outer label's default action on its first
+                labelable descendant — the trigger button — closing the
+                popover right as you release the mouse). */}
+            {widget.type === 'morph' && (
+              <p className="properties__hint">
+                This widget's own color — every base block inherits it while left on Auto. Select a block on the canvas to override
+                just that one.
+              </p>
+            )}
+            <div className="properties__field">
+              <span>Color</span>
+              <ColorPickerButton
+                key={`${activeState.id}-color`}
+                value={effectiveColor}
+                onChange={(color) => patchState({ color, colorExpr: undefined })}
+                isExpr={isColorExpr}
+                exprValue={activeState.colorExpr ?? ''}
+                onExprChange={(code) => patchState({ colorExpr: code })}
+                onEnterExpr={() => patchState({ colorExpr: activeState.colorExpr ?? '' })}
+                onClearExpr={() => patchState({ colorExpr: undefined })}
+                opacity={activeState.backgroundOpacity ?? 1}
+                onOpacityChange={(v) => patchState({ backgroundOpacity: v })}
+              />
+            </div>
 
-      {widget.type === 'button' || selectedBlockId === null ? (
-        <>
-          {/* A plain div, not a <label> — ColorPickerButton's popover nests
-              OpacityField, which renders its own <label>, and a <label>
-              nested inside another <label> is invalid HTML that browsers
-              handle inconsistently (clicks inside the inner one could also
-              re-trigger the outer label's default action on its first
-              labelable descendant — the trigger button — closing the
-              popover right as you release the mouse). */}
-          {widget.type === 'morph' && (
-            <p className="properties__hint">
-              This widget's own color — every base block inherits it while left on Auto. Select a block on the canvas to override
-              just that one.
-            </p>
-          )}
-          <div className="properties__field">
-            <span>Color</span>
-            <ColorPickerButton
-              key={`${activeState.id}-color`}
-              value={effectiveColor}
-              onChange={(color) => patchState({ color, colorExpr: undefined })}
-              isExpr={isColorExpr}
-              exprValue={activeState.colorExpr ?? ''}
-              onExprChange={(code) => patchState({ colorExpr: code })}
-              onEnterExpr={() => patchState({ colorExpr: activeState.colorExpr ?? '' })}
-              onClearExpr={() => patchState({ colorExpr: undefined })}
-              opacity={activeState.backgroundOpacity ?? 1}
-              onOpacityChange={(v) => patchState({ backgroundOpacity: v })}
+            <div className="properties__field">
+              <span>Border color</span>
+              <ColorPickerButton
+                key={`${activeState.id}-border`}
+                value={activeState.borderColor ?? pickAutoBorderColor(effectiveColor)}
+                onChange={(color) => patchState({ borderColor: color, borderColorExpr: undefined })}
+                isExpr={isBorderColorExpr}
+                exprValue={activeState.borderColorExpr ?? ''}
+                onExprChange={(code) => patchState({ borderColorExpr: code })}
+                onEnterExpr={() => patchState({ borderColorExpr: activeState.borderColorExpr ?? '' })}
+                onClearExpr={() => patchState({ borderColorExpr: undefined })}
+                auto={isAutoBorderColor}
+                onAuto={() => patchState({ borderColor: undefined, borderColorExpr: undefined })}
+                opacity={activeState.borderOpacity ?? 1}
+                onOpacityChange={(v) => patchState({ borderOpacity: v })}
+              />
+            </div>
+          </>
+        ) : (
+          <p className="properties__hint">Editing this block's own color — see below.</p>
+        )}
+      </PropertiesSection>
+
+      <PropertiesSection title="Appearance" open={false}>
+        {widget.type === 'button' ? (
+          <>
+            <span className="properties__section-label">Spacing</span>
+            <SidesInputGrid
+              top={{ value: activeState.spacingTop ?? 0, min: -1, onChange: (v) => patchState({ spacingTop: v }) }}
+              right={{ value: activeState.spacingRight ?? 0, min: -1, onChange: (v) => patchState({ spacingRight: v }) }}
+              bottom={{ value: activeState.spacingBottom ?? 0, min: -1, onChange: (v) => patchState({ spacingBottom: v }) }}
+              left={{ value: activeState.spacingLeft ?? 0, min: -1, onChange: (v) => patchState({ spacingLeft: v }) }}
             />
-          </div>
 
-          <div className="properties__field">
-            <span>Border color</span>
-            <ColorPickerButton
-              key={`${activeState.id}-border`}
-              value={activeState.borderColor ?? pickAutoBorderColor(effectiveColor)}
-              onChange={(color) => patchState({ borderColor: color, borderColorExpr: undefined })}
-              isExpr={isBorderColorExpr}
-              exprValue={activeState.borderColorExpr ?? ''}
-              onExprChange={(code) => patchState({ borderColorExpr: code })}
-              onEnterExpr={() => patchState({ borderColorExpr: activeState.borderColorExpr ?? '' })}
-              onClearExpr={() => patchState({ borderColorExpr: undefined })}
-              auto={isAutoBorderColor}
-              onAuto={() => patchState({ borderColor: undefined, borderColorExpr: undefined })}
-              opacity={activeState.borderOpacity ?? 1}
-              onOpacityChange={(v) => patchState({ borderOpacity: v })}
+            <div className="properties__divider" />
+
+            <span className="properties__section-label">Border radius</span>
+            <CornersInputGrid
+              topLeft={{ value: activeState.radiusTopLeft ?? 4, min: 0, onChange: (v) => patchState({ radiusTopLeft: v }) }}
+              topRight={{ value: activeState.radiusTopRight ?? 4, min: 0, onChange: (v) => patchState({ radiusTopRight: v }) }}
+              bottomLeft={{ value: activeState.radiusBottomLeft ?? 4, min: 0, onChange: (v) => patchState({ radiusBottomLeft: v }) }}
+              bottomRight={{ value: activeState.radiusBottomRight ?? 4, min: 0, onChange: (v) => patchState({ radiusBottomRight: v }) }}
             />
-          </div>
-        </>
-      ) : (
-        <p className="properties__hint">Editing this block's own color — see below.</p>
-      )}
 
-      <div className="properties__divider" />
+            <div className="properties__divider" />
 
-      {widget.type === 'button' ? (
-        <>
-          <span className="properties__section-label">Spacing</span>
-          <SidesInputGrid
-            top={{ value: activeState.spacingTop ?? 0, min: -1, onChange: (v) => patchState({ spacingTop: v }) }}
-            right={{ value: activeState.spacingRight ?? 0, min: -1, onChange: (v) => patchState({ spacingRight: v }) }}
-            bottom={{ value: activeState.spacingBottom ?? 0, min: -1, onChange: (v) => patchState({ spacingBottom: v }) }}
-            left={{ value: activeState.spacingLeft ?? 0, min: -1, onChange: (v) => patchState({ spacingLeft: v }) }}
-          />
-
-          <div className="properties__divider" />
-
-          <span className="properties__section-label">Border radius</span>
-          <CornersInputGrid
-            topLeft={{ value: activeState.radiusTopLeft ?? 4, min: 0, onChange: (v) => patchState({ radiusTopLeft: v }) }}
-            topRight={{ value: activeState.radiusTopRight ?? 4, min: 0, onChange: (v) => patchState({ radiusTopRight: v }) }}
-            bottomLeft={{ value: activeState.radiusBottomLeft ?? 4, min: 0, onChange: (v) => patchState({ radiusBottomLeft: v }) }}
-            bottomRight={{ value: activeState.radiusBottomRight ?? 4, min: 0, onChange: (v) => patchState({ radiusBottomRight: v }) }}
-          />
-
-          <div className="properties__divider" />
-
-          <span className="properties__section-label">Border thickness</span>
-          <SidesInputGrid
-            top={{ value: activeState.borderWidthTop ?? 1, min: 0, onChange: (v) => patchState({ borderWidthTop: v }) }}
-            right={{ value: activeState.borderWidthRight ?? 1, min: 0, onChange: (v) => patchState({ borderWidthRight: v }) }}
-            bottom={{ value: activeState.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchState({ borderWidthBottom: v }) }}
-            left={{ value: activeState.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchState({ borderWidthLeft: v }) }}
-          />
-        </>
-      ) : (
-        (() => {
-          const selectedBlock = widget.blocks.find((b) => b.id === selectedBlockId)
-          if (!selectedBlock) {
-            return <p className="properties__hint">Select a base block on the canvas to edit its spacing/radius/border.</p>
-          }
-          const merge = blockMerge(widget.blocks, selectedBlock, activeState.id)
-          const override = selectedBlock.perState[activeState.id] ?? {}
-          return (
-            <MorphBlockFields
-              block={selectedBlock}
-              merge={merge}
-              override={override}
-              widgetColor={effectiveColor}
-              widgetBorderColor={activeState.borderColor ?? pickAutoBorderColor(effectiveColor)}
-              widgetBackgroundOpacity={activeState.backgroundOpacity ?? 1}
-              widgetBorderOpacity={activeState.borderOpacity ?? 1}
-              onChange={(fields) => patchBlock(selectedBlock.id, fields)}
+            <span className="properties__section-label">Border thickness</span>
+            <SidesInputGrid
+              top={{ value: activeState.borderWidthTop ?? 1, min: 0, onChange: (v) => patchState({ borderWidthTop: v }) }}
+              right={{ value: activeState.borderWidthRight ?? 1, min: 0, onChange: (v) => patchState({ borderWidthRight: v }) }}
+              bottom={{ value: activeState.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchState({ borderWidthBottom: v }) }}
+              left={{ value: activeState.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchState({ borderWidthLeft: v }) }}
             />
-          )
-        })()
-      )}
+          </>
+        ) : (
+          (() => {
+            const selectedBlock = widget.blocks.find((b) => b.id === selectedBlockId)
+            if (!selectedBlock) {
+              return <p className="properties__hint">Select a base block on the canvas to edit its spacing/radius/border.</p>
+            }
+            const merge = blockMerge(widget.blocks, selectedBlock, activeState.id)
+            const override = selectedBlock.perState[activeState.id] ?? {}
+            return (
+              <MorphBlockFields
+                block={selectedBlock}
+                merge={merge}
+                override={override}
+                widgetColor={effectiveColor}
+                widgetBorderColor={activeState.borderColor ?? pickAutoBorderColor(effectiveColor)}
+                widgetBackgroundOpacity={activeState.backgroundOpacity ?? 1}
+                widgetBorderOpacity={activeState.borderOpacity ?? 1}
+                onChange={(fields) => patchBlock(selectedBlock.id, fields)}
+              />
+            )
+          })()
+        )}
+      </PropertiesSection>
 
-      <div className="properties__divider" />
+      <PropertiesSection title="Actions" badge={2} open>
+        <EventSequenceEditor
+          title="Press"
+          steps={eventfulWidget.events.press}
+          onChange={(steps) => patch({ events: { press: steps, release: eventfulWidget.events.release } })}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
+        />
+        <EventSequenceEditor
+          title="Release"
+          steps={eventfulWidget.events.release}
+          onChange={(steps) => patch({ events: { press: eventfulWidget.events.press, release: steps } })}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
+        />
+      </PropertiesSection>
 
-      <label className="properties__field">
-        <span>Z-index</span>
-        <div className="color-picker-row">
-          <button
-            type="button"
-            className={`color-picker-row__auto${activeState.zIndex === undefined ? ' color-picker-row__auto--active' : ''}`}
-            onClick={() => patchState({ zIndex: undefined })}
-          >
-            Auto
-          </button>
-          <input
-            type="number"
-            value={activeState.zIndex ?? 0}
-            onChange={(e) => patchState({ zIndex: Math.round(Number(e.target.value)) })}
-          />
-        </div>
-      </label>
-      <p className="properties__hint">Auto follows normal paint order (see Bring to front / Send to back above).</p>
-
-      <div className="properties__divider" />
-
-      <ActionFields action={widget.action} onChange={(action) => patch({ action })} dcsBiosActionEnabled={dcsBiosActionEnabled} />
-
-      <div className="properties__divider" />
-
-      <details className="properties__advanced">
-        <summary>Advanced</summary>
+      <PropertiesSection title="Position & Size" open={false}>
         <div className="properties__grid2">
           <label className="properties__field">
             <span>X</span>
@@ -1937,13 +2972,28 @@ export function PropertiesPanel(): React.JSX.Element {
             handles to add more.
           </p>
         )}
-      </details>
 
-      <div className="properties__divider" />
+        <div className="properties__divider" />
 
-      <button type="button" className="properties__file-button" onClick={handleResetStates}>
-        Reset states
-      </button>
+        <label className="properties__field">
+          <span>Z-index</span>
+          <div className="color-picker-row">
+            <button
+              type="button"
+              className={`color-picker-row__auto${activeState.zIndex === undefined ? ' color-picker-row__auto--active' : ''}`}
+              onClick={() => patchState({ zIndex: undefined })}
+            >
+              Auto
+            </button>
+            <input
+              type="number"
+              value={activeState.zIndex ?? 0}
+              onChange={(e) => patchState({ zIndex: Math.round(Number(e.target.value)) })}
+            />
+          </div>
+        </label>
+        <p className="properties__hint">Auto follows normal paint order (see Bring to front / Send to back above).</p>
+      </PropertiesSection>
 
       <button className="properties__delete" onClick={handleDelete}>
         Delete widget

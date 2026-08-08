@@ -117,7 +117,7 @@ export function useAdjusterDrag(
       if (pending === null) return
       const value = valueFor(pending)
       dragValueRef.current = value
-      triggerWidget(widget.id, value, false)
+      triggerWidget(widget.id, 'move', value, false)
     })
   }
 
@@ -132,6 +132,11 @@ export function useAdjusterDrag(
     }
     const fraction = fractionFromEvent(widget, e, rect)
     setDragFraction(fraction)
+    // Fires once, immediately — a new, explicit 'press' event ahead of the
+    // throttled 'move' ticks below. Preserves "fires on first touch" legacy
+    // behavior, previously folded into the very first scheduleSend call.
+    dragValueRef.current = valueFor(fraction)
+    triggerWidget(widget.id, 'press', dragValueRef.current)
     scheduleSend(fraction)
   }
 
@@ -154,18 +159,21 @@ export function useAdjusterDrag(
     }
     const fraction = fractionFromEvent(widget, e, rect)
     setDragFraction(fraction)
-    // Final, unthrottled send — guarantees the last position commits even
-    // if a scheduled rAF tick from scheduleSend was still pending. Also
+    // Final, unthrottled 'move' send — guarantees the last position commits
+    // even if a scheduled rAF tick from scheduleSend was still pending. Also
     // final in the triggerWidget/runUpdateState sense (the default when
     // omitted) — the settled value gets a synchronous save, same as a plain
-    // click, rather than the debounced save every in-flight tick above uses.
+    // press/release, rather than the debounced save every in-flight tick
+    // above uses. Plus a new, separate 'release' event — same value, its own
+    // (possibly empty) sequence.
     pendingFractionRef.current = null
     const value = valueFor(fraction)
     dragValueRef.current = value
     // Gesture's over — lets the reconciliation effect above act on the next
     // variables update instead of ignoring it as a stale mid-drag echo.
     draggingRef.current = false
-    triggerWidget(widget.id, value)
+    triggerWidget(widget.id, 'move', value)
+    triggerWidget(widget.id, 'release', value)
   }
 
   return { dragFraction, handlePointerDown, handlePointerMove, handlePointerUp }

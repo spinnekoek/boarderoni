@@ -1,8 +1,33 @@
 import { create } from 'zustand'
 import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN } from '@shared/constants'
-import { DEFAULT_DASHBOARD, type ClientToServer, type Dashboard, type DeviceInfo, type ServerToClient, type Widget } from '@shared/types'
+import {
+  DEFAULT_DASHBOARD,
+  type ClientToServer,
+  type Dashboard,
+  type DeviceInfo,
+  type SequenceStep,
+  type ServerToClient,
+  type Widget,
+  type WidgetEventKind
+} from '@shared/types'
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSettings, DcsBiosStatus, DcsBiosWorkerStats } from '@shared/dcsBiosTypes'
-import { getDeviceId, setLastDeckId, clearLastDeckId } from './id'
+import { getDeviceId, setLastDeckId, clearLastDeckId, nextId } from './id'
+
+// A widget action-sequence failure surfaced prominently on the deployed view
+// client (see ToastStack.tsx) — distinct from `errors` (below), which is
+// keyed only by widgetId and drives a small inline indicator on the widget
+// itself. `id` is client-generated and independent of `widgetId`, since one
+// widget can stack multiple toasts over time.
+export interface ActionErrorToast {
+  id: string
+  widgetId: string
+  widgetLabel?: string
+  event?: WidgetEventKind
+  stepIndex?: number
+  stepKind?: SequenceStep['kind']
+  message: string
+  createdAt: number
+}
 
 // A field catalog fetch is either not yet requested (absent from the map),
 // in flight, resolved, or failed — EventsModal's field browser (see
@@ -22,6 +47,10 @@ interface DashboardStore {
   mode: Mode
   connected: boolean
   errors: Record<string, string>
+  // Capped (see action:error handler) — bounds memory even if nothing is
+  // ever mounted to dismiss these (e.g. stray errors while in edit mode,
+  // where ToastStack isn't rendered).
+  toasts: ActionErrorToast[]
   selectedWidgetIds: string[]
   // Which base block of a selected morph widget the properties panel's
   // spacing/radius/border sub-panel targets — reset to null on every
@@ -80,12 +109,13 @@ interface DashboardStore {
   sendToBack: (ids: string[]) => void
   removeWidget: (id: string) => void
   removeWidgets: (ids: string[]) => void
-  // value is set only for a live AdjusterWidget drag — see triggerWidget's
-  // implementation and the 'action:trigger' WS message shape in types.ts.
-  // final: false marks an in-flight drag tick (debounced server-side save
-  // instead of a synchronous one); omit/true for a plain click or the drag's
-  // final commit on pointer-up.
-  triggerWidget: (id: string, value?: number, final?: boolean) => void
+  // event selects which of the widget's events[...] sequences to run. value
+  // is set only for a live AdjusterWidget drag — see the 'action:trigger' WS
+  // message shape in types.ts. final: false marks an in-flight drag tick
+  // (debounced server-side save instead of a synchronous one); omit/true for
+  // a press/release event or the drag's final commit on pointer-up.
+  triggerWidget: (id: string, event: WidgetEventKind, value?: number, final?: boolean) => void
+  dismissToast: (id: string) => void
   selectWidget: (id: string | null, options?: { additive?: boolean }) => void
   // Marquee (shift-drag) selection — replaces the current selection by
   // default, or unions with it when additive (shift-drag always passes
@@ -131,7 +161,7 @@ function sendHello(mode: Mode): void {
 // and by the close listener's DECK_CLOSE_CODE_UNKNOWN branch below.
 function pickerResetState(): Pick<
   DashboardStore,
-  'deckId' | 'connected' | 'dashboard' | 'devices' | 'errors' | 'selectedWidgetIds' | 'selectedBlockId' | 'activeStateIndex'
+  'deckId' | 'connected' | 'dashboard' | 'devices' | 'errors' | 'toasts' | 'selectedWidgetIds' | 'selectedBlockId' | 'activeStateIndex'
 > {
   return {
     deckId: null,
@@ -139,10 +169,24 @@ function pickerResetState(): Pick<
     dashboard: DEFAULT_DASHBOARD,
     devices: [],
     errors: {},
+    toasts: [],
     selectedWidgetIds: [],
     selectedBlockId: null,
     activeStateIndex: 0
   }
+}
+
+// Button/Morph keep labels per-state (states[0].labels[0]); Gauge/Adjuster/
+// Encoder keep a flat labels[]; the switch widgets keep labels per-position
+// (positions[0].labels[0]) — no single field works for all of them, hence
+// the switch. Gauge is included even though it can't actually fire an
+// action/error, purely so this stays a total function over Widget rather
+// than needing its own narrower parameter type.
+function widgetDisplayLabel(widget: Widget | undefined): string | undefined {
+  if (!widget) return undefined
+  if (widget.type === 'button' || widget.type === 'morph') return widget.states[0]?.labels[0]?.text
+  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial') return widget.positions[0]?.labels[0]?.text
+  return widget.labels[0]?.text
 }
 
 export const useDashboardStore = create<DashboardStore>((set, get) => ({
@@ -151,6 +195,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   mode: 'edit',
   connected: false,
   errors: {},
+  toasts: [],
   selectedWidgetIds: [],
   selectedBlockId: null,
   activeStateIndex: 0,
@@ -253,6 +298,18 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set((s) => ({ dashboard: { ...s.dashboard, variables: message.variables } }))
       } else if (message.type === 'action:error') {
         set((s) => ({ errors: { ...s.errors, [message.widgetId]: message.message } }))
+        const widget = get().dashboard.widgets.find((w) => w.id === message.widgetId)
+        const toast: ActionErrorToast = {
+          id: nextId(),
+          widgetId: message.widgetId,
+          widgetLabel: widgetDisplayLabel(widget),
+          event: message.detail?.event,
+          stepIndex: message.detail?.stepIndex,
+          stepKind: message.detail?.stepKind,
+          message: message.message,
+          createdAt: Date.now()
+        }
+        set((s) => ({ toasts: [...s.toasts, toast].slice(-5) }))
       } else if (message.type === 'devices:sync') {
         set({ devices: message.devices })
       } else if (message.type === 'dcsbios:aircraft-list') {
@@ -375,7 +432,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => !idSet.has(w)), selectedBlockId: null }))
   },
 
-  triggerWidget: (id, value, final) => {
+  triggerWidget: (id, event, value, final) => {
     // Optimistically clear any error from a previous attempt — otherwise a
     // stale red banner sticks on the widget forever, even after fixing
     // whatever caused it, since nothing else ever removes an entry here. A
@@ -386,7 +443,11 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       delete errors[id]
       return { errors }
     })
-    send({ type: 'action:trigger', widgetId: id, ...(value !== undefined && { value }), ...(final === false && { final }) })
+    send({ type: 'action:trigger', widgetId: id, event, ...(value !== undefined && { value }), ...(final === false && { final }) })
+  },
+
+  dismissToast: (id) => {
+    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
   },
 
   selectWidget: (id, options) => {

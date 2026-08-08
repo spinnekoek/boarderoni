@@ -11,14 +11,20 @@ export function ButtonWidgetContent({
   interactive,
   error,
   variables,
-  onTrigger
+  onKeyboardActivate
 }: {
   widget: ButtonWidget
   state: WidgetState
   interactive: boolean
   error?: string
   variables: VariableMap
-  onTrigger?: () => void
+  // The real trigger fires on pointerdown/pointerup (see ViewCanvas.tsx's
+  // press()/release()), not this onClick — this only covers keyboard/
+  // assistive-tech activation, which dispatches a synthetic click with no
+  // pointer events at all. Guarded by e.detail === 0 (see the onClick
+  // handler below) so a real pointer/touch click doesn't also fire this and
+  // double-trigger.
+  onKeyboardActivate?: () => void
 }): React.JSX.Element {
   const resolvedColor = resolveColor(state, variables)
   const backgroundColor = resolvedColor.color ?? DEFAULT_WIDGET_COLOR
@@ -40,7 +46,14 @@ export function ButtonWidgetContent({
 
   if (interactive) {
     return (
-      <button className="deck-button" style={buttonStyle} onClick={onTrigger} title={actionTitle(widget.action)}>
+      <button
+        className="deck-button"
+        style={buttonStyle}
+        onClick={(e) => {
+          if (e.detail === 0) onKeyboardActivate?.()
+        }}
+        title={actionTitle(widget)}
+      >
         {labelElements}
         {error && <span className="deck-button__error">{error}</span>}
       </button>

@@ -18,18 +18,24 @@ import { keyboard, Key } from '@nut-tree-fork/nut-js'
 import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN } from '../shared/constants'
 import {
   DEFAULT_DASHBOARD,
+  type ActionStep,
   type ButtonWidget,
   type ClientToServer,
   type Dashboard,
   type DeckSummary,
   type DeviceInfo,
   type EventSource,
+  type KeypressAction,
   type SendDcsCommandAction,
+  type SequenceStep,
   type ServerToClient,
   type Variable,
   type VariableValue,
-  type Widget
+  type Widget,
+  type WidgetAction,
+  type WidgetEventKind
 } from '../shared/types'
+import { getEventSteps } from '../shared/widgetEvents'
 import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression } from '../shared/expr'
 import { EVENT_SOURCE_PRODUCERS } from './eventSourceProducers'
 import { getAppSettings, updateAppSettings } from './appSettings'
@@ -69,11 +75,71 @@ interface LegacyButtonWidget {
   states?: ButtonWidget['states']
 }
 
-function migrateWidget(widget: Widget & LegacyButtonWidget): Widget {
-  // Morph/gauge/adjuster widgets never existed in any of the legacy shapes
-  // below — they're always created with their current shape from the start
-  // (morph with states[]/blocks[], gauge/adjuster with no states[] at all).
-  if (widget.type === 'morph' || widget.type === 'gauge' || widget.type === 'adjuster') return widget
+// Pre-events shape: one `action: WidgetAction` field per widget, before it
+// was replaced by `events: {press,release[,move]}` sequences (see
+// SequenceStep/WidgetEventKind in shared/types.ts). Only Button/Morph/
+// Adjuster ever had this — Gauge was always actionless.
+interface LegacyActionWidget {
+  action?: WidgetAction
+}
+
+function migrateWidgetEvents(widget: Widget & LegacyActionWidget): Widget {
+  if (widget.type === 'gauge') return widget
+  if ('events' in widget && widget.events) return widget // already migrated
+  if (!widget.action) return widget // tolerate a malformed widget with neither shape
+
+  const step: ActionStep = { kind: 'action', id: randomUUID(), action: widget.action }
+  const { action: _action, ...rest } = widget
+
+  if (widget.type === 'adjuster') {
+    // Legacy drag behavior fired continuously while dragging — maps to
+    // 'move' so a migrated widget's actual trigger moments don't change.
+    return { ...rest, events: { press: [], release: [], move: [step] } } as Widget
+  }
+  // Button/Morph: legacy behavior fired on the native onClick (effectively
+  // "tap completed") — maps to 'release', matching where the new
+  // pointerdown/pointerup-based wiring fires for the same gesture. 'press'
+  // stays empty so a migrated widget's real trigger moment is unchanged.
+  return { ...rest, events: { press: [], release: [step] } } as Widget
+}
+
+// Pre-split shape: a single 'switch' widget type with a `style` field
+// choosing rocker-vs-rotary rendering, plus a server-authoritative
+// `currentIndex` broadcast to every client — before it was split into
+// RockerSwitchWidget/DialSwitchWidget (each its own widget type, no shared
+// style toggle) and currentIndex was dropped in favor of activePositionExpr
+// + per-client local selection (see SwitchWidgetBase's own comment in
+// shared/types.ts for why a switch's position isn't synced dashboard state).
+interface LegacySwitchWidget {
+  type?: string
+  style?: 'rocker' | 'rotary'
+  currentIndex?: number
+}
+
+function migrateSwitchWidget(widget: Widget & LegacySwitchWidget): Widget {
+  if ((widget.type as string) !== 'switch') return widget as Widget
+  const { style, currentIndex: _currentIndex, ...rest } = widget
+  return { ...rest, type: style === 'rotary' ? 'switch-dial' : 'switch-rocker' } as Widget
+}
+
+function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget): Widget {
+  widget = migrateWidgetEvents(widget) as Widget & LegacyButtonWidget & LegacyActionWidget
+  widget = migrateSwitchWidget(widget) as Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget
+
+  // Morph/gauge/adjuster/encoder/switch widgets never existed in any of the
+  // legacy shapes below — they're always created with their current shape
+  // from the start (morph with states[]/blocks[], the rest with no states[]
+  // at all, the switch types with positions[] instead of a flat labels[]).
+  if (
+    widget.type === 'morph' ||
+    widget.type === 'gauge' ||
+    widget.type === 'adjuster' ||
+    widget.type === 'encoder' ||
+    widget.type === 'switch-rocker' ||
+    widget.type === 'switch-dial'
+  ) {
+    return widget
+  }
 
   if (!Array.isArray(widget.labels)) {
     const { label, fontFamily, fontSize, textColor, textOpacity, align, verticalAlign, padding, ...rest } = widget
@@ -748,50 +814,124 @@ function resyncAllRoomsEventSources(): void {
   for (const room of rooms.values()) syncEventSources(room)
 }
 
-async function triggerAction(room: DeckRoom, widgetId: string, ws: WebSocket, value: number | undefined, final: boolean): Promise<void> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// mode 'down'/'up' press or release only, with no automatic pairing —
+// pairing a 'down' step with a later 'up' step (typically with a DelayStep
+// between them) is how a held-key sequence is built, via the same generic
+// SequenceStep mechanism as any other multi-step action.
+async function runKeypressAction(action: KeypressAction): Promise<void> {
+  const keys = action.keys.map(keyFromName)
+  const mode = action.mode ?? 'press'
+  if (mode !== 'up') await keyboard.pressKey(...keys)
+  if (mode !== 'down') await keyboard.releaseKey(...keys)
+}
+
+// One action step's dispatch by kind — the same three branches
+// triggerAction used to run directly, now shared by runSequence's loop.
+async function runActionStep(room: DeckRoom, action: WidgetAction, value: number | undefined, final: boolean): Promise<void> {
+  if (action.kind === 'update-state') {
+    runUpdateState(room, action.code, value, final) // throws synchronously on failure
+    return
+  }
+  if (action.kind === 'send-dcs-command') {
+    await runSendDcsCommand(room, action, value)
+    return
+  }
+  await runKeypressAction(action)
+}
+
+// Runs one event's SequenceStep[] in order. Aborts the remainder on the
+// first thrown error (matches the old single-action error behavior) and
+// reports it — originating ws only, same targeting sendError always used.
+// Steps that already completed before the failure keep whatever they
+// already did (e.g. a completed update-state step's variable change and
+// broadcast/save already happened via applyVariableUpdates — not rolled
+// back).
+async function runSequence(
+  room: DeckRoom,
+  steps: SequenceStep[],
+  value: number | undefined,
+  final: boolean,
+  ws: WebSocket,
+  widgetId: string,
+  event: WidgetEventKind
+): Promise<void> {
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    try {
+      if (step.kind === 'delay') {
+        await sleep(step.delayMs)
+      } else {
+        await runActionStep(room, step.action, value, final)
+      }
+    } catch (err) {
+      sendError(ws, widgetId, err instanceof Error ? err.message : String(err), { event, stepIndex: i, stepKind: step.kind })
+      return
+    }
+  }
+}
+
+async function triggerAction(
+  room: DeckRoom,
+  widgetId: string,
+  event: WidgetEventKind,
+  ws: WebSocket,
+  value: number | undefined,
+  final: boolean
+): Promise<void> {
   const widget = room.dashboard.widgets.find((w) => w.id === widgetId)
   if (!widget) {
     sendError(ws, widgetId, 'Widget not found')
     return
   }
 
-  // Gauge is passive — it has no `.action` at all, so a stale/malicious
+  // Gauge is passive — it has no `.events` at all, so a stale/malicious
   // action:trigger naming one lands here rather than crashing on
-  // `widget.action.kind` below.
+  // getEventSteps below.
   if (widget.type === 'gauge') {
     sendError(ws, widgetId, 'This widget cannot be triggered')
     return
   }
 
-  if (widget.action.kind === 'update-state') {
-    try {
-      runUpdateState(room, widget.action.code, value, final)
-    } catch (err) {
-      sendError(ws, widgetId, err instanceof Error ? err.message : String(err))
+  // The switch widgets (RockerSwitchWidget/DialSwitchWidget) aren't
+  // EventfulWidget (see their own comment in shared/types.ts) — which
+  // sequence runs depends on which position was picked, not a static
+  // per-type event kind, so they can't go through getEventSteps below.
+  // `value` carries the target position's index (see ClientToServer's
+  // 'action:trigger'). Unlike the pre-split MultiSwitchWidget, this no longer
+  // mutates/broadcasts room.dashboard at all — which position "looks active"
+  // is deliberately client-local (or driven by activePositionExpr reading a
+  // Variable), never server-authoritative dashboard state; see
+  // SwitchWidgetBase's own comment in shared/types.ts.
+  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial') {
+    const index = value !== undefined ? Math.trunc(value) : NaN
+    const position = widget.positions[index]
+    if (event !== 'select' || !position) {
+      sendError(ws, widgetId, 'This widget cannot fire this event')
+      return
     }
+    await runSequence(room, position.onSelect, undefined, true, ws, widgetId, event)
     return
   }
 
-  if (widget.action.kind === 'send-dcs-command') {
-    try {
-      await runSendDcsCommand(room, widget.action, value)
-    } catch (err) {
-      sendError(ws, widgetId, err instanceof Error ? err.message : String(err))
-    }
+  const steps = getEventSteps(widget, event)
+  if (steps === undefined) {
+    sendError(ws, widgetId, `This widget cannot fire a "${event}" event`)
     return
   }
-
-  try {
-    const keys = widget.action.keys.map(keyFromName)
-    await keyboard.pressKey(...keys)
-    await keyboard.releaseKey(...keys)
-  } catch (err) {
-    sendError(ws, widgetId, err instanceof Error ? err.message : String(err))
-  }
+  await runSequence(room, steps, value, final, ws, widgetId, event)
 }
 
-function sendError(ws: WebSocket, widgetId: string, message: string): void {
-  const payload: ServerToClient = { type: 'action:error', widgetId, message }
+function sendError(
+  ws: WebSocket,
+  widgetId: string,
+  message: string,
+  detail?: { event: WidgetEventKind; stepIndex: number; stepKind: SequenceStep['kind'] }
+): void {
+  const payload: ServerToClient = { type: 'action:error', widgetId, message, ...(detail && { detail }) }
   ws.send(JSON.stringify(payload))
 }
 
@@ -865,7 +1005,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         syncEventSources(activeRoom)
         break
       case 'action:trigger':
-        await triggerAction(activeRoom, message.widgetId, ws, message.value, message.final ?? true)
+        await triggerAction(activeRoom, message.widgetId, message.event, ws, message.value, message.final ?? true)
         break
       case 'hello':
         if (message.role === 'view' && message.viewport && message.deviceId) {

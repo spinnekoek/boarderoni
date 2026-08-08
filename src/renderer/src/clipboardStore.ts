@@ -9,13 +9,27 @@ import type { Widget } from '@shared/types'
 const PASTE_OFFSET = 24
 
 function cloneWidget(widget: Widget, offset: number): Widget {
-  if (widget.type === 'gauge' || widget.type === 'adjuster') {
+  if (widget.type === 'gauge' || widget.type === 'adjuster' || widget.type === 'encoder') {
     return {
       ...widget,
       id: nextId(),
       x: widget.x + offset,
       y: widget.y + offset,
       labels: widget.labels.map((label) => ({ ...label, id: nextId() }))
+    }
+  }
+
+  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial') {
+    return {
+      ...widget,
+      id: nextId(),
+      x: widget.x + offset,
+      y: widget.y + offset,
+      positions: widget.positions.map((position) => ({
+        ...position,
+        id: nextId(),
+        labels: position.labels.map((label) => ({ ...label, id: nextId() }))
+      }))
     }
   }
 
