@@ -3,8 +3,10 @@ import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useWidgetDrag } from '../useWidgetDrag'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
+import { GaugeWidgetContent } from './widgets/GaugeWidget'
+import { AdjusterWidgetContent } from './widgets/AdjusterWidget'
 import type { VariableMap } from '@shared/expr'
-import type { ButtonWidget } from '@shared/types'
+import type { BoxWidget } from '@shared/types'
 
 interface ResizeState {
   startX: number
@@ -19,7 +21,7 @@ export function CanvasWidget({
   variables,
   onContextMenu
 }: {
-  widget: ButtonWidget
+  widget: BoxWidget
   zoom: number
   variables: VariableMap
   onContextMenu: (e: React.MouseEvent) => void
@@ -33,9 +35,10 @@ export function CanvasWidget({
 
   // Follow whichever tab is active in the properties panel — but only while
   // this is the sole selected widget, so an unselected (or multi-selected)
-  // widget always shows its resting Default look.
-  const isSolePreviewTarget = selected && selectedWidgetIds.length === 1 && (widget.statesEnabled ?? false)
-  const previewState = isSolePreviewTarget ? (widget.states[activeStateIndex] ?? widget.states[0]) : widget.states[0]
+  // widget always shows its resting Default look. Only meaningful for a
+  // button (gauge/adjuster have no states at all).
+  const isSolePreviewTarget = widget.type === 'button' && selected && selectedWidgetIds.length === 1 && (widget.statesEnabled ?? false)
+  const previewState = widget.type === 'button' ? (isSolePreviewTarget ? (widget.states[activeStateIndex] ?? widget.states[0]) : widget.states[0]) : null
   const resizeState = useRef<ResizeState | null>(null)
   const [resizing, setResizing] = useState(false)
 
@@ -43,8 +46,12 @@ export function CanvasWidget({
     return snapToGrid ? Math.round(value / gridSize) * gridSize : Math.round(value)
   }
 
-  function patch(fields: Partial<ButtonWidget>): void {
-    updateWidgets(widgets.map((w) => (w.id === widget.id && w.type === 'button' ? { ...w, ...fields } : w)))
+  function patch(fields: Partial<BoxWidget>): void {
+    // All three BoxWidget members share x/y/w/h, so this merge is safe
+    // regardless of which one `widget` actually is — the cast just reflects
+    // that TS can't narrow `fields`' shape back to whichever member matched
+    // `w.id`.
+    updateWidgets(widgets.map((w) => (w.id === widget.id ? ({ ...w, ...fields } as typeof w) : w)))
   }
 
   function handleResizePointerDown(e: React.PointerEvent): void {
@@ -91,7 +98,11 @@ export function CanvasWidget({
       onPointerUp={handlePointerUp}
       onContextMenu={onContextMenu}
     >
-      <ButtonWidgetContent widget={widget} state={previewState} interactive={false} variables={variables} />
+      {widget.type === 'button' && previewState && (
+        <ButtonWidgetContent widget={widget} state={previewState} interactive={false} variables={variables} />
+      )}
+      {widget.type === 'gauge' && <GaugeWidgetContent widget={widget} variables={variables} />}
+      {widget.type === 'adjuster' && <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} />}
       {resizing && (
         <div className="canvas-widget__size-label" style={{ transform: `scale(${1 / zoom})` }}>
           {Math.round(widget.w)} × {Math.round(widget.h)}

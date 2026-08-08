@@ -248,60 +248,70 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
   return (
     <div className="variables-modal-overlay" onPointerDown={onClose}>
       <div className="variables-modal" onPointerDown={(e) => e.stopPropagation()}>
-        <h2 className="variables-modal__title">Variables</h2>
-        <p className="properties__hint">
-          Referenced in expressions as <code>variables.&lt;name&gt;</code>. Set by any widget whose action is "Update
-          state", or by an event source's mapping (see "Events" in the toolbar).
-        </p>
+        <div className="variables-modal__header">
+          <h2 className="variables-modal__title">Variables</h2>
+          <button type="button" className="modal-close" title="Close" onClick={onClose}>
+            ×
+          </button>
+        </div>
 
-        {variables.length === 0 && <p className="properties__hint">No variables yet.</p>}
+        <div className="variables-modal__body">
+          <p className="properties__hint">
+            Referenced in expressions as <code>variables.&lt;name&gt;</code>. Set by any widget whose action is "Update
+            state", or by an event source's mapping (see "Events" in the toolbar).
+          </p>
 
-        {variables.length > 0 && (
-          <>
-            <div className="variables-modal__tabs">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  className={`variables-modal__tab${activeTab === tab.id ? ' variables-modal__tab--active' : ''}`}
-                  onClick={() => setActiveTab(tab.id)}
-                >
-                  {tab.label}
-                  <span className="variables-modal__group-count">{tab.count}</span>
-                </button>
-              ))}
-            </div>
+          {variables.length === 0 && <p className="properties__hint">No variables yet.</p>}
 
-            <div className="variables-modal__toolbar">
-              <input
-                className="variables-modal__search"
-                type="text"
-                placeholder="Search variables…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            {tabVariables.length === 0 && <p className="properties__hint">No variables in this category yet.</p>}
-            {tabVariables.length > 0 && filtered.length === 0 && (
-              <p className="properties__hint">No variables match &quot;{search}&quot;.</p>
-            )}
-
-            {filtered.length > 0 && (
-              <div className="variables-modal__groups">
-                <VariableRows variables={filtered} mappedFromSource={mappedFromSource} onPatch={patchVariable} onRemove={removeVariable} />
+          {variables.length > 0 && (
+            <>
+              <div className="variables-modal__tabs">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`variables-modal__tab${activeTab === tab.id ? ' variables-modal__tab--active' : ''}`}
+                    onClick={() => setActiveTab(tab.id)}
+                  >
+                    {tab.label}
+                    <span className="variables-modal__group-count">{tab.count}</span>
+                  </button>
+                ))}
               </div>
-            )}
-          </>
-        )}
 
-        <div className="variables-modal__actions">
-          <button type="button" className="properties__file-button" onClick={addVariable}>
-            + Add variable
-          </button>
-          <button type="button" className="device-modal__save" onClick={onClose}>
-            Close
-          </button>
+              <div className="variables-modal__toolbar">
+                <input
+                  className="variables-modal__search"
+                  type="text"
+                  placeholder="Search variables…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+
+              <div className="variables-modal__scroll">
+                {tabVariables.length === 0 && <p className="properties__hint">No variables in this category yet.</p>}
+                {tabVariables.length > 0 && filtered.length === 0 && (
+                  <p className="properties__hint">No variables match &quot;{search}&quot;.</p>
+                )}
+
+                {filtered.length > 0 && (
+                  <div className="variables-modal__groups">
+                    <VariableRows variables={filtered} mappedFromSource={mappedFromSource} onPatch={patchVariable} onRemove={removeVariable} />
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          <div className="variables-modal__actions">
+            <button type="button" className="properties__file-button" onClick={addVariable}>
+              + Add variable
+            </button>
+            <button type="button" className="device-modal__save" onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </div>

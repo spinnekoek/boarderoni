@@ -232,7 +232,104 @@ export interface MorphButtonWidget {
   activeStateExpr?: string
 }
 
-export type Widget = ButtonWidget | MorphButtonWidget
+// Passive value display — a filled bar or arc showing valueExpr's result
+// against min/max. No action: nothing to trigger, so it's never clickable
+// on the view client.
+export interface GaugeWidget {
+  id: string
+  type: 'gauge'
+  x: number
+  y: number
+  w: number
+  h: number
+  // JS function body (see resolveNumericExpr in shared/expr.ts), `variables`
+  // in scope, must return a number — any other outcome (throw, wrong type,
+  // NaN/Infinity) falls back to `min`.
+  valueExpr: string
+  min: number
+  max: number
+  style: 'bar' | 'arc'
+  orientation?: 'horizontal' | 'vertical' // bar only, default 'horizontal'
+  startAngle?: number // arc only, degrees, default 135
+  endAngle?: number // arc only, degrees, default 405 (270° sweep)
+  fill: ColorAppearance
+  track: ColorAppearance
+  labels: WidgetLabel[]
+  // Bar style only — an arc has no rectangular box to round/border, so these
+  // are hidden from the properties panel (and not applied to the outer
+  // container) whenever style is 'arc'. Per-corner/per-side, same as
+  // BoxAppearance's own radius/border fields, so the properties panel can
+  // reuse CornersInputGrid/SidesInputGrid as-is.
+  radiusTopLeft?: number
+  radiusTopRight?: number
+  radiusBottomLeft?: number
+  radiusBottomRight?: number
+  borderWidthTop?: number
+  borderWidthRight?: number
+  borderWidthBottom?: number
+  borderWidthLeft?: number
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+  zIndex?: number
+}
+
+// A drag-to-set-a-value control — a slider (linear drag) or knob (rotary
+// drag). Reuses the exact same `action: WidgetAction` shape/editor as
+// ButtonWidget (keypress/update-state/send-dcs-command are all equally
+// available — nothing here is specific to any one data source), just with
+// the live drag position additionally exposed as `variables.$value` while
+// dragging (see evaluateMappingExpression in shared/expr.ts, the same
+// convention an EventSourceMapping's own `expr` already uses) for whichever
+// expression field the chosen action kind reads.
+export interface AdjusterWidget {
+  id: string
+  type: 'adjuster'
+  x: number
+  y: number
+  w: number
+  h: number
+  style: 'slider' | 'knob'
+  orientation?: 'horizontal' | 'vertical' // slider only, default 'vertical'
+  startAngle?: number // knob only, degrees, default 135
+  endAngle?: number // knob only, degrees, default 405
+  min: number
+  max: number
+  // Rest-position fallback for the handle while not being dragged (e.g.
+  // reflect a variable back into the visual) — same mechanism as Gauge's
+  // valueExpr. Falls back to `min` if unset/unresolved.
+  valueExpr?: string
+  action: WidgetAction
+  fill: ColorAppearance
+  track: ColorAppearance
+  labels: WidgetLabel[]
+  // Slider style only — a knob has no rectangular box to round/border, same
+  // reasoning as GaugeWidget's own radius/border fields above.
+  radiusTopLeft?: number
+  radiusTopRight?: number
+  radiusBottomLeft?: number
+  radiusBottomRight?: number
+  borderWidthTop?: number
+  borderWidthRight?: number
+  borderWidthBottom?: number
+  borderWidthLeft?: number
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+  zIndex?: number
+}
+
+export type Widget = ButtonWidget | MorphButtonWidget | GaugeWidget | AdjusterWidget
+
+// A plain draggable/resizable x/y/w/h rectangle in the editor (unlike
+// MorphButtonWidget's cellW/cellH+blocks shape) — shared prop type for
+// CanvasWidget's generalized drag/resize wrapper.
+export type BoxWidget = ButtonWidget | GaugeWidget | AdjusterWidget
+
+// Widgets driven by the WidgetState/statesEnabled/activeStateExpr machinery
+// — used to narrow getEffectiveStates now that Widget includes types
+// without those fields.
+export type StatefulWidget = ButtonWidget | MorphButtonWidget
 
 // 'cover'/'contain'/'stretch' scale the image proportionally or not, 'tile'
 // repeats it at native size, 'none' places it at native size unscaled — the
@@ -308,6 +405,11 @@ export interface Dashboard {
   id: string
   name: string
   backgroundColor: string
+  // Same idea as ColorAppearance's colorExpr (see resolveColor in
+  // shared/expr.ts, reused here directly since this is the same
+  // color/colorExpr shape) — independent of backgroundColor, which stays as
+  // the fallback for whatever the expression doesn't return.
+  backgroundColorExpr?: string
   // The image itself lives server-side and is fetched over plain HTTP at
   // /background-image — embedding it as a data URL here would mean every
   // dashboard:update (including per-frame widget drags) re-sends the whole
@@ -359,7 +461,20 @@ export type ClientToServer =
       deviceId?: string
     }
   | { type: 'dashboard:update'; dashboard: Dashboard }
-  | { type: 'action:trigger'; widgetId: string }
+  // value is set only while an AdjusterWidget is being dragged — the live
+  // position, exposed as `variables.$value` when the widget's action is
+  // evaluated (see triggerAction in main/index.ts). Absent for a plain
+  // button/morph click.
+  // final is false for every in-flight drag tick (useAdjusterDrag's
+  // rAF-throttled sends) and true for a plain click or the drag's own
+  // pointer-up — see runUpdateState's immediate/debounced save split, which
+  // this drives: an in-flight tick's variable update still broadcasts live
+  // but its disk save is debounced rather than synchronous, the same way an
+  // event-source tick's already is, so a fast drag isn't doing a blocking
+  // disk write on every single frame. Omitted (rather than defaulted to
+  // false) is treated the same as true, so older clients/messages without it
+  // keep the old always-immediate behavior.
+  | { type: 'action:trigger'; widgetId: string; value?: number; final?: boolean }
   | { type: 'background-image:upload'; dataUrl: string }
   | { type: 'background-image:clear' }
   | { type: 'device:rename'; deviceId: string; name: string }
@@ -376,6 +491,15 @@ export type ClientToServer =
 
 export type ServerToClient =
   | { type: 'dashboard:sync'; dashboard: Dashboard }
+  // Lighter-weight alternative to dashboard:sync for a variables-only change
+  // (an update-state action — including every in-flight AdjusterWidget drag
+  // tick — or an event-source tick, see applyVariableUpdates in
+  // main/index.ts). Carries the full variables array (not just the changed
+  // keys) so a brand-new variable's server-assigned id round-trips correctly
+  // without the client having to invent one — but skips widgets/eventSources/
+  // devices/background image, which don't change here and would otherwise
+  // get re-serialized and re-diffed on every single tick for no reason.
+  | { type: 'variables:sync'; variables: Variable[] }
   | { type: 'action:error'; widgetId: string; message: string }
   | { type: 'devices:sync'; devices: DeviceInfo[] }
   | { type: 'dcsbios:aircraft-list'; aircraft: { id: string; name: string }[] }

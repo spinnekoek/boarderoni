@@ -17,7 +17,12 @@ export function ExpressionEditorModal({
   return (
     <div className="expr-modal-overlay" onPointerDown={onClose}>
       <div className="expr-modal" onPointerDown={(e) => e.stopPropagation()}>
-        <h2 className="expr-modal__title">Edit expression</h2>
+        <div className="expr-modal__header">
+          <h2 className="expr-modal__title">Edit expression</h2>
+          <button type="button" className="modal-close" title="Close" onClick={onClose}>
+            ×
+          </button>
+        </div>
         <div className="expr-modal__editor">
           <CodeEditor value={value} onChange={onChange} placeholder={placeholder} />
         </div>

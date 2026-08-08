@@ -3,21 +3,45 @@ import { useDashboardStore } from '../store'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { getEffectiveStates } from '@shared/states'
 import { morphFootprint } from '@shared/morph'
-import { toVariableMap, type VariableMap } from '@shared/expr'
-import type { Widget } from '@shared/types'
+import { resolveColor, toVariableMap, type VariableMap } from '@shared/expr'
+import type { AdjusterWidget, StatefulWidget, Widget } from '@shared/types'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
+import { GaugeWidgetContent } from './widgets/GaugeWidget'
+import { AdjusterWidgetContent } from './widgets/AdjusterWidget'
+import { useAdjusterDrag } from '../useAdjusterDrag'
 import { DeviceSettingsModal } from './DeviceSettingsModal'
 
 const SETTINGS_GESTURE_FINGER_COUNT = 5
 
-function ViewWidget({
+// Owns the drag hook — kept separate from the dispatcher below so the hook
+// only ever mounts for an actual AdjusterWidget, not conditionally within a
+// component that also handles other widget types.
+function AdjusterView({ widget, variables }: { widget: AdjusterWidget; variables: VariableMap }): React.JSX.Element {
+  const { dragFraction, handlePointerDown, handlePointerMove, handlePointerUp } = useAdjusterDrag(widget, variables)
+  return (
+    <AdjusterWidgetContent
+      widget={widget}
+      variables={variables}
+      interactive
+      dragFraction={dragFraction}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    />
+  )
+}
+
+// Today's button/morph interactive rendering — press/release + tap-to-
+// trigger. Typed StatefulWidget (not the full Widget union) since it's the
+// only branch that touches getEffectiveStates/states/activeStateExpr.
+function TriggerableViewWidget({
   widget,
   variables,
   onTrigger,
   error
 }: {
-  widget: Widget
+  widget: StatefulWidget
   variables: VariableMap
   onTrigger: () => void
   error?: string
@@ -76,10 +100,31 @@ function ViewWidget({
   )
 }
 
+// Dispatches on widget.type before any type-specific hooks run — Gauge is
+// passive (no action, no pointer handling at all) and Adjuster owns its own
+// drag hook (AdjusterView above), neither of which fits
+// TriggerableViewWidget's press/release + getEffectiveStates model.
+function ViewWidget({
+  widget,
+  variables,
+  onTrigger,
+  error
+}: {
+  widget: Widget
+  variables: VariableMap
+  onTrigger: () => void
+  error?: string
+}): React.JSX.Element {
+  if (widget.type === 'gauge') return <GaugeWidgetContent widget={widget} variables={variables} />
+  if (widget.type === 'adjuster') return <AdjusterView widget={widget} variables={variables} />
+  return <TriggerableViewWidget widget={widget} variables={variables} onTrigger={onTrigger} error={error} />
+}
+
 export function ViewCanvas(): React.JSX.Element {
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
   const variables = useDashboardStore((s) => s.dashboard.variables)
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
+  const backgroundColorExpr = useDashboardStore((s) => s.dashboard.backgroundColorExpr)
   const backgroundImageVersion = useDashboardStore((s) => s.dashboard.backgroundImageVersion)
   const deckId = useDashboardStore((s) => s.deckId)
   const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
@@ -88,6 +133,8 @@ export function ViewCanvas(): React.JSX.Element {
   const errors = useDashboardStore((s) => s.errors)
 
   const variableMap = useMemo(() => toVariableMap(variables ?? []), [variables])
+  const resolvedBackgroundColor =
+    resolveColor({ color: backgroundColor, colorExpr: backgroundColorExpr }, variableMap).color ?? backgroundColor
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Guards against re-opening on every touchmove while 5+ fingers stay down,
@@ -109,7 +156,7 @@ export function ViewCanvas(): React.JSX.Element {
   return (
     <div
       className="view-canvas"
-      style={{ backgroundColor }}
+      style={{ backgroundColor: resolvedBackgroundColor }}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}

@@ -71,6 +71,16 @@ function evaluateColorExpression(expr: string, variables: VariableMap): Resolved
 // `color` field for whichever part the expression didn't return (a missing
 // key, an error, or a value of the wrong type all land here the same way —
 // never treated as an explicit "clear this to nothing").
+// A Gauge/Adjuster's valueExpr — same mechanism as every other bindable
+// field here, just coercing the result to a finite number. Any failure mode
+// (throw, non-number, NaN/Infinity) returns undefined so callers fall back
+// to their own default (the widget's own `min`) rather than crashing render.
+export function resolveNumericExpr(expr: string, variables: VariableMap): number | undefined {
+  const result = tryEvaluateExpression(expr, variables)
+  if (!result.ok || typeof result.value !== 'number' || !Number.isFinite(result.value)) return undefined
+  return result.value
+}
+
 export function resolveColor(box: ColorAppearance, variables: VariableMap): ResolvedColor {
   if (!box.colorExpr) return { color: box.color }
   const resolved = evaluateColorExpression(box.colorExpr, variables)

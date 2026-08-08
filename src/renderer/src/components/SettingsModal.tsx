@@ -37,42 +37,52 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   return (
     <div className="variables-modal-overlay" onPointerDown={onClose}>
       <div className="variables-modal settings-modal" onPointerDown={(e) => e.stopPropagation()}>
-        <h2 className="variables-modal__title">Settings</h2>
-        <p className="properties__hint">
-          Enabled data sources appear in the "Add event source" picker (Events, in the toolbar). Disabling one pauses
-          it — its configuration and mapped variables are kept, not deleted.
-        </p>
-
-        <div className="settings-modal__sources">
-          {EVENT_SOURCE_TYPES.map((type) => {
-            const enabled = enabledSet.has(type.kind)
-            const Panel = DATA_SOURCE_SETTINGS_PANELS[type.kind]
-            return (
-              <details key={type.kind} className="settings-modal__source" open={type.kind === focusKind}>
-                <summary className="settings-modal__source-summary">
-                  <input
-                    type="checkbox"
-                    checked={enabled}
-                    // Prevents the checkbox click from also triggering the
-                    // native <details> toggle on its enclosing <summary>.
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => toggle(type.kind, e.target.checked)}
-                  />
-                  <span>{type.label}</span>
-                  {!Panel && <span className="properties__hint-inline">No settings</span>}
-                </summary>
-                {Panel && (enabled ? <div className="settings-modal__source-panel"><Panel /></div> : (
-                  <p className="properties__hint">Enable this data source to configure it.</p>
-                ))}
-              </details>
-            )
-          })}
+        <div className="variables-modal__header">
+          <h2 className="variables-modal__title">Settings</h2>
+          <button type="button" className="modal-close" title="Close" onClick={onClose}>
+            ×
+          </button>
         </div>
 
-        <div className="variables-modal__actions">
-          <button type="button" className="device-modal__save" onClick={onClose}>
-            Close
-          </button>
+        <div className="variables-modal__body">
+          <p className="properties__hint">
+            Enabled data sources appear in the "Add event source" picker (Events, in the toolbar). Disabling one pauses
+            it — its configuration and mapped variables are kept, not deleted.
+          </p>
+
+          <div className="variables-modal__scroll">
+            <div className="settings-modal__sources">
+              {EVENT_SOURCE_TYPES.map((type) => {
+                const enabled = enabledSet.has(type.kind)
+                const Panel = DATA_SOURCE_SETTINGS_PANELS[type.kind]
+                return (
+                  <details key={type.kind} className="settings-modal__source" open={type.kind === focusKind}>
+                    <summary className="settings-modal__source-summary">
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        // Prevents the checkbox click from also triggering the
+                        // native <details> toggle on its enclosing <summary>.
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => toggle(type.kind, e.target.checked)}
+                      />
+                      <span>{type.label}</span>
+                      {!Panel && <span className="properties__hint-inline">No settings</span>}
+                    </summary>
+                    {Panel && (enabled ? <div className="settings-modal__source-panel"><Panel /></div> : (
+                      <p className="properties__hint">Enable this data source to configure it.</p>
+                    ))}
+                  </details>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="variables-modal__actions">
+            <button type="button" className="device-modal__save" onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -9,6 +9,16 @@ import type { Widget } from '@shared/types'
 const PASTE_OFFSET = 24
 
 function cloneWidget(widget: Widget, offset: number): Widget {
+  if (widget.type === 'gauge' || widget.type === 'adjuster') {
+    return {
+      ...widget,
+      id: nextId(),
+      x: widget.x + offset,
+      y: widget.y + offset,
+      labels: widget.labels.map((label) => ({ ...label, id: nextId() }))
+    }
+  }
+
   // Tracks old state id -> new state id so a morph widget's blocks (below)
   // can rekey their perState overrides onto the states they actually get
   // cloned alongside, instead of pointing at ids that no longer exist.

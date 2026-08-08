@@ -4,7 +4,7 @@ import { useEditorSettings } from '../settingsStore'
 import { useEditorShortcuts } from '../useEditorShortcuts'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { morphFootprint } from '@shared/morph'
-import { toVariableMap } from '@shared/expr'
+import { resolveColor, toVariableMap } from '@shared/expr'
 import { CanvasWidget } from './CanvasWidget'
 import { MorphCanvasWidget } from './MorphCanvasWidget'
 import { ContextMenu } from './ContextMenu'
@@ -49,6 +49,7 @@ interface MarqueeState {
 export function Canvas(): React.JSX.Element {
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
+  const backgroundColorExpr = useDashboardStore((s) => s.dashboard.backgroundColorExpr)
   const backgroundImageVersion = useDashboardStore((s) => s.dashboard.backgroundImageVersion)
   const deckId = useDashboardStore((s) => s.deckId)
   const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
@@ -64,6 +65,8 @@ export function Canvas(): React.JSX.Element {
   useEditorShortcuts()
 
   const variableMap = useMemo(() => toVariableMap(variables ?? []), [variables])
+  const resolvedBackgroundColor =
+    resolveColor({ color: backgroundColor, colorExpr: backgroundColorExpr }, variableMap).color ?? backgroundColor
 
   const [camera, setCamera] = useState<Camera>(INITIAL_CAMERA)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -200,11 +203,11 @@ export function Canvas(): React.JSX.Element {
         style={
           snapToGrid
             ? {
-                backgroundColor,
+                backgroundColor: resolvedBackgroundColor,
                 backgroundSize: `${gridSize * camera.zoom}px ${gridSize * camera.zoom}px`,
                 backgroundPosition: `${camera.x}px ${camera.y}px`
               }
-            : { backgroundColor, backgroundImage: 'none' }
+            : { backgroundColor: resolvedBackgroundColor, backgroundImage: 'none' }
         }
       >
         <div className="canvas-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>

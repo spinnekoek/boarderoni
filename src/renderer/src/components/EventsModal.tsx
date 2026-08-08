@@ -518,7 +518,14 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
   return (
     <div className="variables-modal-overlay" onPointerDown={onClose}>
       <div className="variables-modal events-modal" onPointerDown={(e) => e.stopPropagation()}>
-        <h2 className="variables-modal__title">Events</h2>
+        <div className="variables-modal__header">
+          <h2 className="variables-modal__title">Events</h2>
+          <button type="button" className="modal-close" title="Close" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <div className="variables-modal__body">
         <p className="properties__hint">
           Continuously running sources of data (a clock, DCS-BIOS telemetry, and more to come) whose fields you can
           map into <code>variables</code>, optionally through an expression.
@@ -542,6 +549,7 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
           </div>
         )}
 
+        <div className="variables-modal__scroll">
         {(() => {
           const source = eventSources.find((s) => s.id === activeSourceId)
           if (!source) return null
@@ -665,6 +673,7 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
             </div>
           )
         })()}
+        </div>
 
         <div className="variables-modal__actions">
           <div className="events-modal__add">
@@ -685,6 +694,7 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
           <button type="button" className="device-modal__save" onClick={onClose}>
             Close
           </button>
+        </div>
         </div>
       </div>
     </div>

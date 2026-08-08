@@ -452,6 +452,53 @@ button.deck-button:focus-visible {
   overflow: visible;
 }
 
+.deck-gauge {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.deck-gauge__track {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.deck-gauge__arc {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.deck-adjuster {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  touch-action: none;
+  cursor: grab;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.deck-adjuster--static {
+  cursor: default;
+}
+
+.deck-adjuster__track {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.deck-adjuster__handle {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
 .deck-morph {
   position: relative;
   width: 100%;
@@ -1439,6 +1486,24 @@ button.deck-morph-cell:focus-visible {
   background: #5c2424;
 }
 
+/* Close (×) button shared by every modal's header row except ConfirmModal
+   (which has no header — its cancel/confirm buttons already serve that
+   role). */
+.modal-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: #9098a8;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.modal-close:hover {
+  color: #e8e8ea;
+}
+
 .device-modal-overlay {
   position: fixed;
   inset: 0;
@@ -1450,19 +1515,35 @@ button.deck-morph-cell:focus-visible {
 }
 
 .device-modal {
+  display: flex;
+  flex-direction: column;
   background: #1c1f26;
   border: 1px solid #2a2e37;
   border-radius: 8px;
   padding: 20px;
   width: 320px;
   max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 40px);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
 
+.device-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .device-modal__title {
-  margin: 0 0 16px;
+  margin: 0;
   font-size: 15px;
   color: #e8e8ea;
+}
+
+.device-modal__body {
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .device-modal__field {
@@ -1718,6 +1799,8 @@ button.deck-morph-cell:focus-visible {
 }
 
 .variables-modal {
+  display: flex;
+  flex-direction: column;
   background: #1c1f26;
   border: 1px solid #2a2e37;
   border-radius: 8px;
@@ -1732,14 +1815,41 @@ button.deck-morph-cell:focus-visible {
      overlay) plus a 40px bottom margin, instead of the old vertically-
      centered layout's simpler "100vh minus a flat margin" math. */
   max-height: calc(100vh - 104px);
-  overflow-y: auto;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
 
+.variables-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
 .variables-modal__title {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 15px;
   color: #e8e8ea;
+}
+
+/* Fills the space below the header. Not itself a scroll container — see
+   .variables-modal__tab-content below, which is the part that actually
+   scrolls, so the tabs bar/search/actions stay put too. */
+.variables-modal__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The scrollable part of the body — e.g. the active tab's variable/mapping
+   list, or Settings' data source list. Everything else in the body (hint
+   text, tabs bar, search box, action buttons) stays fixed in view while
+   just this scrolls underneath them. */
+.variables-modal__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .variables-modal__tabs {
@@ -2341,8 +2451,16 @@ button.deck-morph-cell:focus-visible {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
 
+.expr-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .expr-modal__title {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 15px;
   color: #e8e8ea;
 }

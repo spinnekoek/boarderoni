@@ -1,7 +1,7 @@
 import { DEFAULT_WIDGET_COLOR, lighten } from './color'
 import { AUTO_CLICKED_LIGHTEN } from './constants'
 import { tryEvaluateExpression, type VariableMap } from './expr'
-import type { Widget, WidgetState } from './types'
+import type { StatefulWidget, WidgetState } from './types'
 
 export function deriveClickedState(base: WidgetState, id: string): WidgetState {
   return {
@@ -20,7 +20,7 @@ export function deriveClickedState(base: WidgetState, id: string): WidgetState {
 // state that doesn't exist) falls back to states[0] rather than surfacing an
 // error on the view client — the expression only ever narrows which state is
 // active, it never breaks rendering.
-function resolveBaseState(widget: Widget, variables: VariableMap): WidgetState {
+function resolveBaseState(widget: StatefulWidget, variables: VariableMap): WidgetState {
   const fallback = widget.states[0]
   if (!widget.statesEnabled || !widget.activeStateExpr) return fallback
   const result = tryEvaluateExpression(widget.activeStateExpr, variables)
@@ -36,7 +36,7 @@ function resolveBaseState(widget: Widget, variables: VariableMap): WidgetState {
 // With states enabled, "clicked" is whichever stored state (if any) has
 // isClicked set — not a positional guess — so deleting it means nothing
 // plays on tap rather than some other state activating in its place.
-export function getEffectiveStates(widget: Widget, variables: VariableMap): [WidgetState, WidgetState | null] {
+export function getEffectiveStates(widget: StatefulWidget, variables: VariableMap): [WidgetState, WidgetState | null] {
   const base = resolveBaseState(widget, variables)
   if (widget.statesEnabled) {
     return [base, widget.states.find((s) => s.isClicked) ?? null]

@@ -37,28 +37,35 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
   return (
     <div className="device-modal-overlay" onPointerDown={onClose}>
       <div className="device-modal" onPointerDown={(e) => e.stopPropagation()}>
-        <h2 className="device-modal__title">Device settings</h2>
-
-        <label className="device-modal__field">
-          <span>Friendly name</span>
-          <input value={name} placeholder={friendlyDeviceName(device?.userAgent)} onChange={(e) => setName(e.target.value)} />
-        </label>
-
-        <button className="device-modal__change-deck" onClick={handleChangeDeck}>
-          Change deck
-        </button>
-
-        <button className="device-modal__change-deck" onClick={handleForceRefresh}>
-          Force refresh
-        </button>
-
-        <div className="device-modal__actions">
-          <button className="device-modal__cancel" onClick={onClose}>
-            Cancel
+        <div className="device-modal__header">
+          <h2 className="device-modal__title">Device settings</h2>
+          <button type="button" className="modal-close" title="Close" onClick={onClose}>
+            ×
           </button>
-          <button className="device-modal__save" onClick={handleSave}>
-            Save
+        </div>
+
+        <div className="device-modal__body">
+          <label className="device-modal__field">
+            <span>Friendly name</span>
+            <input value={name} placeholder={friendlyDeviceName(device?.userAgent)} onChange={(e) => setName(e.target.value)} />
+          </label>
+
+          <button className="device-modal__change-deck" onClick={handleChangeDeck}>
+            Change deck
           </button>
+
+          <button className="device-modal__change-deck" onClick={handleForceRefresh}>
+            Force refresh
+          </button>
+
+          <div className="device-modal__actions">
+            <button className="device-modal__cancel" onClick={onClose}>
+              Cancel
+            </button>
+            <button className="device-modal__save" onClick={handleSave}>
+              Save
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -18,6 +18,7 @@ import { keyboard, Key } from '@nut-tree-fork/nut-js'
 import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN } from '../shared/constants'
 import {
   DEFAULT_DASHBOARD,
+  type ButtonWidget,
   type ClientToServer,
   type Dashboard,
   type DeckSummary,
@@ -60,18 +61,19 @@ interface LegacyButtonWidget {
   padding?: number
   // Pre-states shape: labels/color/border/opacity lived flat on the widget
   // itself, before they moved into ButtonWidget.states[].
-  labels?: Widget['states'][number]['labels']
+  labels?: ButtonWidget['states'][number]['labels']
   color?: string
   borderColor?: string
   backgroundOpacity?: number
   borderOpacity?: number
-  states?: Widget['states']
+  states?: ButtonWidget['states']
 }
 
 function migrateWidget(widget: Widget & LegacyButtonWidget): Widget {
-  // Morph widgets never existed in any of the legacy shapes below — they're
-  // always created with a states[]/blocks[] array from the start.
-  if (widget.type === 'morph') return widget
+  // Morph/gauge/adjuster widgets never existed in any of the legacy shapes
+  // below — they're always created with their current shape from the start
+  // (morph with states[]/blocks[], gauge/adjuster with no states[] at all).
+  if (widget.type === 'morph' || widget.type === 'gauge' || widget.type === 'adjuster') return widget
 
   if (!Array.isArray(widget.labels)) {
     const { label, fontFamily, fontSize, textColor, textOpacity, align, verticalAlign, padding, ...rest } = widget
@@ -586,7 +588,12 @@ function applyVariableUpdates(room: DeckRoom, updates: Record<string, unknown>, 
   }
 
   room.dashboard = { ...room.dashboard, variables }
-  broadcastToRoom(room, { type: 'dashboard:sync', dashboard: room.dashboard })
+  // variables:sync, not dashboard:sync — this can fire many times a second
+  // (every in-flight AdjusterWidget drag tick, or a fast event-source), and
+  // widgets/eventSources/devices never change here, so re-sending the whole
+  // dashboard every time would mean every connected client re-serializing
+  // and re-diffing all of that for nothing.
+  broadcastToRoom(room, { type: 'variables:sync', variables })
   if (options.immediate) {
     cancelScheduledSave(room)
     saveDeckDashboard(room)
@@ -599,26 +606,35 @@ function applyVariableUpdates(room: DeckRoom, updates: Record<string, unknown>, 
 // into the room's dashboard.variables. Runs server-side (not per-client) so
 // every client's next dashboard:sync already reflects the result, same as
 // any other mutation.
-function runUpdateState(room: DeckRoom, code: string): void {
+function runUpdateState(room: DeckRoom, code: string, value: number | undefined, final: boolean): void {
   const variableMap = toVariableMap(room.dashboard.variables ?? [])
-  const result = tryEvaluateExpression(code, variableMap)
+  // value is only set while an AdjusterWidget is being dragged — exposed as
+  // variables.$value, same convention an EventSourceMapping's own `expr`
+  // already uses (see evaluateMappingExpression). A plain button/morph click
+  // has no value, so it evaluates exactly as before.
+  const result = value !== undefined ? evaluateMappingExpression(code, value, variableMap) : tryEvaluateExpression(code, variableMap)
   // A genuine failure (syntax error, thrown exception, ...) surfaces to the
   // caller — triggerAction's catch turns it into an action:error the client
   // shows on the widget. Code that just doesn't return anything (empty body,
   // no update intended) is a normal no-op, not an error.
   if (!result.ok) throw new Error(result.error)
   if (!result.value || typeof result.value !== 'object') return
-  applyVariableUpdates(room, result.value as Record<string, unknown>, { immediate: true })
+  // final=false (an in-flight AdjusterWidget drag tick) debounces the disk
+  // save instead of writing synchronously — see ClientToServer's own comment
+  // on 'action:trigger'.final. A plain click has no `value` at all, and
+  // always passes final=true.
+  applyVariableUpdates(room, result.value as Record<string, unknown>, { immediate: final })
 }
 
 // argumentExpr (when set) is evaluated the same way UpdateStateAction.code
-// is — variables in scope, thrown/syntax errors surface to the caller as an
+// is — variables (plus $value while an AdjusterWidget is being dragged, see
+// runUpdateState) in scope, thrown/syntax errors surface to the caller as an
 // action:error — except the returned value becomes the literal argument
 // string sent, not a variables patch. No aircraft-matching is needed here
 // (unlike reading): DCS-BIOS just applies whatever identifier/argument pair
 // arrives to the currently active aircraft, silently ignoring it if that
 // identifier doesn't exist for that aircraft.
-async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction): Promise<void> {
+async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction, value?: number): Promise<void> {
   // Same enabledDataSources gate syncEventSources already applies to the
   // read side (see its own comment) — disabling DCS-BIOS in Settings should
   // stop a button from firing commands too, not just stop reading fields.
@@ -629,7 +645,7 @@ async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction): 
   let argument = action.argument
   if (action.argumentExpr && action.argumentExpr.trim()) {
     const variableMap = toVariableMap(room.dashboard.variables ?? [])
-    const result = tryEvaluateExpression(action.argumentExpr, variableMap)
+    const result = value !== undefined ? evaluateMappingExpression(action.argumentExpr, value, variableMap) : tryEvaluateExpression(action.argumentExpr, variableMap)
     if (!result.ok) throw new Error(result.error)
     argument = String(result.value)
   }
@@ -732,16 +748,24 @@ function resyncAllRoomsEventSources(): void {
   for (const room of rooms.values()) syncEventSources(room)
 }
 
-async function triggerAction(room: DeckRoom, widgetId: string, ws: WebSocket): Promise<void> {
+async function triggerAction(room: DeckRoom, widgetId: string, ws: WebSocket, value: number | undefined, final: boolean): Promise<void> {
   const widget = room.dashboard.widgets.find((w) => w.id === widgetId)
   if (!widget) {
     sendError(ws, widgetId, 'Widget not found')
     return
   }
 
+  // Gauge is passive — it has no `.action` at all, so a stale/malicious
+  // action:trigger naming one lands here rather than crashing on
+  // `widget.action.kind` below.
+  if (widget.type === 'gauge') {
+    sendError(ws, widgetId, 'This widget cannot be triggered')
+    return
+  }
+
   if (widget.action.kind === 'update-state') {
     try {
-      runUpdateState(room, widget.action.code)
+      runUpdateState(room, widget.action.code, value, final)
     } catch (err) {
       sendError(ws, widgetId, err instanceof Error ? err.message : String(err))
     }
@@ -750,7 +774,7 @@ async function triggerAction(room: DeckRoom, widgetId: string, ws: WebSocket): P
 
   if (widget.action.kind === 'send-dcs-command') {
     try {
-      await runSendDcsCommand(room, widget.action)
+      await runSendDcsCommand(room, widget.action, value)
     } catch (err) {
       sendError(ws, widgetId, err instanceof Error ? err.message : String(err))
     }
@@ -841,7 +865,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         syncEventSources(activeRoom)
         break
       case 'action:trigger':
-        await triggerAction(activeRoom, message.widgetId, ws)
+        await triggerAction(activeRoom, message.widgetId, ws, message.value, message.final ?? true)
         break
       case 'hello':
         if (message.role === 'view' && message.viewport && message.deviceId) {

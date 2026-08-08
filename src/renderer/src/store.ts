@@ -69,7 +69,7 @@ interface DashboardStore {
   updateWidgets: (widgets: Widget[]) => void
   updateDashboardMeta: (
     fields: Partial<
-      Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundFit' | 'backgroundAnchor' | 'variables' | 'eventSources'>
+      Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundColorExpr' | 'backgroundFit' | 'backgroundAnchor' | 'variables' | 'eventSources'>
     >
   ) => void
   uploadBackgroundImage: (dataUrl: string) => void
@@ -80,7 +80,12 @@ interface DashboardStore {
   sendToBack: (ids: string[]) => void
   removeWidget: (id: string) => void
   removeWidgets: (ids: string[]) => void
-  triggerWidget: (id: string) => void
+  // value is set only for a live AdjusterWidget drag — see triggerWidget's
+  // implementation and the 'action:trigger' WS message shape in types.ts.
+  // final: false marks an in-flight drag tick (debounced server-side save
+  // instead of a synchronous one); omit/true for a plain click or the drag's
+  // final commit on pointer-up.
+  triggerWidget: (id: string, value?: number, final?: boolean) => void
   selectWidget: (id: string | null, options?: { additive?: boolean }) => void
   // Marquee (shift-drag) selection — replaces the current selection by
   // default, or unions with it when additive (shift-drag always passes
@@ -240,6 +245,12 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       const message: ServerToClient = JSON.parse(event.data)
       if (message.type === 'dashboard:sync') {
         set({ dashboard: message.dashboard })
+      } else if (message.type === 'variables:sync') {
+        // Same effect as a dashboard:sync as far as `dashboard.variables` is
+        // concerned, but leaves `dashboard.widgets`/`eventSources`/`devices`
+        // etc. at their existing references instead of replacing the whole
+        // object graph — see ServerToClient's own comment on this message.
+        set((s) => ({ dashboard: { ...s.dashboard, variables: message.variables } }))
       } else if (message.type === 'action:error') {
         set((s) => ({ errors: { ...s.errors, [message.widgetId]: message.message } }))
       } else if (message.type === 'devices:sync') {
@@ -364,7 +375,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => !idSet.has(w)), selectedBlockId: null }))
   },
 
-  triggerWidget: (id) => {
+  triggerWidget: (id, value, final) => {
     // Optimistically clear any error from a previous attempt — otherwise a
     // stale red banner sticks on the widget forever, even after fixing
     // whatever caused it, since nothing else ever removes an entry here. A
@@ -375,7 +386,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       delete errors[id]
       return { errors }
     })
-    send({ type: 'action:trigger', widgetId: id })
+    send({ type: 'action:trigger', widgetId: id, ...(value !== undefined && { value }), ...(final === false && { final }) })
   },
 
   selectWidget: (id, options) => {
