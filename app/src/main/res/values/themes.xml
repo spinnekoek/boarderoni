@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      No values-night/ variant exists for this theme on purpose — paired with
+      AppCompatDelegate.setDefaultNightMode(MODE_NIGHT_NO) in MainActivity,
+      there's nothing for the system dark theme to switch to. This is the
+      fix for the white-background-in-dark-theme glitches from the previous
+      app build.
+    -->
+    <style name="Theme.Boarderoni" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="android:windowBackground">@color/status_overlay_background</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="29">false</item>
+    </style>
+</resources>
