@@ -1,9 +1,11 @@
 import { create } from 'zustand'
-import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN } from '@shared/constants'
+import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN, DECK_CLOSE_CODE_DENIED } from '@shared/constants'
 import {
   DEFAULT_DASHBOARD,
+  type ApprovedDeviceSummary,
   type ClientToServer,
   type Dashboard,
+  type DeckSummary,
   type DeviceInfo,
   type SequenceStep,
   type ServerToClient,
@@ -52,14 +54,36 @@ interface DashboardStore {
   // where ToastStack isn't rendered).
   toasts: ActionErrorToast[]
   selectedWidgetIds: string[]
-  // Which base block of a selected morph widget the properties panel's
-  // spacing/radius/border sub-panel targets — reset to null on every
-  // widget-selection change (see selectWidget/pasteWidgets/removeWidget(s)).
+  // Canvas drill-down selection within the sole-selected widget — a morph
+  // block id (targets the properties panel's spacing/radius/border
+  // sub-panel) or a rocker switch position id (just a visual highlight, see
+  // CanvasWidget.tsx's isSoleSelection-gated onPositionSelect). Reset to null
+  // on every widget-selection change (see selectWidget/pasteWidgets/
+  // removeWidget(s)) — never meaningful across two different widgets anyway.
   selectedBlockId: string | null
   // Which of the selected widget's states the editor canvas previews (its
   // properties panel tab) — reset to 0 (Default) on every selection change.
   activeStateIndex: number
   devices: DeviceInfo[]
+  // View mode only: true between sendHello and either a dashboard:sync
+  // (approved) or device:denied (denied) — see ViewCanvas's waiting screen.
+  devicePending: boolean
+  // View mode only: the desktop explicitly denied this device. Sticky —
+  // unlike a normal disconnect, the socket close handler won't auto-retry
+  // (see DECK_CLOSE_CODE_DENIED), so this stays true until the app restarts.
+  deviceDenied: boolean
+  // Devices whose first hello arrived unapproved, queued for any trusted
+  // client (edit or an already-approved view device) to approve/deny — see
+  // DeviceApprovalBanner.tsx, mounted in both edit and view mode.
+  pendingApprovals: DeviceInfo[]
+  // View mode, no deck chosen yet: the lobby connection's deck list (see
+  // connectLobby) — null until it arrives, distinct from an empty array
+  // (no decks exist yet). Edit mode's DeckPicker still fetches its own copy
+  // over REST instead, since it's always trusted regardless of this.
+  decks: DeckSummary[] | null
+  // Edit mode's settings modal only — the master approved-device list (see
+  // requestApprovedDevices/revokeDeviceApproval), for revoking access.
+  approvedDevices: ApprovedDeviceSummary[]
   // DCS-BIOS event source support — all null/empty until first requested,
   // fetched once app-wide and cached rather than per EventSource instance
   // (see EventsModal.tsx). null means "not yet requested," distinct from
@@ -91,10 +115,19 @@ interface DashboardStore {
   requestAppSettings: () => void
   updateEnabledDataSources: (enabledDataSources: string[]) => void
   connect: (mode: Mode, deckId: string) => void
+  // View mode, no deck chosen yet — establishes approval (and the deck
+  // list, once approved) before any specific deck is even in the picture.
+  // Separate from connect() rather than connect(mode, ''): deckId staying
+  // null here is what keeps App.tsx showing the picker instead of
+  // ViewCanvas, and connect()'s reconnect/close handling is all built
+  // around dashboard-bearing state a lobby connection never has.
+  connectLobby: () => void
   // Tears down the current connection and returns to the deck picker (the
   // "← Decks" button in edit mode, "Change deck" in the view-mode device
   // settings modal).
   disconnect: () => void
+  requestApprovedDevices: () => void
+  revokeDeviceApproval: (deviceId: string) => void
   updateWidgets: (widgets: Widget[]) => void
   updateDashboardMeta: (
     fields: Partial<
@@ -124,6 +157,8 @@ interface DashboardStore {
   selectBlock: (id: string | null) => void
   setActiveStateIndex: (index: number | ((current: number) => number)) => void
   renameDevice: (deviceId: string, name: string) => void
+  approveDevice: (deviceId: string) => void
+  denyDevice: (deviceId: string) => void
 }
 
 let socket: WebSocket | null = null
@@ -137,6 +172,18 @@ function send(message: ClientToServer): void {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message))
   }
+}
+
+// Separate from `socket` on purpose — see connectLobby's comment on why
+// it's not just connect(mode, ''). Closed (not left to linger) the moment a
+// real deck connection starts, via closeLobby() below.
+let lobbySocket: WebSocket | null = null
+
+function closeLobby(): void {
+  if (!lobbySocket) return
+  const ws = lobbySocket
+  lobbySocket = null
+  ws.close()
 }
 
 function isTextInputElement(el: Element | null): boolean {
@@ -185,7 +232,7 @@ function pickerResetState(): Pick<
 function widgetDisplayLabel(widget: Widget | undefined): string | undefined {
   if (!widget) return undefined
   if (widget.type === 'button' || widget.type === 'morph') return widget.states[0]?.labels[0]?.text
-  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial') return widget.positions[0]?.labels[0]?.text
+  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial' || widget.type === 'dropdown') return widget.positions[0]?.labels[0]?.text
   return widget.labels[0]?.text
 }
 
@@ -200,6 +247,11 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   selectedBlockId: null,
   activeStateIndex: 0,
   devices: [],
+  devicePending: false,
+  deviceDenied: false,
+  pendingApprovals: [],
+  decks: null,
+  approvedDevices: [],
   dcsBiosAircraft: null,
   dcsBiosFieldCatalogs: {},
   dcsBiosCommandCatalogs: {},
@@ -254,6 +306,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   },
 
   connect: (mode, deckId) => {
+    closeLobby()
     set({ mode, deckId })
     setLastDeckId(deckId)
     if (socket) return
@@ -282,6 +335,14 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set(pickerResetState())
         return
       }
+      if (event.code === DECK_CLOSE_CODE_DENIED) {
+        // Unlike DECK_CLOSE_CODE_UNKNOWN, deliberately not pickerResetState —
+        // there's no dead deck id to forget here and, in view mode, no
+        // picker to fall back to; App.tsx shows a denied screen instead
+        // while deviceDenied stays true.
+        set({ connected: false, devicePending: false, deviceDenied: true })
+        return
+      }
       set({ connected: false })
       setTimeout(() => get().connect(mode, deckId), 1500)
     })
@@ -289,7 +350,21 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     ws.addEventListener('message', (event) => {
       const message: ServerToClient = JSON.parse(event.data)
       if (message.type === 'dashboard:sync') {
-        set({ dashboard: message.dashboard })
+        // Only ever arrives once this connection is actually approved (or
+        // never needed to be — edit mode, or an already-trusted device) —
+        // see main/index.ts's sendInitialState — so receiving it doubles as
+        // "no longer pending."
+        set({ dashboard: message.dashboard, devicePending: false })
+      } else if (message.type === 'device:pending') {
+        set({ devicePending: true })
+      } else if (message.type === 'device:denied') {
+        set({ devicePending: false, deviceDenied: true })
+      } else if (message.type === 'device:approval-requested') {
+        set((s) => ({
+          pendingApprovals: [...s.pendingApprovals.filter((d) => d.id !== message.device.id), message.device]
+        }))
+      } else if (message.type === 'device:approved-list') {
+        set({ approvedDevices: message.devices })
       } else if (message.type === 'variables:sync') {
         // Same effect as a dashboard:sync as far as `dashboard.variables` is
         // concerned, but leaves `dashboard.widgets`/`eventSources`/`devices`
@@ -364,6 +439,54 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         true
       )
     }
+  },
+
+  connectLobby: () => {
+    if (lobbySocket || socket) return
+
+    const host = window.location.hostname || 'localhost'
+    const ws = new WebSocket(`ws://${host}:${SERVER_PORT}/ws`)
+    lobbySocket = ws
+
+    ws.addEventListener('open', () => {
+      ws.send(
+        JSON.stringify({
+          type: 'hello',
+          role: 'view',
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          userAgent: navigator.userAgent,
+          deviceId: getDeviceId()
+        } satisfies ClientToServer)
+      )
+    })
+
+    ws.addEventListener('close', (event) => {
+      // Superseded by closeLobby() (a real deck got picked) — that's an
+      // intentional teardown, not a drop, so don't reconnect a lobby
+      // nothing needs anymore.
+      if (lobbySocket !== ws) return
+      lobbySocket = null
+      if (event.code === DECK_CLOSE_CODE_DENIED) {
+        set({ devicePending: false, deviceDenied: true })
+        return
+      }
+      setTimeout(() => get().connectLobby(), 1500)
+    })
+
+    ws.addEventListener('message', (event) => {
+      const message: ServerToClient = JSON.parse(event.data)
+      if (message.type === 'device:pending') {
+        set({ devicePending: true })
+      } else if (message.type === 'device:denied') {
+        set({ devicePending: false, deviceDenied: true })
+      } else if (message.type === 'device:approval-requested') {
+        set((s) => ({
+          pendingApprovals: [...s.pendingApprovals.filter((d) => d.id !== message.device.id), message.device]
+        }))
+      } else if (message.type === 'decks:list') {
+        set({ decks: message.decks, devicePending: false })
+      }
+    })
   },
 
   disconnect: () => {
@@ -495,5 +618,23 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   renameDevice: (deviceId, name) => {
     send({ type: 'device:rename', deviceId, name })
+  },
+
+  approveDevice: (deviceId) => {
+    send({ type: 'device:approve', deviceId })
+    set((s) => ({ pendingApprovals: s.pendingApprovals.filter((d) => d.id !== deviceId) }))
+  },
+
+  denyDevice: (deviceId) => {
+    send({ type: 'device:deny', deviceId })
+    set((s) => ({ pendingApprovals: s.pendingApprovals.filter((d) => d.id !== deviceId) }))
+  },
+
+  requestApprovedDevices: () => {
+    send({ type: 'device:list-approved' })
+  },
+
+  revokeDeviceApproval: (deviceId) => {
+    send({ type: 'device:revoke', deviceId })
   }
 }))

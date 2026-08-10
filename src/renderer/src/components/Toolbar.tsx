@@ -6,10 +6,12 @@ import { displayDeviceName } from '@shared/deviceName'
 import { VariablesModal } from './VariablesModal'
 import { EventsModal } from './EventsModal'
 import { SettingsModal } from './SettingsModal'
+import { MobileAppModal } from './MobileAppModal'
 
 export function Toolbar(): React.JSX.Element {
   const [variablesOpen, setVariablesOpen] = useState(false)
   const [eventsOpen, setEventsOpen] = useState(false)
+  const [mobileAppOpen, setMobileAppOpen] = useState(false)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
   const setSnapToGrid = useEditorSettings((s) => s.setSnapToGrid)
@@ -80,9 +82,13 @@ export function Toolbar(): React.JSX.Element {
       <button type="button" className="toolbar__button" onClick={() => openSettings()}>
         Settings
       </button>
+      <button type="button" className="toolbar__button" onClick={() => setMobileAppOpen(true)}>
+        Mobile app
+      </button>
       {variablesOpen && <VariablesModal onClose={() => setVariablesOpen(false)} />}
       {eventsOpen && <EventsModal onClose={() => setEventsOpen(false)} />}
       {settingsOpen && <SettingsModal onClose={closeSettings} />}
+      {mobileAppOpen && <MobileAppModal onClose={() => setMobileAppOpen(false)} />}
     </div>
   )
 }

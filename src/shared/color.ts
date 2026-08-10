@@ -1,3 +1,5 @@
+import { AUTO_CLICKED_LIGHTEN } from './constants'
+
 export const DEFAULT_WIDGET_COLOR = '#2a2e37'
 
 export const COLOR_PALETTE = [
@@ -74,6 +76,14 @@ const AUTO_BORDER_DARKEN = 0.25
 
 export function pickAutoBorderColor(backgroundColor: string): string {
   return darken(backgroundColor, AUTO_BORDER_DARKEN)
+}
+
+// A switch position's auto-derived "selected" look — same brighten treatment
+// as ButtonWidget's auto-derived "Clicked" state (see deriveClickedState in
+// shared/states.ts), just applied to a switch position's color instead of a
+// button's.
+export function pickAutoActiveColor(unselectedColor: string): string {
+  return lighten(unselectedColor, AUTO_CLICKED_LIGHTEN)
 }
 
 // Lightens a hex color by a 0-1 fraction toward white — used to auto-derive

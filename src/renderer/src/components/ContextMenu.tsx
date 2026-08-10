@@ -56,11 +56,14 @@ export function ContextMenu({
 
   async function handleDelete(): Promise<void> {
     if (!widgetIds) return
+    // Close right away, same as every other action below — awaiting
+    // confirm() first (as this used to) left the context menu sitting open
+    // behind the confirmation modal for as long as it took to answer.
+    onClose()
     const message =
       widgetIds.length === 1 ? 'Delete this widget? This cannot be undone.' : `Delete ${widgetIds.length} widgets? This cannot be undone.`
     const ok = await confirm(message, { confirmLabel: 'Delete' })
     if (ok) removeWidgets(widgetIds)
-    onClose()
   }
 
   function handleCopy(): void {

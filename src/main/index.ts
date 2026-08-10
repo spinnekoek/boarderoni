@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import {
   readFile,
@@ -9,13 +9,16 @@ import {
   unlinkSync,
   readdirSync,
   rmSync,
-  copyFileSync
+  copyFileSync,
+  statSync
 } from 'node:fs'
 import { join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { hostname, networkInterfaces } from 'node:os'
 import { WebSocketServer, WebSocket } from 'ws'
+import { Bonjour, type Service } from 'bonjour-service'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
-import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN } from '../shared/constants'
+import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN, DECK_CLOSE_CODE_DENIED, MDNS_SERVICE_TYPE } from '../shared/constants'
 import {
   DEFAULT_DASHBOARD,
   type ActionStep,
@@ -24,6 +27,8 @@ import {
   type Dashboard,
   type DeckSummary,
   type DeviceInfo,
+  type DialSwitchWidget,
+  type DropdownWidget,
   type EventSource,
   type KeypressAction,
   type SendDcsCommandAction,
@@ -39,6 +44,8 @@ import { getEventSteps } from '../shared/widgetEvents'
 import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression } from '../shared/expr'
 import { EVENT_SOURCE_PRODUCERS } from './eventSourceProducers'
 import { getAppSettings, updateAppSettings } from './appSettings'
+import { isDeviceApproved, approveDevice, revokeDevice, renameApprovedDevice, listApprovedDevices } from './deviceApproval'
+import { displayDeviceName } from '../shared/deviceName'
 import {
   listInstalledAircraft,
   getFieldCatalog,
@@ -122,21 +129,65 @@ function migrateSwitchWidget(widget: Widget & LegacySwitchWidget): Widget {
   return { ...rest, type: style === 'rotary' ? 'switch-dial' : 'switch-rocker' } as Widget
 }
 
+// Pre-4-direction shape: DropdownWidget.orientation was just
+// 'vertical'/'horizontal' before it split into which physical direction the
+// stack grows too (see shared/dropdownLayout.ts) — 'vertical' always grew
+// downward and 'horizontal' always grew right, so those map onto whichever
+// new value renders identically.
+function migrateDropdownOrientation(widget: DropdownWidget): DropdownWidget {
+  const orientation = widget.orientation as string | undefined
+  if (orientation === 'vertical') return { ...widget, orientation: 'top-to-bottom' }
+  if (orientation === 'horizontal') return { ...widget, orientation: 'left-to-right' }
+  return widget
+}
+
+// labelAnchor started out on the DialSwitchWidget itself (one fixed side for
+// every detent), then briefly moved onto each SwitchPosition (one fixed side
+// per detent, still shared by every label on it) before landing on each
+// WidgetLabel so a single detent's labels can anchor independently of each
+// other too. An old value at either abandoned level becomes every label
+// beneath it that doesn't already have its own (most specific wins:
+// label > position > widget), then both legacy fields are dropped.
+interface LegacyDialSwitchWidget {
+  labelAnchor?: 'top' | 'bottom' | 'left' | 'right'
+}
+interface LegacySwitchPosition {
+  labelAnchor?: 'top' | 'bottom' | 'left' | 'right'
+}
+
+function migrateDialSwitchLabelAnchor(widget: DialSwitchWidget & LegacyDialSwitchWidget): DialSwitchWidget {
+  const { labelAnchor: widgetAnchor, ...rest } = widget
+  const positions = widget.positions.map((position) => {
+    const { labelAnchor: positionAnchor, ...restPosition } = position as typeof position & LegacySwitchPosition
+    const anchor = positionAnchor ?? widgetAnchor
+    if (anchor === undefined) return restPosition
+    return { ...restPosition, labels: restPosition.labels.map((l) => (l.labelAnchor === undefined ? { ...l, labelAnchor: anchor } : l)) }
+  })
+  return { ...rest, positions }
+}
+
 function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget): Widget {
   widget = migrateWidgetEvents(widget) as Widget & LegacyButtonWidget & LegacyActionWidget
   widget = migrateSwitchWidget(widget) as Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget
 
+  // Dropdown has its own narrower migration (orientation's value set only,
+  // see migrateDropdownOrientation) rather than skipping migration outright
+  // like the others below.
+  if (widget.type === 'dropdown') return migrateDropdownOrientation(widget)
+
+  if (widget.type === 'switch-dial') return migrateDialSwitchLabelAnchor(widget as DialSwitchWidget & LegacyDialSwitchWidget)
+
   // Morph/gauge/adjuster/encoder/switch widgets never existed in any of the
   // legacy shapes below — they're always created with their current shape
-  // from the start (morph with states[]/blocks[], the rest with no states[]
-  // at all, the switch types with positions[] instead of a flat labels[]).
+  // from the start (morph with states[]/blocks[], the rest with no
+  // states[] at all, the switch type with positions[] instead of a flat
+  // labels[]).
   if (
     widget.type === 'morph' ||
     widget.type === 'gauge' ||
     widget.type === 'adjuster' ||
     widget.type === 'encoder' ||
-    widget.type === 'switch-rocker' ||
-    widget.type === 'switch-dial'
+    widget.type === 'switch-rocker'
   ) {
     return widget
   }
@@ -181,6 +232,24 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
 // telling those apart, so this env var is the only trustworthy signal.
 const devServerUrl = process.env['ELECTRON_RENDERER_URL']
 const rendererDist = join(__dirname, '../renderer')
+
+// Same fixed name every rebuild, so the desktop always has a stable path to
+// serve regardless of which debug/versioned .apk most recently landed here —
+// see android/README (or the build step) for what copies the latest build in.
+const APK_PATH = join(__dirname, '../../dist/boarderoni-latest.apk')
+
+// Used to build the "scan to install" link shown alongside the QR code in
+// the desktop editor — window.location.hostname isn't usable there since the
+// Electron window itself loads from localhost/devServerUrl, not the LAN
+// address a phone would need.
+function getLanAddress(): string | null {
+  for (const iface of Object.values(networkInterfaces())) {
+    for (const addr of iface ?? []) {
+      if (addr.family === 'IPv4' && !addr.internal) return addr.address
+    }
+  }
+  return null
+}
 
 // Each deck lives in its own directory: decks/<id>/dashboard.json +
 // decks/<id>/background-image. Listing decks is a directory scan (see
@@ -360,6 +429,41 @@ function serveBackgroundImage(res: ServerResponse, deckId: string): void {
   })
 }
 
+// dist/boarderoni-latest.apk itself stays a fixed filename (see APK_PATH's
+// comment — that's what makes it a stable path to serve) but the
+// *downloaded* file shouldn't be, or a phone's download manager just
+// silently overwrites the previous one with no way to tell them apart.
+// Built from the file's own mtime rather than tracked separately — always
+// correct after any rebuild (manual or via build-android.sh) with nothing
+// extra to keep in sync.
+function apkVersionedFilename(): string {
+  const mtime = statSync(APK_PATH).mtime
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const stamp = `${mtime.getFullYear()}${pad(mtime.getMonth() + 1)}${pad(mtime.getDate())}-${pad(mtime.getHours())}${pad(mtime.getMinutes())}`
+  return `boarderoni-${stamp}.apk`
+}
+
+function serveApk(res: ServerResponse): void {
+  if (!existsSync(APK_PATH)) {
+    res.writeHead(404)
+    res.end('No APK build available')
+    return
+  }
+  readFile(APK_PATH, (err, data) => {
+    if (err) {
+      res.writeHead(404)
+      res.end('No APK build available')
+      return
+    }
+    res.writeHead(200, {
+      'Content-Type': 'application/vnd.android.package-archive',
+      'Content-Disposition': `attachment; filename="${apkVersionedFilename()}"`,
+      'Cache-Control': 'no-store'
+    })
+    res.end(data)
+  })
+}
+
 interface DeckRoom {
   id: string
   dashboard: Dashboard
@@ -382,14 +486,30 @@ interface DeckRoom {
 const rooms = new Map<string, DeckRoom>()
 
 interface SocketContext {
+  // '' means the lobby — a view client with no deck chosen yet (see
+  // connectLobby in store.ts and the deckParam handling in
+  // wss.on('connection')). Never collides with a real deck id: isValidDeckId
+  // rejects the empty string, so no room is ever registered under it.
   deckId: string
   deviceId?: string
+  // Known once the socket's first 'hello' arrives — undefined briefly
+  // between raw connect and that first message. Drives both which sockets
+  // get a device:approval-requested broadcast and which get gated on
+  // approval before receiving dashboard/deck-list content — see
+  // isTrustedSocket.
+  role?: 'edit' | 'view'
 }
 // Which room (and, once 'hello' arrives, which device) a given socket
 // belongs to — resolved from here on close/message, never from a global map,
 // so cleanup always targets the right room even if others have since been
 // deleted.
 const socketContext = new Map<WebSocket, SocketContext>()
+
+// A device between "sent hello, not approved yet" and "got approved or
+// denied" — holds just enough (whatever hello provided) to give
+// device:approve something to snapshot a display name from. Cleaned up on
+// approval, denial, or the socket closing without either happening.
+const pendingDeviceInfo = new Map<string, DeviceInfo>()
 
 function getOrLoadRoom(deckId: string): DeckRoom | null {
   const existing = rooms.get(deckId)
@@ -558,6 +678,27 @@ const httpServer = createServer((req, res) => {
     return
   }
 
+  if (url.pathname === '/download/apk') {
+    serveApk(res)
+    return
+  }
+
+  // The MobileAppModal's QR code needs the LAN address, not window.location
+  // (see getLanAddress's comment) — this is that lookup, plus whether a
+  // build actually exists to link to, plus the plain browser link (webPort,
+  // not SERVER_PORT — same dev-vs-prod distinction as the mDNS TXT record;
+  // see MDNS_SERVICE_TYPE's comment in shared/constants.ts).
+  if (url.pathname === '/api/apk-info') {
+    const lanAddress = getLanAddress()
+    const available = existsSync(APK_PATH)
+    sendJson(res, 200, {
+      available,
+      url: available && lanAddress ? `http://${lanAddress}:${SERVER_PORT}/download/apk` : null,
+      appUrl: lanAddress ? `http://${lanAddress}:${webPort}/?mode=view` : null
+    })
+    return
+  }
+
   // Checked before the devServerUrl guard below, same as /background-image
   // above — otherwise `npm run dev` would swallow every /api/decks* request
   // behind the "WS only in dev mode" placeholder text and the picker could
@@ -595,6 +736,29 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
 // 'close' below, which is what actually marks the device offline.
 type TrackedSocket = WebSocket & { isAlive?: boolean }
 const HEARTBEAT_INTERVAL_MS = 30_000
+
+function sendInitialState(ws: WebSocket, room: DeckRoom): void {
+  ws.send(JSON.stringify({ type: 'dashboard:sync', dashboard: room.dashboard } satisfies ServerToClient))
+  ws.send(JSON.stringify({ type: 'devices:sync', devices: Array.from(room.devices.values()) } satisfies ServerToClient))
+  ws.send(JSON.stringify({ type: 'dcsbios:status', ...getDcsBiosStatus() } satisfies ServerToClient))
+  const stats = getDcsBiosWorkerStats()
+  if (stats) ws.send(JSON.stringify({ type: 'dcsbios:stats', ...stats } satisfies ServerToClient))
+}
+
+// A socket earns the right to approve/deny other devices (and receive
+// device:approval-requested in the first place) the same way it earns
+// dashboard content: being 'edit', or an already-approved 'view' device. Any
+// trusted device can vouch for a new one, not just the desktop.
+function isTrustedSocket(ctx: SocketContext): boolean {
+  return ctx.role === 'edit' || (ctx.role === 'view' && ctx.deviceId !== undefined && isDeviceApproved(ctx.deviceId))
+}
+
+function requestDeviceApproval(device: DeviceInfo): void {
+  const payload: ServerToClient = { type: 'device:approval-requested', device }
+  for (const [sock, sctx] of socketContext) {
+    if (sock.readyState === WebSocket.OPEN && isTrustedSocket(sctx)) sock.send(JSON.stringify(payload))
+  }
+}
 
 const heartbeat = setInterval(() => {
   for (const client of wss.clients as Set<TrackedSocket>) {
@@ -917,6 +1081,26 @@ async function triggerAction(
     return
   }
 
+  // DropdownWidget is a hybrid the other two branches above each cover half
+  // of — its own static press/release (like the generic path below) PLUS
+  // per-position 'select' (like the switch branch above) — so it gets its
+  // own branch handling both rather than fitting either alone. See its own
+  // comment in shared/types.ts for why it isn't an EventfulWidget/SwitchWidget.
+  if (widget.type === 'dropdown') {
+    if (event === 'press' || event === 'release') {
+      await runSequence(room, widget.events[event], value, final, ws, widgetId, event)
+      return
+    }
+    const index = value !== undefined ? Math.trunc(value) : NaN
+    const position = widget.positions[index]
+    if (event !== 'select' || !position) {
+      sendError(ws, widgetId, 'This widget cannot fire this event')
+      return
+    }
+    await runSequence(room, position.onSelect, undefined, true, ws, widgetId, event)
+    return
+  }
+
   const steps = getEventSteps(widget, event)
   if (steps === undefined) {
     sendError(ws, widgetId, `This widget cannot fire a "${event}" event`)
@@ -937,36 +1121,38 @@ function sendError(
 
 wss.on('connection', (ws: TrackedSocket, req) => {
   const url = new URL(req.url ?? '', 'http://localhost')
-  const room = getOrLoadRoom(url.searchParams.get('deck') ?? '')
-  if (!room) {
+  const deckParam = url.searchParams.get('deck') ?? ''
+  // Empty deck param is the lobby (see connectLobby in store.ts) — only a
+  // *non-empty* one that fails to resolve gets rejected outright.
+  const room = deckParam ? getOrLoadRoom(deckParam) : null
+  if (deckParam && !room) {
     ws.close(DECK_CLOSE_CODE_UNKNOWN, 'Unknown deck')
     return
   }
 
-  socketContext.set(ws, { deckId: room.id })
-  room.sockets.add(ws)
+  socketContext.set(ws, { deckId: room?.id ?? '' })
+  room?.sockets.add(ws)
 
   ws.isAlive = true
   ws.on('pong', () => {
     ws.isAlive = true
   })
 
-  ws.send(JSON.stringify({ type: 'dashboard:sync', dashboard: room.dashboard } satisfies ServerToClient))
-  ws.send(JSON.stringify({ type: 'devices:sync', devices: Array.from(room.devices.values()) } satisfies ServerToClient))
-  // Both genuinely process-wide (one DCS-BIOS connection for the whole
-  // app), so a freshly-connected client gets the current cached value right
-  // away rather than waiting for the next change (see the proactive
-  // onDcsBiosStatusChange/onDcsBiosStatsChange broadcasts below).
-  ws.send(JSON.stringify({ type: 'dcsbios:status', ...getDcsBiosStatus() } satisfies ServerToClient))
-  const initialDcsBiosStats = getDcsBiosWorkerStats()
-  if (initialDcsBiosStats) ws.send(JSON.stringify({ type: 'dcsbios:stats', ...initialDcsBiosStats } satisfies ServerToClient))
+  // Deliberately nothing sent here — dashboard/devices/DCS-BIOS state only
+  // goes out once 'hello' identifies the socket as 'edit' (always trusted)
+  // or an approved 'view' device (see the 'hello' case below and
+  // sendInitialState). An unapproved device gets device:pending instead.
 
   ws.on('close', () => {
     const ctx = socketContext.get(ws)
     socketContext.delete(ws)
     if (!ctx) return
+    // Harmless if it was never in there (already approved/denied, or never
+    // sent hello at all) — Map.delete on a missing key is a no-op.
+    if (ctx.deviceId) pendingDeviceInfo.delete(ctx.deviceId)
     // The room may have been deleted (via DELETE /api/decks/:id) while this
-    // socket was still open — tolerate that rather than assuming it's there.
+    // socket was still open, or this was a lobby connection with no room to
+    // begin with — tolerate both rather than assuming one's there.
     const activeRoom = rooms.get(ctx.deckId)
     if (!activeRoom) return
     activeRoom.sockets.delete(ws)
@@ -981,11 +1167,18 @@ wss.on('connection', (ws: TrackedSocket, req) => {
 
   ws.on('message', async (raw) => {
     const ctx = socketContext.get(ws)
-    const activeRoom = ctx && rooms.get(ctx.deckId)
-    if (!ctx || !activeRoom) {
-      // The deck this socket was connected to no longer exists (deleted
-      // mid-session) — close with the same code the initial-connection
-      // rejection uses so the client falls back to the picker.
+    if (!ctx) {
+      ws.close(DECK_CLOSE_CODE_UNKNOWN, 'Unknown deck')
+      return
+    }
+    // A non-empty ctx.deckId names a room that existed when this socket
+    // connected — if it's gone now (deleted mid-session), close the same
+    // way the initial-connection rejection does. A lobby socket (empty
+    // ctx.deckId) was never tied to one, so activeRoom staying undefined
+    // here is the expected, unproblematic case — see the per-case guards
+    // below for what still needs a real room.
+    const activeRoom = ctx.deckId ? rooms.get(ctx.deckId) : undefined
+    if (ctx.deckId && !activeRoom) {
       ws.close(DECK_CLOSE_CODE_UNKNOWN, 'Unknown deck')
       return
     }
@@ -997,43 +1190,156 @@ wss.on('connection', (ws: TrackedSocket, req) => {
       return
     }
 
+    // Whitelist, not blacklist: 'hello' is always allowed (that's how a
+    // socket earns trust in the first place), everything else needs
+    // isTrustedSocket — covers both an unapproved view device and a
+    // hand-crafted client that skipped hello entirely (ctx.role still
+    // undefined at that point).
+    if (message.type !== 'hello' && !isTrustedSocket(ctx)) {
+      return
+    }
+
     switch (message.type) {
       case 'dashboard:update':
+        if (!activeRoom) break
         activeRoom.dashboard = message.dashboard
         saveDeckDashboard(activeRoom)
         broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard }, ws)
         syncEventSources(activeRoom)
         break
       case 'action:trigger':
+        if (!activeRoom) break
         await triggerAction(activeRoom, message.widgetId, message.event, ws, message.value, message.final ?? true)
         break
       case 'hello':
-        if (message.role === 'view' && message.viewport && message.deviceId) {
+        if (message.role === 'edit') {
+          // The editor's own window — always trusted, no approval gate.
+          // Guarded so a resize-triggered re-hello (if edit mode ever sends
+          // one) doesn't re-send the initial state or double-register.
+          if (ctx.role !== 'edit') {
+            ctx.role = 'edit'
+            if (activeRoom) sendInitialState(ws, activeRoom)
+          }
+        } else if (message.role === 'view' && message.viewport && message.deviceId) {
+          const isFirstHello = ctx.deviceId === undefined
+          ctx.role = 'view'
           ctx.deviceId = message.deviceId
-          // Merge onto any existing entry — this also fires on every window
-          // resize (see store.ts's sendHello), so a plain overwrite would
-          // wipe out a previously-set customName each time.
-          const existing = activeRoom.devices.get(message.deviceId)
-          activeRoom.devices.set(message.deviceId, {
-            ...existing,
+
+          let device: DeviceInfo = {
             id: message.deviceId,
             width: message.viewport.width,
             height: message.viewport.height,
             userAgent: message.userAgent,
             connected: true
-          })
-          broadcastDevices(activeRoom)
+          }
+
+          if (activeRoom) {
+            // Merge onto any existing entry — this also fires on every
+            // window resize (see store.ts's sendHello), so a plain
+            // overwrite would wipe out a previously-set customName each
+            // time. A lobby connection (no activeRoom) has no per-deck
+            // device entry to merge onto in the first place — it's not
+            // "in" any deck yet.
+            const existing = activeRoom.devices.get(message.deviceId)
+            device = { ...existing, ...device }
+            activeRoom.devices.set(message.deviceId, device)
+            broadcastDevices(activeRoom)
+          }
+
+          // Only the socket's first hello decides whether to send state or
+          // request approval — a later resize-triggered hello for an
+          // already-pending device would otherwise re-prompt every
+          // trusted device every time the phone rotates.
+          if (isFirstHello) {
+            if (isDeviceApproved(message.deviceId)) {
+              if (activeRoom) {
+                sendInitialState(ws, activeRoom)
+              } else {
+                // The lobby's whole point: even the deck list itself is
+                // gated the same way dashboard content is.
+                ws.send(JSON.stringify({ type: 'decks:list', decks: listDeckSummaries() } satisfies ServerToClient))
+              }
+            } else {
+              ws.send(JSON.stringify({ type: 'device:pending' } satisfies ServerToClient))
+              pendingDeviceInfo.set(message.deviceId, device)
+              requestDeviceApproval(device)
+            }
+          }
         }
         break
+      case 'device:approve': {
+        // Reaching this case at all already proves isTrustedSocket(ctx) —
+        // the message gate above only lets 'hello' through otherwise — so
+        // no separate role check is needed here.
+        {
+          const info = pendingDeviceInfo.get(message.deviceId)
+          approveDevice(message.deviceId, info ? displayDeviceName(info) : message.deviceId)
+          pendingDeviceInfo.delete(message.deviceId)
+        }
+        for (const [sock, sctx] of socketContext) {
+          if (sctx.deviceId !== message.deviceId || sock.readyState !== WebSocket.OPEN) continue
+          const targetRoom = sctx.deckId ? rooms.get(sctx.deckId) : undefined
+          if (targetRoom) {
+            sendInitialState(sock, targetRoom)
+          } else {
+            // Approved while still sitting on the picker screen (lobby) —
+            // push the deck list now rather than making it reconnect.
+            sock.send(JSON.stringify({ type: 'decks:list', decks: listDeckSummaries() } satisfies ServerToClient))
+          }
+        }
+        break
+      }
+      case 'device:deny': {
+        pendingDeviceInfo.delete(message.deviceId)
+        for (const [sock, sctx] of socketContext) {
+          if (sctx.deviceId !== message.deviceId) continue
+          sock.send(JSON.stringify({ type: 'device:denied' } satisfies ServerToClient))
+          sock.close(DECK_CLOSE_CODE_DENIED, 'Device denied')
+        }
+        break
+      }
+      case 'device:list-approved': {
+        // Admin action — kept desktop-only, unlike approve/deny above,
+        // since this manages the master list rather than one pending device.
+        if (ctx.role !== 'edit') break
+        ws.send(JSON.stringify({ type: 'device:approved-list', devices: listApprovedDevices() } satisfies ServerToClient))
+        break
+      }
+      case 'device:revoke': {
+        if (ctx.role !== 'edit') break
+        revokeDevice(message.deviceId)
+        // Also ends any session it's mid-using right now — a revoke that
+        // only took effect on its *next* reconnect would leave a
+        // still-open dashboard connection working until whenever that is.
+        for (const [sock, sctx] of socketContext) {
+          if (sctx.deviceId !== message.deviceId) continue
+          sock.send(JSON.stringify({ type: 'device:denied' } satisfies ServerToClient))
+          sock.close(DECK_CLOSE_CODE_DENIED, 'Device revoked')
+        }
+        ws.send(JSON.stringify({ type: 'device:approved-list', devices: listApprovedDevices() } satisfies ServerToClient))
+        break
+      }
       case 'device:rename': {
+        if (!activeRoom) break
         const existing = activeRoom.devices.get(message.deviceId)
         if (existing) {
-          activeRoom.devices.set(message.deviceId, { ...existing, customName: message.name.trim() || undefined })
+          const updated = { ...existing, customName: message.name.trim() || undefined }
+          activeRoom.devices.set(message.deviceId, updated)
           broadcastDevices(activeRoom)
+          // Keeps the settings modal's "Approved devices" list from staying
+          // frozen at whatever name was current when this device was
+          // approved — no-op if it isn't (or isn't currently) approved.
+          renameApprovedDevice(message.deviceId, displayDeviceName(updated))
+          for (const [sock, sctx] of socketContext) {
+            if (sctx.role === 'edit' && sock.readyState === WebSocket.OPEN) {
+              sock.send(JSON.stringify({ type: 'device:approved-list', devices: listApprovedDevices() } satisfies ServerToClient))
+            }
+          }
         }
         break
       }
       case 'background-image:upload': {
+        if (!activeRoom) break
         const match = /^data:([\w/+.-]+);base64,(.+)$/.exec(message.dataUrl)
         if (!match) break
         const [, mime, base64] = match
@@ -1045,6 +1351,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         break
       }
       case 'background-image:clear': {
+        if (!activeRoom) break
         const file = deckBackgroundImageFile(activeRoom.id)
         if (existsSync(file)) unlinkSync(file)
         const { backgroundImageMime: _mime, backgroundImageVersion: _version, ...rest } = activeRoom.dashboard
@@ -1156,6 +1463,42 @@ onDcsBiosStatsChange((stats) => {
 
 httpServer.listen(SERVER_PORT, () => {
   console.log(`[boarderoni] server listening on :${SERVER_PORT}`)
+})
+
+// Backs MobileAppModal's clickable appUrl/APK links (see preload/index.ts) —
+// restricted to http(s) so a compromised/malicious renderer content can't
+// use this as a generic "run arbitrary shell integration" primitive (e.g.
+// a file:// or custom protocol handler).
+ipcMain.handle('open-external', (_event, url: string) => {
+  if (!/^https?:\/\//i.test(url)) return
+  shell.openExternal(url)
+})
+
+// Lets the Android app find this machine via NsdManager instead of a
+// manually-typed IP — see MDNS_SERVICE_TYPE in shared/constants.ts for the
+// TXT record contract.
+const bonjour = new Bonjour()
+const webPort = devServerUrl ? Number(new URL(devServerUrl).port) : SERVER_PORT
+let mdnsService: Service | undefined
+try {
+  mdnsService = bonjour.publish({
+    name: `Boarderoni (${hostname()})`,
+    type: MDNS_SERVICE_TYPE,
+    port: SERVER_PORT,
+    txt: {
+      webPort: String(webPort),
+      dev: devServerUrl ? '1' : '0'
+    }
+  })
+} catch (err) {
+  // Best-effort — a machine with multicast disabled/firewalled just falls
+  // back to no auto-discovery, the app itself still works fine.
+  console.error('[boarderoni] mDNS advertisement failed to start', err)
+}
+
+app.on('before-quit', () => {
+  mdnsService?.stop()
+  bonjour.destroy()
 })
 
 try {

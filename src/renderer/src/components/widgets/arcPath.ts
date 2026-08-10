@@ -9,6 +9,31 @@ export function polarToCartesian(cx: number, cy: number, r: number, angleDeg: nu
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
 }
 
+// SVG polygon `points` for a needle/pointer — a constant-width shaft (like
+// the old stroked line) for most of its length, then tapering to a sharp
+// point over the last `tipLength` units instead of ending in a round cap.
+// Shared by DialSwitchWidget's needle and EncoderWidget's grip indicator so
+// both read as a real pointer instead of a blunt round-capped line.
+export function needlePoints(cx: number, cy: number, angleDeg: number, length: number, halfWidth: number, tipLength: number): string {
+  const rad = ((angleDeg - 90) * Math.PI) / 180
+  const dx = Math.cos(rad)
+  const dy = Math.sin(rad)
+  const px = -dy
+  const py = dx
+  const shoulder = Math.max(0, length - tipLength)
+  const baseLeftX = cx + px * halfWidth
+  const baseLeftY = cy + py * halfWidth
+  const baseRightX = cx - px * halfWidth
+  const baseRightY = cy - py * halfWidth
+  const shoulderLeftX = cx + dx * shoulder + px * halfWidth
+  const shoulderLeftY = cy + dy * shoulder + py * halfWidth
+  const shoulderRightX = cx + dx * shoulder - px * halfWidth
+  const shoulderRightY = cy + dy * shoulder - py * halfWidth
+  const tipX = cx + dx * length
+  const tipY = cy + dy * length
+  return `${baseLeftX},${baseLeftY} ${shoulderLeftX},${shoulderLeftY} ${tipX},${tipY} ${shoulderRightX},${shoulderRightY} ${baseRightX},${baseRightY}`
+}
+
 // Builds an SVG path `d` string for the arc from startDeg to endDeg on a
 // circle of radius r centered at (cx, cy). Handles sweeps past 360° (e.g.
 // startAngle=135/endAngle=405, a 270° gauge sweep) by always taking the

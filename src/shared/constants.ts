@@ -2,12 +2,30 @@
 // build, the static renderer bundle that the Android WebView loads.
 export const SERVER_PORT = 17334
 
+// mDNS/DNS-SD service type the desktop app advertises itself under (via
+// bonjour-service) so the Android app never needs a manually-typed IP. The
+// Android client resolves this via NsdManager to get the desktop's current
+// address, plus two TXT records:
+//   webPort — where to load the HTML/JS from. Always SERVER_PORT in a
+//     packaged build, but in `electron-vite dev` it's the Vite dev server's
+//     port instead, so the phone gets the same hot-reload the desktop window
+//     gets. The WebSocket itself is unaffected — that's always SERVER_PORT.
+//   dev — '1' if webPort points at the Vite dev server, '0' otherwise.
+export const MDNS_SERVICE_TYPE = 'boarderoni'
+
 // WebSocket close code the server uses when a connection's `?deck=` id is
 // missing/invalid, or the deck it named has since been deleted. In the
 // 4000-4999 private-use range (RFC 6455) so it can't collide with a
 // protocol-level code. The client (store.ts) treats this as "give up and
 // fall back to the deck picker" rather than its normal auto-reconnect.
 export const DECK_CLOSE_CODE_UNKNOWN = 4004
+
+// WebSocket close code the server uses when a desktop operator explicitly
+// denies a pending device (see device:deny in main/index.ts). The client
+// treats this like DECK_CLOSE_CODE_UNKNOWN in that it stops auto-reconnecting
+// — retrying would just get denied again — but shows a distinct "denied"
+// screen instead of falling back to the deck picker.
+export const DECK_CLOSE_CODE_DENIED = 4005
 
 // Default inner padding (px) for a button widget when it hasn't set its own.
 export const DEFAULT_WIDGET_PADDING = 8

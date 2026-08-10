@@ -11,9 +11,15 @@ function apiUrl(path: string): string {
 
 export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Element {
   const connect = useDashboardStore((s) => s.connect)
+  // Populated by the lobby connection (see connectLobby in store.ts) — a
+  // view client no longer fetches this over REST at all, so even the deck
+  // list itself goes through the same approval gate as dashboard content.
+  // Edit mode ignores it entirely; the desktop is always trusted, so it
+  // keeps using its own REST fetch below same as before this existed.
+  const lobbyDecks = useDashboardStore((s) => s.decks)
   const confirm = useConfirmStore((s) => s.confirm)
 
-  const [decks, setDecks] = useState<DeckSummary[] | null>(null)
+  const [restDecks, setRestDecks] = useState<DeckSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -21,20 +27,23 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
   const [busy, setBusy] = useState(false)
 
   const canManage = mode === 'edit'
+  const decks = canManage ? restDecks : lobbyDecks
 
   function load(): void {
     setError(null)
-    setDecks(null)
+    setRestDecks(null)
     fetch(apiUrl('/api/decks'))
       .then((res) => {
         if (!res.ok) throw new Error(`Server responded ${res.status}`)
         return res.json() as Promise<DeckSummary[]>
       })
-      .then(setDecks)
+      .then(setRestDecks)
       .catch(() => setError('Could not load decks.'))
   }
 
-  useEffect(load, [])
+  useEffect(() => {
+    if (canManage) load()
+  }, [])
 
   function openDeck(id: string): void {
     connect(mode, id)
@@ -66,9 +75,9 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
   async function commitRename(id: string): Promise<void> {
     const name = renameValue.trim()
     setRenamingId(null)
-    if (!name || !decks) return
-    const previous = decks
-    setDecks(decks.map((d) => (d.id === id ? { ...d, name } : d)))
+    if (!name || !restDecks) return
+    const previous = restDecks
+    setRestDecks(restDecks.map((d) => (d.id === id ? { ...d, name } : d)))
     try {
       const res = await fetch(apiUrl(`/api/decks/${id}`), {
         method: 'PATCH',
@@ -77,21 +86,21 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
       })
       if (!res.ok) throw new Error(`Server responded ${res.status}`)
     } catch {
-      setDecks(previous)
+      setRestDecks(previous)
       setError('Could not rename that deck.')
     }
   }
 
   async function handleDelete(deck: DeckSummary): Promise<void> {
     const ok = await confirm(`Delete "${deck.name}"? This cannot be undone.`, { confirmLabel: 'Delete' })
-    if (!ok || !decks) return
-    const previous = decks
-    setDecks(decks.filter((d) => d.id !== deck.id))
+    if (!ok || !restDecks) return
+    const previous = restDecks
+    setRestDecks(restDecks.filter((d) => d.id !== deck.id))
     try {
       const res = await fetch(apiUrl(`/api/decks/${deck.id}`), { method: 'DELETE' })
       if (!res.ok && res.status !== 404) throw new Error(`Server responded ${res.status}`)
     } catch {
-      setDecks(previous)
+      setRestDecks(previous)
       setError('Could not delete that deck.')
     }
   }

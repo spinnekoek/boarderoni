@@ -16,12 +16,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
   const enabledDataSources = useDashboardStore((s) => s.enabledDataSources)
   const requestAppSettings = useDashboardStore((s) => s.requestAppSettings)
   const updateEnabledDataSources = useDashboardStore((s) => s.updateEnabledDataSources)
+  const approvedDevices = useDashboardStore((s) => s.approvedDevices)
+  const requestApprovedDevices = useDashboardStore((s) => s.requestApprovedDevices)
+  const revokeDeviceApproval = useDashboardStore((s) => s.revokeDeviceApproval)
   const focusKind = useEditorSettings((s) => s.settingsFocusKind)
   useEscapeToClose(onClose)
 
   useEffect(() => {
     requestAppSettings()
-  }, [requestAppSettings])
+    requestApprovedDevices()
+  }, [requestAppSettings, requestApprovedDevices])
 
   // Opt-out by default while the real list is still loading, matching the
   // main process's own default (see appSettings.ts) — never flashes "all
@@ -77,6 +81,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
               })}
             </div>
           </div>
+
+          <h3 className="settings-modal__section-title">Approved devices</h3>
+          <p className="properties__hint">
+            Devices that can see the deck list and connect without going through approval again. Revoking one ends its
+            current session too, not just future ones.
+          </p>
+          {approvedDevices.length === 0 ? (
+            <p className="properties__hint">No devices approved yet.</p>
+          ) : (
+            <ul className="settings-modal__device-list">
+              {approvedDevices.map((device) => (
+                <li key={device.id} className="settings-modal__device-row">
+                  <span className="settings-modal__device-name">{device.name}</span>
+                  <button
+                    type="button"
+                    className="device-approval-card__deny"
+                    onClick={() => revokeDeviceApproval(device.id)}
+                  >
+                    Revoke
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
 
           <div className="variables-modal__actions">
             <button type="button" className="device-modal__save" onClick={onClose}>

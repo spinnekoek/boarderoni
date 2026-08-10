@@ -405,6 +405,17 @@ body {
      a clean 1.0 scale can cause hairline rendering artifacts. Nothing here
      needs native scrolling either. */
   touch-action: none;
+  /* touch-action above stops a touchscreen turning a drag into a scroll —
+     it does nothing for a desktop-browser mouse-drag turning one into a
+     text selection (e.g. dragging a dial/rocker switch in Chrome). Same
+     fix .app already uses for the editor, mirrored here for the deployed
+     view client. */
+  user-select: none;
+}
+
+.view-canvas input,
+.view-canvas textarea {
+  user-select: text;
 }
 
 .view-canvas__widget {
@@ -450,6 +461,17 @@ button.deck-button:focus-visible {
   pointer-events: none;
   white-space: nowrap;
   overflow: visible;
+  line-height: 0.9;
+}
+
+/* The single flex child inside .deck-button__label above — plain inline
+   flow (not flex) so a ␤-driven <br> actually breaks the line and an icon
+   sits inline with surrounding text; flex items ignore <br> and would just
+   lay every part out in one row regardless of flex-wrap. */
+.deck-button__label-content svg {
+  /* FontAwesome's own recommended nudge so an icon centers against the
+     surrounding text's baseline instead of sitting low. */
+  vertical-align: -0.125em;
 }
 
 .deck-gauge {
@@ -540,7 +562,7 @@ button.deck-button:focus-visible {
   flex: 1;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: filter 80ms ease;
+  transition: background 80ms ease;
 }
 
 .deck-rocker-switch__body--vertical .deck-rocker-switch__segment + .deck-rocker-switch__segment {
@@ -551,8 +573,12 @@ button.deck-button:focus-visible {
   border-left: 1px solid rgba(0, 0, 0, 0.35);
 }
 
-.deck-rocker-switch__segment--active {
-  filter: brightness(1.35);
+/* Editor-only click-through selection (see CanvasWidget.tsx's
+   onPositionSelect) — same amber outline treatment as
+   .deck-morph-cell--selected. */
+.deck-rocker-switch__segment--selected {
+  outline: 2px solid #e2a53d;
+  outline-offset: -2px;
 }
 
 .deck-dial-switch {
@@ -591,15 +617,29 @@ button.deck-button:focus-visible {
 
 .deck-dial-switch__detent {
   position: absolute;
-  border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   transform: translate(-50%, -50%);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: background 80ms ease;
 }
 
-.deck-dial-switch__detent--active {
-  filter: brightness(1.35);
+.deck-dial-switch__detent--circle {
+  border-radius: 50%;
+}
+
+.deck-dial-switch__detent--square {
+  border-radius: 2px;
+}
+
+.deck-dial-switch__detent--tick {
+  border-radius: 1px;
+}
+
+/* Rotated (see DialSwitchWidget.tsx) to point radially outward — apex up
+   in its own unrotated coordinate space matches rotate(0deg) = "outward at
+   the top of the dial", same convention angleForPosition uses. */
+.deck-dial-switch__detent--triangle {
+  clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
 }
 
 .deck-dial-switch__detent-label {
@@ -630,6 +670,33 @@ button.deck-button:focus-visible {
   width: 100%;
   height: 100%;
   box-sizing: border-box;
+}
+
+.deck-dropdown {
+  position: absolute;
+  inset: 0;
+  /* No overflow rule here on purpose — held items (see .deck-dropdown__item
+     below) are positioned outside this box's own 0..w/0..h range and must
+     not get clipped to it. */
+}
+
+.deck-dropdown--static .deck-dropdown__item {
+  cursor: default;
+}
+
+/* Sits above every other widget while a drag is previewing which position
+   would commit — see DropdownWidgetContent's OPEN_Z_INDEX. */
+.deck-dropdown--open {
+  touch-action: none;
+}
+
+.deck-dropdown__item {
+  position: absolute;
+  box-sizing: border-box;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 80ms ease;
+  overflow: hidden;
 }
 
 .deck-morph {
@@ -1911,6 +1978,16 @@ button.deck-morph-cell:focus-visible {
   font-size: 15px;
 }
 
+.device-modal__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #e8e8ea;
+  margin-bottom: 20px;
+  cursor: pointer;
+}
+
 .device-modal__change-deck {
   width: 100%;
   padding: 10px;
@@ -2435,6 +2512,38 @@ button.deck-morph-cell:focus-visible {
   border-top: 1px solid #2a2e37;
 }
 
+.settings-modal__section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e8ea;
+  margin: 20px 0 4px;
+  padding-top: 16px;
+  border-top: 1px solid #2a2e37;
+}
+
+.settings-modal__device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.settings-modal__device-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #2a2e37;
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+.settings-modal__device-name {
+  font-size: 13px;
+  color: #e8e8ea;
+  word-break: break-word;
+}
+
 .dcsbios-settings {
   display: flex;
   flex-direction: column;
@@ -2835,4 +2944,128 @@ button.deck-morph-cell:focus-visible {
 
 .expr-modal__done:hover {
   filter: brightness(1.1);
+}
+
+.view-status-screen {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  background: #14161b;
+  color: #9aa0ac;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.device-approval-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(90%, 320px);
+  z-index: 1200;
+}
+
+.device-approval-card {
+  background: #1c2027;
+  border: 1px solid #3a3f4a;
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: toast-in 150ms ease-out;
+}
+
+.device-approval-card__title {
+  font-size: 12px;
+  color: #9aa0ac;
+  margin-bottom: 4px;
+}
+
+.device-approval-card__name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #e8e8ea;
+  margin-bottom: 12px;
+  word-break: break-word;
+}
+
+.device-approval-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.device-approval-card__deny,
+.device-approval-card__approve {
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.device-approval-card__deny {
+  background: #3a1f22;
+  color: #f0d8d8;
+  border: 1px solid #6b2b2b;
+}
+
+.device-approval-card__deny:hover {
+  background: #472328;
+}
+
+.device-approval-card__approve {
+  background: #5b8def;
+  color: #14161b;
+  border: 1px solid #5b8def;
+}
+
+.device-approval-card__approve:hover {
+  filter: brightness(1.1);
+}
+
+.mobile-app-modal__link-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.mobile-app-modal__link {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #7ea6f5;
+  background: #14161b;
+  border: 1px solid #3a3f4a;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-app-modal__link:hover {
+  border-color: #5b8def;
+}
+
+.mobile-app-modal__copy {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #2a2e37;
+  color: #e8e8ea;
+  border: 1px solid #3a3f4a;
+  cursor: pointer;
+}
+
+.mobile-app-modal__copy:hover {
+  background: #343a46;
 }

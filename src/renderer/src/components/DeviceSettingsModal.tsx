@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useDashboardStore } from '../store'
-import { getDeviceId } from '../id'
+import { getDeviceId, getKeepScreenOnPreference, setKeepScreenOnPreference } from '../id'
 import { useEscapeToClose } from '../useEscapeToClose'
 import { friendlyDeviceName } from '@shared/deviceName'
+import { changeServer, isBoarderoniAndroidApp, setKeepScreenOn } from '../androidBridge'
 
 export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   const devices = useDashboardStore((s) => s.devices)
@@ -14,10 +15,22 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
   const device = devices.find((d) => d.id === deviceId)
 
   const [name, setName] = useState(device?.customName ?? '')
+  // Only meaningful (and only rendered) inside the actual Android app — see
+  // androidBridge.ts's comment on why presence of window.BoarderoniAndroid
+  // is what that means, not e.g. a mobile-browser user-agent check.
+  const [keepScreenOn, setKeepScreenOnState] = useState(getKeepScreenOnPreference)
 
   function handleSave(): void {
     renameDevice(deviceId, name)
     onClose()
+  }
+
+  // Applies immediately rather than waiting for Save — it's a live toggle
+  // of the current screen, not a value that needs staging/confirming.
+  function handleKeepScreenOnChange(enabled: boolean): void {
+    setKeepScreenOnState(enabled)
+    setKeepScreenOnPreference(enabled)
+    setKeepScreenOn(enabled)
   }
 
   // No onClose() here — disconnect() clears the store's deckId, which is
@@ -32,6 +45,14 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
   // within the app can't fix.
   function handleForceRefresh(): void {
     window.location.reload()
+  }
+
+  // Drops the native app back to its searching/manual-entry screen —
+  // replaces the old always-on-screen floating button. Only reachable here
+  // (Android app only, see isBoarderoniAndroidApp's gate below): a regular
+  // browser has no native discovery/manual-entry screen to drop back to.
+  function handleChangeServer(): void {
+    changeServer()
   }
 
   return (
@@ -50,6 +71,13 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
             <input value={name} placeholder={friendlyDeviceName(device?.userAgent)} onChange={(e) => setName(e.target.value)} />
           </label>
 
+          {isBoarderoniAndroidApp() && (
+            <label className="device-modal__checkbox">
+              <input type="checkbox" checked={keepScreenOn} onChange={(e) => handleKeepScreenOnChange(e.target.checked)} />
+              <span>Prevent screen timeout</span>
+            </label>
+          )}
+
           <button className="device-modal__change-deck" onClick={handleChangeDeck}>
             Change deck
           </button>
@@ -57,6 +85,12 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
           <button className="device-modal__change-deck" onClick={handleForceRefresh}>
             Force refresh
           </button>
+
+          {isBoarderoniAndroidApp() && (
+            <button className="device-modal__change-deck" onClick={handleChangeServer}>
+              Change server
+            </button>
+          )}
 
           <div className="device-modal__actions">
             <button className="device-modal__cancel" onClick={onClose}>

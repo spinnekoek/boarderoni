@@ -1,10 +1,12 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
+import { isBoarderoniAndroidApp, setKeepScreenOn } from '../androidBridge'
+import { getKeepScreenOnPreference } from '../id'
 import { getEffectiveStates } from '@shared/states'
 import { morphFootprint } from '@shared/morph'
 import { resolveColor, toVariableMap, type VariableMap } from '@shared/expr'
-import type { AdjusterWidget, DialSwitchWidget, EncoderWidget, RockerSwitchWidget, StatefulWidget, Widget } from '@shared/types'
+import type { AdjusterWidget, DialSwitchWidget, DropdownWidget, EncoderWidget, RockerSwitchWidget, StatefulWidget, Widget } from '@shared/types'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
 import { GaugeWidgetContent } from './widgets/GaugeWidget'
@@ -12,10 +14,12 @@ import { AdjusterWidgetContent } from './widgets/AdjusterWidget'
 import { EncoderWidgetContent } from './widgets/EncoderWidget'
 import { RockerSwitchWidgetContent } from './widgets/RockerSwitchWidget'
 import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
+import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { useAdjusterDrag } from '../useAdjusterDrag'
 import { useEncoderDrag } from '../useEncoderDrag'
 import { useSwitchPosition } from '../useSwitchPosition'
 import { useDialSwitchDrag } from '../useDialSwitchDrag'
+import { useDropdownDrag } from '../useDropdownDrag'
 import { DeviceSettingsModal } from './DeviceSettingsModal'
 import { ToastStack } from './ToastStack'
 
@@ -94,6 +98,36 @@ function DialSwitchView({ widget, variables }: { widget: DialSwitchWidget; varia
     )
   }
   return <DialSwitchWidgetContent widget={widget} variables={variables} interactive activeIndex={activeIndex} onSelect={select} />
+}
+
+// press/release fire on every hold regardless of where it ends; select
+// (via useSwitchPosition's own select — same 'select' action:trigger every
+// switch type uses, and same local "remember what this device last picked"
+// behavior) only fires when useDropdownDrag resolves the release to a real
+// position, not a drag-off-the-end miss — see its own comment.
+function DropdownView({ widget, variables }: { widget: DropdownWidget; variables: VariableMap }): React.JSX.Element {
+  const triggerWidget = useDashboardStore((s) => s.triggerWidget)
+  const { activeIndex, select } = useSwitchPosition(widget, variables)
+  const { held, dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useDropdownDrag(
+    widget,
+    activeIndex,
+    () => triggerWidget(widget.id, 'press'),
+    () => triggerWidget(widget.id, 'release'),
+    select
+  )
+  return (
+    <DropdownWidgetContent
+      widget={widget}
+      variables={variables}
+      interactive
+      activeIndex={activeIndex}
+      held={held}
+      dragIndex={dragIndex}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    />
+  )
 }
 
 // Today's button/morph interactive rendering — press/release + tap-to-
@@ -214,6 +248,7 @@ function ViewWidget({
   if (widget.type === 'encoder') return <EncoderView widget={widget} variables={variables} />
   if (widget.type === 'switch-rocker') return <RockerSwitchView widget={widget} variables={variables} />
   if (widget.type === 'switch-dial') return <DialSwitchView widget={widget} variables={variables} />
+  if (widget.type === 'dropdown') return <DropdownView widget={widget} variables={variables} />
   return <TriggerableViewWidget widget={widget} variables={variables} error={error} />
 }
 
@@ -232,6 +267,14 @@ export function ViewCanvas(): React.JSX.Element {
   const resolvedBackgroundColor =
     resolveColor({ color: backgroundColor, colorExpr: backgroundColorExpr }, variableMap).color ?? backgroundColor
 
+  // Applies the persisted preference to the native side once per mount —
+  // DeviceSettingsModal's checkbox re-applies it live on every toggle, this
+  // is just what makes it stick across app relaunches without the modal
+  // ever having to be opened.
+  useEffect(() => {
+    if (isBoarderoniAndroidApp()) setKeepScreenOn(getKeepScreenOnPreference())
+  }, [])
+
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Guards against re-opening on every touchmove while 5+ fingers stay down,
   // and resets once every finger has lifted so the next 5-finger touch can
@@ -248,6 +291,20 @@ export function ViewCanvas(): React.JSX.Element {
   function handleTouchEnd(e: React.TouchEvent): void {
     if (e.touches.length === 0) gestureFiredRef.current = false
   }
+
+  // The 5-finger gesture's keyboard equivalent — for opening this same
+  // modal from a regular desktop browser (e.g. testing the appUrl link from
+  // MobileAppModal in Chrome), where there's no touchscreen to 5-finger tap.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent): void {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
+      if (e.key.toLowerCase() !== 'i') return
+      e.preventDefault()
+      setSettingsOpen(true)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   return (
     <div

@@ -2,7 +2,7 @@ import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { EncoderWidget } from '@shared/types'
 import { renderWidgetLabels } from './labels'
-import { polarToCartesian } from './arcPath'
+import { needlePoints } from './arcPath'
 
 const GRIP_RADIUS = 34
 
@@ -43,8 +43,6 @@ export function EncoderWidgetContent({
   const resolvedBorder = resolveBorderColor(widget, variables)
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
 
-  const grip = polarToCartesian(50, 50, GRIP_RADIUS, spin)
-
   return (
     <div
       className={`deck-encoder${interactive ? '' : ' deck-encoder--static'}`}
@@ -56,7 +54,7 @@ export function EncoderWidgetContent({
     >
       <svg className="deck-encoder__dial" viewBox="0 0 100 100">
         <circle cx={50} cy={50} r={45} fill={trackColor} stroke={borderColor} strokeWidth={2} />
-        <line x1={50} y1={50} x2={grip.x} y2={grip.y} stroke={fillColor} strokeWidth={6} strokeLinecap="round" />
+        <polygon points={needlePoints(50, 50, spin, GRIP_RADIUS, 3, 12)} fill={fillColor} />
         <circle cx={50} cy={50} r={5} fill={fillColor} />
       </svg>
       {renderWidgetLabels(widget.labels, trackColor, variables)}

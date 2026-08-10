@@ -8,6 +8,7 @@ import { AdjusterWidgetContent } from './widgets/AdjusterWidget'
 import { EncoderWidgetContent } from './widgets/EncoderWidget'
 import { RockerSwitchWidgetContent } from './widgets/RockerSwitchWidget'
 import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
+import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { resolveActivePositionIndex } from '@shared/switchPosition'
 import type { VariableMap } from '@shared/expr'
 import type { BoxWidget } from '@shared/types'
@@ -34,8 +35,11 @@ export function CanvasWidget({
   const widgets = useDashboardStore((s) => s.dashboard.widgets)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
   const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
+  const selectedBlockId = useDashboardStore((s) => s.selectedBlockId)
+  const selectBlock = useDashboardStore((s) => s.selectBlock)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useEditorSettings((s) => s.gridSize)
+  const isSoleSelection = selected && selectedWidgetIds.length === 1
 
   // Follow whichever tab is active in the properties panel — but only while
   // this is the sole selected widget, so an unselected (or multi-selected)
@@ -114,10 +118,27 @@ export function CanvasWidget({
           variables={variables}
           interactive={false}
           activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? 0}
+          selectedPositionId={isSoleSelection ? selectedBlockId : null}
+          onPositionSelect={(position) => {
+            // First click on the widget selects the whole thing (same as
+            // anywhere else on it) and stops here; a second click, now that
+            // it's already the sole selection, drills into that position —
+            // same two-step as MorphCanvasWidget's onBlockSelect.
+            if (!isSoleSelection) return
+            selectBlock(selectedBlockId === position.id ? null : position.id)
+          }}
         />
       )}
       {widget.type === 'switch-dial' && (
         <DialSwitchWidgetContent
+          widget={widget}
+          variables={variables}
+          interactive={false}
+          activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? 0}
+        />
+      )}
+      {widget.type === 'dropdown' && (
+        <DropdownWidgetContent
           widget={widget}
           variables={variables}
           interactive={false}

@@ -37,3 +37,17 @@ export function setLastDeckId(id: string): void {
 export function clearLastDeckId(): void {
   localStorage.removeItem(LAST_DECK_ID_KEY)
 }
+
+const KEEP_SCREEN_ON_KEY = 'boarderoni-keep-screen-on'
+
+// Purely local to this device — not synced through the server like
+// customName, since it's a hardware preference with no meaning to any other
+// client. Only actually does anything inside the Android app (see
+// androidBridge.ts); reading/writing it elsewhere is harmless no-op storage.
+export function getKeepScreenOnPreference(): boolean {
+  return localStorage.getItem(KEEP_SCREEN_ON_KEY) === '1'
+}
+
+export function setKeepScreenOnPreference(enabled: boolean): void {
+  localStorage.setItem(KEEP_SCREEN_ON_KEY, enabled ? '1' : '0')
+}

@@ -129,6 +129,20 @@ export interface WidgetLabel {
   align?: HorizontalAlign
   verticalAlign?: VerticalAlign
   padding?: number
+  // DialSwitchWidget only — where THIS label sits relative to its position's
+  // detent dot. Unset (the default) places it radially outward along that
+  // detent's own angle, just past the dial's rim, so it reads correctly
+  // regardless of which side of the ring it's on. A fixed side instead pins
+  // just this one label there, independent of every other label — e.g. one
+  // label that collides with something else on the dashboard can be pinned
+  // aside without disturbing the rest (including its own position's other
+  // labels, if it has more than one).
+  labelAnchor?: 'top' | 'bottom' | 'left' | 'right'
+  // DialSwitchWidget only — how far THIS label sits from its detent dot, in
+  // the same 0-100 viewBox units as DialSwitchWidget.detentRadius. Only
+  // affects automatic (radial) placement, i.e. labelAnchor unset — a label
+  // pinned to a fixed side ignores this. Unset uses the fixed LABEL_OFFSET.
+  labelDistance?: number
 }
 
 // Purely geometric per-side appearance shared by anything rendered as a
@@ -427,6 +441,19 @@ export interface SwitchPosition extends ColorAppearance {
   // switch branch in main/index.ts) — same SequenceStep[] mechanism as a
   // button's press/release, just keyed by position instead of by event kind.
   onSelect: SequenceStep[]
+  // This position's look while it's the active one — `color`/`colorExpr`
+  // above are the unselected/idle look. Both unset (the default) means
+  // "Auto": derived by lightening the resolved unselected color by
+  // AUTO_CLICKED_LIGHTEN, same treatment ButtonWidget's auto-derived
+  // "Clicked" state gets (see pickAutoActiveColor in shared/color.ts) —
+  // computed at render time, not stored, so it always tracks a live/
+  // expression-driven base color instead of going stale.
+  activeColor?: string
+  activeColorExpr?: string
+  // Independent of the unselected color's own backgroundOpacity — same
+  // "each distinct color field gets its own opacity" convention every other
+  // color pair in this app follows (e.g. background vs border).
+  activeOpacity?: number
 }
 
 // Shared by RockerSwitchWidget/DialSwitchWidget below — everything about a
@@ -480,6 +507,20 @@ export interface RockerSwitchWidget extends SwitchWidgetBase {
   borderOpacity?: number
 }
 
+// Shared shape geometry for a small marker — either one of a DialSwitchWidget's
+// ring detents, or its dial-center indicator dot. Deliberately excludes fill
+// color (per-position for ring detents, a single field for the indicator —
+// different enough between the two callers that it stays outside this type)
+// and the shape enum itself (each caller keeps its own `*Shape` field so an
+// already-saved widget's detentShape survives this type existing at all).
+export interface DetentStyle {
+  width?: number
+  height?: number
+  borderWidth?: number
+  borderColor?: string
+  borderRadius?: number
+}
+
 // A rotary dial switch — HSI/ADI mode selector, ignition/mag switch.
 // Positions render as labeled detents around startAngle..endAngle, with a
 // needle pointing at whichever one is active.
@@ -502,15 +543,104 @@ export interface DialSwitchWidget extends SwitchWidgetBase {
   interactionMode?: 'tap' | 'drag'
   track: ColorAppearance // dial face
   fill: ColorAppearance // needle/pointer color
-  // Where each position's label sits relative to its detent dot. Unset (the
-  // default) places it radially outward along that detent's own angle — just
-  // past the dial's rim, on whichever side that particular detent is on, so
-  // every label reads correctly around the ring with zero configuration.
-  // Any fixed direction instead pins every label to that same side
-  // regardless of angle (matching a single earlier "always below" layout,
-  // generalized to 4 choices) — useful if radial placement collides with
-  // something else on the dashboard.
-  labelAnchor?: 'top' | 'bottom' | 'left' | 'right'
+  // Per-label label anchor — see WidgetLabel.labelAnchor.
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+  // How each detent dot is drawn. Unset (the default) is a plain circle;
+  // 'tick' and 'triangle' are rotated to point radially outward along that
+  // detent's own angle (same convention angleForPosition/labelAnchorPoint
+  // use), reading like a real rotary switch's click-stops.
+  detentShape?: 'circle' | 'square' | 'tick' | 'triangle'
+  // Distance from center to each detent dot, in the same 0-100 viewBox units
+  // as everything else here (see DialSwitchWidgetContent). Unset (the
+  // default) uses DETENT_RADIUS.
+  detentRadius?: number
+  // Size/border for whichever detentShape is picked — see DetentStyle. Unset
+  // fields fall back to the fixed DETENT_SIZE/CSS defaults for that shape.
+  detentStyle?: DetentStyle
+  // What draws the dial's position indicator. 'needle' (the default) is a
+  // line from center to the active angle, same as always. 'square'/'circle'
+  // instead draw that shape at the dial's center plus a small indicator
+  // marker (see indicatorShape/indicatorStyle) at the active angle — on the
+  // shape's own top edge for 'square' (it's already rotated to point there),
+  // on the shape's rim for 'circle' (which isn't rotated, so the marker
+  // itself moves to the active angle instead).
+  dialShape?: 'needle' | 'square' | 'circle'
+  // 'square' dialShape only.
+  squareWidth?: number
+  squareHeight?: number
+  squareBorderWidth?: number
+  squareBorderRadius?: number
+  squareColor?: string
+  squareBorderColor?: string
+  // 'circle' dialShape only.
+  circleSize?: number
+  circleBorderWidth?: number
+  circleColor?: string
+  circleBorderColor?: string
+  // The small marker on the dial's own shape (square/circle dialShape only)
+  // that shows the active angle — same shape/style vocabulary as the ring
+  // detents above (see detentShape/detentStyle), just a second independent
+  // instance of it since the two markers usually look different in practice.
+  // Border color lives in indicatorStyle.borderColor (DetentStyle), same as
+  // a ring detent's — deliberately no separate indicatorBorderColor field,
+  // so there's exactly one place that sets what the render actually reads.
+  indicatorShape?: 'circle' | 'square' | 'tick' | 'triangle'
+  indicatorStyle?: DetentStyle
+  indicatorColor?: string
+}
+
+// A collapsed picker — CDU page selector, radio channel select. Normally
+// shows only the active position, sized like a single cell; press and hold
+// to reveal the rest stacked along `orientation`, in one of two layouts (see
+// expandMode):
+//   - 'anchored' (default): the active one stays exactly where it already
+//     was and the others fan out around it in list order (4 positions, #2
+//     active: #1 renders one slot above, #3/#4 one/two slots below).
+//   - 'unanchored': the list always starts at the widget's own x/y footprint
+//     regardless of which one is active (position 0 fills it, the rest
+//     stack below/right of it in list order) — active is just highlighted
+//     wherever it falls.
+// Both drag while held to preview, release to commit — see
+// useDropdownDrag.ts, which resolves the drag distance to a slot the same
+// way useDialSwitchDrag.ts resolves an angle to a detent, just linear
+// instead of angular, then maps that slot to a position index per
+// expandMode the same way DropdownWidgetContent does for layout.
+//
+// Deliberately NOT an EventfulWidget or a SwitchWidget: it's both at once
+// (own press/release, like Adjuster/Encoder, AND per-position onSelect, like
+// the switches) — see its own dedicated branch in triggerAction rather than
+// forcing it through either single-purpose union.
+export interface DropdownWidget extends SwitchWidgetBase {
+  id: string
+  type: 'dropdown'
+  x: number
+  y: number
+  w: number
+  h: number
+  // Which axis the held-open stack fans out along, and which direction it
+  // grows in — default 'top-to-bottom'. See shared/dropdownLayout.ts for how
+  // this maps to a physical axis/sign, shared by rendering and drag
+  // resolution alike.
+  orientation?: 'top-to-bottom' | 'bottom-to-top' | 'left-to-right' | 'right-to-left'
+  // 'anchored' (default): active position stays put, others fan around it.
+  // 'unanchored': list always starts at the widget's own footprint — see
+  // above.
+  expandMode?: 'anchored' | 'unanchored'
+  events: {
+    press: SequenceStep[]
+    release: SequenceStep[]
+  }
+  track: ColorAppearance // cell background behind every position, held or not
+  radiusTopLeft?: number
+  radiusTopRight?: number
+  radiusBottomLeft?: number
+  radiusBottomRight?: number
+  borderWidthTop?: number
+  borderWidthRight?: number
+  borderWidthBottom?: number
+  borderWidthLeft?: number
   borderColor?: string
   borderColorExpr?: string
   borderOpacity?: number
@@ -524,11 +654,19 @@ export type Widget =
   | EncoderWidget
   | RockerSwitchWidget
   | DialSwitchWidget
+  | DropdownWidget
 
 // A plain draggable/resizable x/y/w/h rectangle in the editor (unlike
 // MorphButtonWidget's cellW/cellH+blocks shape) — shared prop type for
 // CanvasWidget's generalized drag/resize wrapper.
-export type BoxWidget = ButtonWidget | GaugeWidget | AdjusterWidget | EncoderWidget | RockerSwitchWidget | DialSwitchWidget
+export type BoxWidget =
+  | ButtonWidget
+  | GaugeWidget
+  | AdjusterWidget
+  | EncoderWidget
+  | RockerSwitchWidget
+  | DialSwitchWidget
+  | DropdownWidget
 
 // Widgets driven by the WidgetState/statesEnabled/activeStateExpr machinery
 // — used to narrow getEffectiveStates now that Widget includes types
@@ -543,7 +681,9 @@ export type StatefulWidget = ButtonWidget | MorphButtonWidget
 // position, not by a static per-type set of event kinds, so they can't be
 // resolved through getEventSteps's (widget, event) -> steps shape; they're
 // handled as their own branch in triggerAction instead. Mirrors StatefulWidget's
-// own narrowing convention immediately above.
+// own narrowing convention immediately above. DropdownWidget is excluded for
+// the same reason PLUS it has its own press/release, unlike the switches —
+// see its own comment and triggerAction's dropdown branch.
 export type EventfulWidget = ButtonWidget | MorphButtonWidget | AdjusterWidget | EncoderWidget
 
 // The two switch widget types, narrowed together wherever code (triggerAction,
@@ -672,6 +812,20 @@ export interface DeviceInfo {
   customName?: string
 }
 
+// One entry in the settings modal's "Approved devices" list — see
+// deviceApproval.ts. Distinct from DeviceInfo: this is the persisted,
+// global approval record (survives across every deck/session), not a
+// specific room's live connection state.
+export interface ApprovedDeviceSummary {
+  id: string
+  // Best-effort snapshot of the device's name at the moment it was
+  // approved (customName if it had one yet, else the friendly userAgent
+  // label) — not live-updated by a later rename, same tradeoff
+  // DeviceInfo.userAgent's snapshot-at-hello already has.
+  name: string
+  approvedAt: number
+}
+
 export type ClientToServer =
   | {
       type: 'hello'
@@ -701,6 +855,15 @@ export type ClientToServer =
   | { type: 'background-image:upload'; dataUrl: string }
   | { type: 'background-image:clear' }
   | { type: 'device:rename'; deviceId: string; name: string }
+  // Sent by any trusted client (edit, or an already-approved view device —
+  // see isTrustedSocket in main/index.ts), in response to a
+  // device:approval-requested it received.
+  | { type: 'device:approve'; deviceId: string }
+  | { type: 'device:deny'; deviceId: string }
+  // Settings modal only, edit-role only (enforced server-side) — managing
+  // the master approved list is an admin action, unlike approve/deny above.
+  | { type: 'device:list-approved' }
+  | { type: 'device:revoke'; deviceId: string }
   | { type: 'dcsbios:list-aircraft' }
   | { type: 'dcsbios:field-catalog'; aircraft: string }
   | { type: 'dcsbios:get-settings' }
@@ -729,6 +892,26 @@ export type ServerToClient =
   // "cannot fire this event", which has no step context.
   | { type: 'action:error'; widgetId: string; message: string; detail?: { event: WidgetEventKind; stepIndex: number; stepKind: SequenceStep['kind'] } }
   | { type: 'devices:sync'; devices: DeviceInfo[] }
+  // Sent to a 'view' client instead of dashboard:sync when its deviceId
+  // hasn't been approved yet — the client shows a waiting screen and gets no
+  // dashboard content until either this resolves into a dashboard:sync (approved)
+  // or a device:denied arrives and the connection closes (see main/index.ts).
+  | { type: 'device:pending' }
+  | { type: 'device:denied' }
+  // Sent to every currently-trusted client (edit, or an already-approved
+  // view device — any of them can approve/deny, not just the desktop) when
+  // a not-yet-approved device's first hello arrives.
+  | { type: 'device:approval-requested'; device: DeviceInfo }
+  // Reply to device:list-approved / device:revoke — the full current list
+  // either way, so the settings modal doesn't need to locally patch its
+  // copy after a revoke.
+  | { type: 'device:approved-list'; devices: ApprovedDeviceSummary[] }
+  // Pushed to a 'view' client with no deck chosen yet, once its hello
+  // resolves as approved (immediately if already-approved, or the moment a
+  // pending one gets approved) — what the picker screen renders instead of
+  // dashboard content, which doesn't apply pre-deck-selection. Server push,
+  // not client poll, same as everything else here.
+  | { type: 'decks:list'; decks: DeckSummary[] }
   | { type: 'dcsbios:aircraft-list'; aircraft: { id: string; name: string }[] }
   | { type: 'dcsbios:field-catalog'; aircraft: string; fields: DcsBiosFieldCatalogEntry[] }
   | { type: 'dcsbios:field-catalog-error'; aircraft: string; message: string }

@@ -2,7 +2,16 @@ import { useDashboardStore } from '../store'
 import { DEFAULT_FONT_ID } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR } from '@shared/color'
 import { nextId } from '../id'
-import type { AdjusterWidget, ButtonWidget, DialSwitchWidget, EncoderWidget, GaugeWidget, MorphButtonWidget, RockerSwitchWidget } from '@shared/types'
+import type {
+  AdjusterWidget,
+  ButtonWidget,
+  DialSwitchWidget,
+  DropdownWidget,
+  EncoderWidget,
+  GaugeWidget,
+  MorphButtonWidget,
+  RockerSwitchWidget
+} from '@shared/types'
 
 export function Palette(): React.JSX.Element {
   const addWidget = useDashboardStore((s) => s.addWidget)
@@ -162,6 +171,23 @@ export function Palette(): React.JSX.Element {
     selectWidget(widget.id)
   }
 
+  function handleAddDropdown(): void {
+    const widget: DropdownWidget = {
+      id: nextId(),
+      type: 'dropdown',
+      x: 40,
+      y: 40,
+      w: 120,
+      h: 36,
+      orientation: 'top-to-bottom',
+      positions: defaultPositions(),
+      events: { press: [], release: [] },
+      track: { color: DEFAULT_WIDGET_COLOR }
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
   return (
     <aside className="palette">
       <h2 className="palette__title">Widgets</h2>
@@ -186,6 +212,9 @@ export function Palette(): React.JSX.Element {
       <button className="palette__item" onClick={handleAddDialSwitch}>
         + Dial switch
       </button>
+      <button className="palette__item" onClick={handleAddDropdown}>
+        + Dropdown
+      </button>
       <p className="palette__hint">Click a widget on the canvas to edit its label, keybind, and position in the properties panel.</p>
       <p className="palette__hint">
         Morph buttons: select one, then use the + handles on its edges to extend it into other base blocks — connected blocks act as
@@ -199,6 +228,11 @@ export function Palette(): React.JSX.Element {
         switches have 2+ tappable positions, each with its own action — good for DCS-BIOS set-position controls (gear, mode
         selectors, ...). Which position looks active is local to each device unless you wire an "Active position" expression to a
         shared variable.
+      </p>
+      <p className="palette__hint">
+        Dropdowns show only the active position until pressed and held, then fan the rest out above/below (or left/right) it — drag to
+        the one you want and release to select it. Has its own Press/Release (fires on every hold) alongside each position's own action
+        (fires only if you release on it).
       </p>
     </aside>
   )

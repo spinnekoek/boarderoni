@@ -19,7 +19,7 @@ function cloneWidget(widget: Widget, offset: number): Widget {
     }
   }
 
-  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial') {
+  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial' || widget.type === 'dropdown') {
     return {
       ...widget,
       id: nextId(),
