@@ -10,7 +10,8 @@ import type {
   EncoderWidget,
   GaugeWidget,
   MorphButtonWidget,
-  RockerSwitchWidget
+  RockerSwitchWidget,
+  ToggleSwitchWidget
 } from '@shared/types'
 
 export function Palette(): React.JSX.Element {
@@ -171,6 +172,35 @@ export function Palette(): React.JSX.Element {
     selectWidget(widget.id)
   }
 
+  function defaultTogglePositions(): ToggleSwitchWidget['positions'] {
+    return [
+      { id: nextId(), name: 'Top', labels: [{ id: nextId(), text: 'Top', fontFamily: DEFAULT_FONT_ID, align: 'center', verticalAlign: 'center' }], onSelect: [] },
+      {
+        id: nextId(),
+        name: 'Bottom',
+        labels: [{ id: nextId(), text: 'Bottom', fontFamily: DEFAULT_FONT_ID, align: 'center', verticalAlign: 'center' }],
+        onSelect: []
+      }
+    ]
+  }
+
+  function handleAddToggleSwitch(): void {
+    const widget: ToggleSwitchWidget = {
+      id: nextId(),
+      type: 'switch-toggle',
+      x: 40,
+      y: 40,
+      w: 70,
+      h: 130,
+      orientation: 'vertical',
+      positions: defaultTogglePositions(),
+      track: { color: DEFAULT_WIDGET_COLOR },
+      fill: { color: '#5b8def' }
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
   function handleAddDropdown(): void {
     const widget: DropdownWidget = {
       id: nextId(),
@@ -212,6 +242,9 @@ export function Palette(): React.JSX.Element {
       <button className="palette__item" onClick={handleAddDialSwitch}>
         + Dial switch
       </button>
+      <button className="palette__item" onClick={handleAddToggleSwitch}>
+        + Toggle switch
+      </button>
       <button className="palette__item" onClick={handleAddDropdown}>
         + Dropdown
       </button>
@@ -228,6 +261,11 @@ export function Palette(): React.JSX.Element {
         switches have 2+ tappable positions, each with its own action — good for DCS-BIOS set-position controls (gear, mode
         selectors, ...). Which position looks active is local to each device unless you wire an "Active position" expression to a
         shared variable.
+      </p>
+      <p className="palette__hint">
+        Toggle switches are Rocker's physical-lever cousin — always 2 (Top/Bottom) or 3 (Top/Middle/Bottom) positions, names fixed.
+        Top/Bottom can be set Momentary (springs back to Middle on release). Interaction mode picks Tap (tap a position directly) or
+        Drag (press and drag toward a position, like Dial) — Momentary fires live in either mode, not just on release.
       </p>
       <p className="palette__hint">
         Dropdowns show only the active position until pressed and held, then fan the rest out above/below (or left/right) it — drag to

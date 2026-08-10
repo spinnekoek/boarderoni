@@ -1,8 +1,11 @@
-// Shared SVG arc-path math for Gauge's arc style and Adjuster's knob style.
-// Angles are degrees, 0 pointing right, increasing clockwise (SVG's y-down
-// coordinate space) — matches how startAngle/endAngle read intuitively as
-// "clock position" when picked in the properties panel (135° = ~4:30,
-// 405° = 135+270 = ~7:30 going the long way round).
+import type { WidgetLabel } from '@shared/types'
+
+// Shared SVG arc-path math for Gauge's arc style, Adjuster's knob style, and
+// DialSwitchWidget/ToggleSwitchWidget's ring/pole label placement. Angles
+// are degrees, 0 pointing up, increasing clockwise (SVG's y-down coordinate
+// space) — matches how startAngle/endAngle read intuitively as "clock
+// position" when picked in the properties panel (135° = ~4:30, 405° =
+// 135+270 = ~7:30 going the long way round).
 
 export function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number): { x: number; y: number } {
   const rad = ((angleDeg - 90) * Math.PI) / 180
@@ -47,4 +50,43 @@ export function describeArc(cx: number, cy: number, r: number, startDeg: number,
   const largeArcFlag = Math.abs(sweep) > 180 ? 1 : 0
   const sweepFlag = sweep > 0 ? 1 : 0
   return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArcFlag} ${sweepFlag} ${end.x} ${end.y}`
+}
+
+// A ring/dial-style widget's own SVG is always `viewBox="0 0 100 100"` — by
+// default it scales uniformly (preserveAspectRatio: xMidYMid meet) to stay
+// undistorted regardless of the widget's own w/h, letterboxing the shorter
+// axis. Detent dots/labels, being plain HTML rather than part of that SVG,
+// must replicate the exact same uniform scale-and-center transform by hand
+// — raw 0-100 percentages for left/top apply w and h independently and
+// drift off the SVG's own shape on any non-square widget. Shared by
+// DialSwitchWidget (ring detents) and ToggleSwitchWidget (per-position
+// labels).
+export function viewBoxToPixel(vx: number, vy: number, w: number, h: number): { x: number; y: number } {
+  const scale = Math.min(w, h) / 100
+  return { x: w / 2 + (vx - 50) * scale, y: h / 2 + (vy - 50) * scale }
+}
+
+// Where a label sits, in the same viewBox coordinate space as its position's
+// own anchor point `dotVb` — the label's own labelAnchor (WidgetLabel field)
+// wins outright, fixed to that one side; unset means 'auto': radially
+// outward along THIS position's own angle, just past the ring/pole radius,
+// so it reads correctly regardless of which side of the widget it falls on.
+// `labelDistance` is this one label's own WidgetLabel.labelDistance (or a
+// caller-supplied default if unset) — only used by the 'auto' case; a fixed
+// side always offsets from `dotVb` by a plain `sideOffset`, since a side
+// anchor is about dodging something nearby, not about how far out the label
+// sits along the ring. Shared by DialSwitchWidget/ToggleSwitchWidget.
+export function labelAnchorPoint(
+  dotVb: { x: number; y: number },
+  angle: number,
+  ringRadius: number,
+  labelDistance: number,
+  anchor: WidgetLabel['labelAnchor'],
+  sideOffset: number
+): { x: number; y: number } {
+  if (anchor === 'top') return { x: dotVb.x, y: dotVb.y - sideOffset }
+  if (anchor === 'bottom') return { x: dotVb.x, y: dotVb.y + sideOffset }
+  if (anchor === 'left') return { x: dotVb.x - sideOffset, y: dotVb.y }
+  if (anchor === 'right') return { x: dotVb.x + sideOffset, y: dotVb.y }
+  return polarToCartesian(50, 50, ringRadius + labelDistance, angle)
 }

@@ -232,7 +232,8 @@ function pickerResetState(): Pick<
 function widgetDisplayLabel(widget: Widget | undefined): string | undefined {
   if (!widget) return undefined
   if (widget.type === 'button' || widget.type === 'morph') return widget.states[0]?.labels[0]?.text
-  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial' || widget.type === 'dropdown') return widget.positions[0]?.labels[0]?.text
+  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial' || widget.type === 'switch-toggle' || widget.type === 'dropdown')
+    return widget.positions[0]?.labels[0]?.text
   return widget.labels[0]?.text
 }
 

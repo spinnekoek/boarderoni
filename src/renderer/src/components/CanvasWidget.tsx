@@ -8,6 +8,7 @@ import { AdjusterWidgetContent } from './widgets/AdjusterWidget'
 import { EncoderWidgetContent } from './widgets/EncoderWidget'
 import { RockerSwitchWidgetContent } from './widgets/RockerSwitchWidget'
 import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
+import { ToggleSwitchWidgetContent } from './widgets/ToggleSwitchWidget'
 import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { resolveActivePositionIndex } from '@shared/switchPosition'
 import type { VariableMap } from '@shared/expr'
@@ -135,6 +136,25 @@ export function CanvasWidget({
           variables={variables}
           interactive={false}
           activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? 0}
+        />
+      )}
+      {widget.type === 'switch-toggle' && (
+        <ToggleSwitchWidgetContent
+          widget={widget}
+          variables={variables}
+          interactive={false}
+          activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? 0}
+          selectedPositionId={isSoleSelection ? selectedBlockId : null}
+          onPositionSelect={(position) => {
+            // Unlike RockerSwitchWidget's two-step select-then-drill above,
+            // a toggle's zones are big and few enough that clicking one
+            // should jump straight to that position in the properties
+            // panel even on the very first click — no need to already be
+            // the sole selection (the widget-level pointerdown this bubbles
+            // up to, see useWidgetDrag, selects the widget in the same
+            // event regardless).
+            selectBlock(isSoleSelection && selectedBlockId === position.id ? null : position.id)
+          }}
         />
       )}
       {widget.type === 'dropdown' && (

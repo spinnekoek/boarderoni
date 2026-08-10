@@ -187,7 +187,8 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
     widget.type === 'gauge' ||
     widget.type === 'adjuster' ||
     widget.type === 'encoder' ||
-    widget.type === 'switch-rocker'
+    widget.type === 'switch-rocker' ||
+    widget.type === 'switch-toggle'
   ) {
     return widget
   }
@@ -1070,7 +1071,7 @@ async function triggerAction(
   // is deliberately client-local (or driven by activePositionExpr reading a
   // Variable), never server-authoritative dashboard state; see
   // SwitchWidgetBase's own comment in shared/types.ts.
-  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial') {
+  if (widget.type === 'switch-rocker' || widget.type === 'switch-dial' || widget.type === 'switch-toggle') {
     const index = value !== undefined ? Math.trunc(value) : NaN
     const position = widget.positions[index]
     if (event !== 'select' || !position) {

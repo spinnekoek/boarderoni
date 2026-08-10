@@ -1,8 +1,8 @@
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, type VariableMap } from '@shared/expr'
-import type { DetentStyle, DialSwitchWidget, WidgetLabel } from '@shared/types'
+import type { DetentStyle, DialSwitchWidget } from '@shared/types'
 import { renderWidgetLabel } from './labels'
-import { needlePoints, polarToCartesian } from './arcPath'
+import { labelAnchorPoint, needlePoints, polarToCartesian, viewBoxToPixel } from './arcPath'
 
 // The default 2-position dial's own two detents sit at these — mirrored
 // left/right of the vertical (top) axis (120 = 360 - 240), connected by the
@@ -42,42 +42,6 @@ export const DETENT_SIZE: Record<NonNullable<DialSwitchWidget['detentShape']>, {
 const DEFAULT_DETENT_BORDER_RADIUS: Partial<Record<NonNullable<DialSwitchWidget['detentShape']>, number>> = {
   square: 2,
   tick: 1
-}
-
-// The dial face is an SVG with viewBox="0 0 100 100" — by default it scales
-// uniformly (preserveAspectRatio: xMidYMid meet) to stay a true circle
-// regardless of the widget's own w/h. The detent dots below are plain HTML,
-// NOT part of that SVG, so they must replicate the exact same uniform
-// scale-and-center transform by hand — using raw 0-100 percentages for
-// left/top (as an earlier version did) applies w and h independently and
-// drifts off the SVG's circle on any non-square widget (dots outside the
-// ring on the axis that's "long," inside on the axis that's "short").
-function viewBoxToPixel(vx: number, vy: number, w: number, h: number): { x: number; y: number } {
-  const scale = Math.min(w, h) / 100
-  return { x: w / 2 + (vx - 50) * scale, y: h / 2 + (vy - 50) * scale }
-}
-
-// Where a label sits, in the same viewBox coordinate space as its position's
-// dot (see `dot` below) — the label's own labelAnchor (WidgetLabel field)
-// wins outright, fixed to that one side; unset means 'auto': radially
-// outward along THIS detent's own angle, just past the dial's rim, so it
-// reads correctly on every side of the ring without any configuration.
-// `labelDistance` is this one label's own WidgetLabel.labelDistance (or
-// LABEL_OFFSET if unset) — only used by the 'auto' case; a fixed side always
-// uses LABEL_OFFSET, since a side anchor is about dodging something nearby,
-// not about how far out the label sits.
-function labelAnchorPoint(
-  dotVb: { x: number; y: number },
-  angle: number,
-  detentRadius: number,
-  labelDistance: number,
-  anchor: WidgetLabel['labelAnchor']
-): { x: number; y: number } {
-  if (anchor === 'top') return { x: dotVb.x, y: dotVb.y - LABEL_OFFSET }
-  if (anchor === 'bottom') return { x: dotVb.x, y: dotVb.y + LABEL_OFFSET }
-  if (anchor === 'left') return { x: dotVb.x - LABEL_OFFSET, y: dotVb.y }
-  if (anchor === 'right') return { x: dotVb.x + LABEL_OFFSET, y: dotVb.y }
-  return polarToCartesian(50, 50, detentRadius + labelDistance, angle)
 }
 
 // The clock-position angle (0 = up, clockwise) a given position sits at —
@@ -367,7 +331,14 @@ export function DialSwitchWidgetContent({
               onClick={handleSelect}
             />
             {position.labels.map((positionLabel) => {
-              const labelVb = labelAnchorPoint(dotVb, angle, detentRadius, positionLabel.labelDistance ?? LABEL_OFFSET, positionLabel.labelAnchor)
+              const labelVb = labelAnchorPoint(
+                dotVb,
+                angle,
+                detentRadius,
+                positionLabel.labelDistance ?? LABEL_OFFSET,
+                positionLabel.labelAnchor,
+                LABEL_OFFSET
+              )
               const label = viewBoxToPixel(labelVb.x, labelVb.y, widget.w, widget.h)
               return (
                 <div key={positionLabel.id} className="deck-dial-switch__detent-label" style={{ left: label.x, top: label.y }} onClick={handleSelect}>

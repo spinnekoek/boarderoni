@@ -581,6 +581,83 @@ button.deck-button:focus-visible {
   outline-offset: -2px;
 }
 
+.deck-toggle-switch {
+  position: absolute;
+  inset: 0;
+}
+
+.deck-toggle-switch--static .deck-toggle-switch__zone {
+  cursor: default;
+}
+
+/* Drag interaction mode (see useToggleSwitchDrag.ts) — same "the whole
+   widget is one drag surface, not a set of individually-tappable zones"
+   treatment as .deck-dial-switch--drag, see its own comment. */
+.deck-toggle-switch--drag {
+  touch-action: none;
+  cursor: grab;
+}
+
+.deck-toggle-switch--drag .deck-toggle-switch__zone {
+  cursor: grab;
+}
+
+/* The bezel+lever SVG sits under the click zones and labels, letterboxed to
+   a true circle regardless of the widget's own w/h (see viewBoxToPixel's own
+   comment in arcPath.ts) — the zones above it are transparent (see
+   .deck-toggle-switch__zone) so it stays visible while still catching the
+   tap that decides which zone/position was hit. */
+.deck-toggle-switch__bezel {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.deck-toggle-switch__zones {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.deck-toggle-switch__zone {
+  position: relative;
+  flex: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Editor-only click-through selection (see CanvasWidget.tsx's
+   onPositionSelect) — same amber outline treatment as
+   .deck-rocker-switch__segment--selected. */
+.deck-toggle-switch__zone--selected {
+  outline: 2px solid #e2a53d;
+  outline-offset: -2px;
+}
+
+/* Each position's own label — same absolutely-positioned, self-centered
+   overlay convention as .deck-dial-switch__detent-label, placed via
+   labelAnchorPoint/viewBoxToPixel in ToggleSwitchWidget.tsx. Purely
+   decorative (not a click target — the zones above already cover the whole
+   widget), so no cursor/pointer-events override needed. */
+.deck-toggle-switch__label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 60px;
+  height: 22px;
+  pointer-events: none;
+}
+
+/* Same box-sizing fix as .deck-dial-switch__detent-label's own — see its
+   comment for why a plain fixed size sidesteps the width:auto equation. */
+.deck-toggle-switch__label .deck-button__label {
+  position: static;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
 .deck-dial-switch {
   position: absolute;
   inset: 0;

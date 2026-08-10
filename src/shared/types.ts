@@ -454,6 +454,15 @@ export interface SwitchPosition extends ColorAppearance {
   // "each distinct color field gets its own opacity" convention every other
   // color pair in this app follows (e.g. background vs border).
   activeOpacity?: number
+  // ToggleSwitchWidget only — Rocker/Dial/Dropdown leave this unused, same
+  // as they leave DetentStyle's dial-only fields unused elsewhere. Only
+  // meaningful on a toggle's first/last position (never its middle one,
+  // which has no momentary config at all — see the properties panel's own
+  // gating): pressing/dragging to a momentary position selects it (fires
+  // onSelect) only while held, springing back to the middle position (fires
+  // ITS onSelect too) the instant you release — see ToggleSwitchView in
+  // ViewCanvas.tsx and useToggleSwitchDrag.ts.
+  momentary?: boolean
 }
 
 // Shared by RockerSwitchWidget/DialSwitchWidget below — everything about a
@@ -505,6 +514,78 @@ export interface RockerSwitchWidget extends SwitchWidgetBase {
   borderColor?: string
   borderColorExpr?: string
   borderOpacity?: number
+}
+
+// A physical panel toggle — gear handle, master arm, BATT switch. A single
+// round bezel (always a true circle, same "SVG viewBox scales uniformly"
+// convention as DialSwitchWidget's dial face — see ToggleSwitchWidget.tsx's
+// own comment) holds one lever that points between 2 or 3 throws (unlike
+// Rocker/Dial's arbitrary N — the properties panel caps it) — straight up
+// for the first position, straight down for the last (or left/right for
+// 'horizontal'). Unlike RockerSwitchWidget's adjoining colored segments,
+// only one lever is ever drawn, so per-position look lives in `fill`/`track`
+// (fixed, not per-SwitchPosition) — a position's own `color`/`activeColor`
+// fields (inherited from SwitchPosition) go unused here, same as
+// DialSwitchWidget's ring detents leave DetentStyle's unrelated fields
+// unused. With exactly 3 positions, the middle one renders as a plain circle
+// instead of a lever pointing sideways — the "center" look a real
+// 3-position toggle's neutral throw gets (e.g. a BATT switch's OFF) — see
+// ToggleSwitchWidgetContent's isMiddlePosition. Each position's `name` is
+// fixed by the properties panel, not freely editable, to "Top"/"Bottom" (2
+// positions) or "Top"/"Middle"/"Bottom" (3) — activePositionExpr and each
+// position's momentary config (see SwitchPosition.momentary) both key off
+// these names, so they can't drift from what's actually rendered where.
+// Each position's own labels still place themselves the same way a
+// DialSwitch detent's do — via each WidgetLabel's own labelAnchor,
+// defaulting to 'auto' (radially outward at that position's own angle).
+export interface ToggleSwitchWidget extends SwitchWidgetBase {
+  id: string
+  type: 'switch-toggle'
+  x: number
+  y: number
+  w: number
+  h: number
+  orientation?: 'horizontal' | 'vertical' // default 'vertical'
+  // 'tap' (default): tap a zone (or its label) to select that position
+  // directly. 'drag': press anywhere on the widget and drag toward the
+  // position you want, same gesture as DialSwitchWidget's own drag mode —
+  // see useToggleSwitchDrag.ts, which (unlike Dial's drag) also fires a
+  // momentary position's onSelect live as the drag reaches it, not just on
+  // release, since a momentary throw has nothing meaningful to "commit"
+  // later — see SwitchPosition.momentary.
+  interactionMode?: 'tap' | 'drag'
+  track: ColorAppearance // bezel color
+  fill: ColorAppearance // lever color
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+  // The base/bezel circle's own radius, in the same 0-100 viewBox units as
+  // BEZEL_RADIUS (its default) in ToggleSwitchWidget.tsx. The label ring
+  // scales off whichever value is effective, so shrinking/growing the bezel
+  // doesn't leave labels anchored to the old rim position — leverLength
+  // below is independent and NOT clamped to this, so a lever can be sized
+  // to intentionally poke out past a shrunk bezel.
+  bezelRadius?: number
+  // The lever's own length (from the pivot at the bezel's center out to its
+  // tip) and border — independent of the bezel's border above. Length
+  // defaults to LEVER_LENGTH, border to none (width 0), both in
+  // ToggleSwitchWidget.tsx.
+  leverLength?: number
+  leverBorderColor?: string
+  leverBorderWidth?: number
+  // The plain circle drawn instead of a lever at an odd-count switch's exact
+  // middle position (see isMiddlePosition) — a distinct look from the lever/
+  // `fill` above, since a real 3-way toggle's neutral throw often reads as a
+  // different center rather than just "the lever pointing at itself". Color/
+  // opacity default to `fill`'s own (so an existing dashboard's middle
+  // position keeps its prior look until deliberately overridden); size
+  // defaults to CIRCLE_RADIUS, border to none (width 0) — all in
+  // ToggleSwitchWidget.tsx.
+  circleColor?: string
+  circleOpacity?: number
+  circleRadius?: number
+  circleBorderColor?: string
+  circleBorderWidth?: number
 }
 
 // Shared shape geometry for a small marker — either one of a DialSwitchWidget's
@@ -654,6 +735,7 @@ export type Widget =
   | EncoderWidget
   | RockerSwitchWidget
   | DialSwitchWidget
+  | ToggleSwitchWidget
   | DropdownWidget
 
 // A plain draggable/resizable x/y/w/h rectangle in the editor (unlike
@@ -666,6 +748,7 @@ export type BoxWidget =
   | EncoderWidget
   | RockerSwitchWidget
   | DialSwitchWidget
+  | ToggleSwitchWidget
   | DropdownWidget
 
 // Widgets driven by the WidgetState/statesEnabled/activeStateExpr machinery
@@ -686,10 +769,10 @@ export type StatefulWidget = ButtonWidget | MorphButtonWidget
 // see its own comment and triggerAction's dropdown branch.
 export type EventfulWidget = ButtonWidget | MorphButtonWidget | AdjusterWidget | EncoderWidget
 
-// The two switch widget types, narrowed together wherever code (triggerAction,
+// The three switch widget types, narrowed together wherever code (triggerAction,
 // the properties panel's shared positions editor, ...) treats them
 // identically via SwitchWidgetBase's common fields.
-export type SwitchWidget = RockerSwitchWidget | DialSwitchWidget
+export type SwitchWidget = RockerSwitchWidget | DialSwitchWidget | ToggleSwitchWidget
 
 // 'cover'/'contain'/'stretch' scale the image proportionally or not, 'tile'
 // repeats it at native size, 'none' places it at native size unscaled — the

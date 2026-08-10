@@ -13,6 +13,7 @@ import { ANCHOR_OPTIONS } from '../background'
 import { KeyCapture } from './KeyCapture'
 import { ColorPickerButton } from './ColorPickerButton'
 import { DETENT_SIZE } from './widgets/DialSwitchWidget'
+import { isMiddlePosition as isMiddleTogglePosition, toggleNameForIndex } from './widgets/ToggleSwitchWidget'
 import { CodeEditor } from './CodeEditor'
 import { ExpressionEditorModal } from './ExpressionEditorModal'
 import type {
@@ -35,6 +36,7 @@ import type {
   SequenceStep,
   StatefulWidget,
   SwitchPosition,
+  ToggleSwitchWidget,
   VerticalAlign,
   Widget,
   WidgetAction,
@@ -59,6 +61,7 @@ const WIDGET_TYPE_LABELS: Record<Widget['type'], string> = {
   encoder: 'Encoder',
   'switch-rocker': 'Rocker switch',
   'switch-dial': 'Dial switch',
+  'switch-toggle': 'Toggle switch',
   dropdown: 'Dropdown'
 }
 
@@ -1233,7 +1236,9 @@ function SwitchPositionsEditor({
   activePositionExprExpanded,
   setActivePositionExprExpanded,
   confirm,
-  showLabelAnchor = false
+  showLabelAnchor = false,
+  showPositionName = true,
+  maxPositions
 }: {
   positions: SwitchPosition[]
   activePositionExpr?: string
@@ -1258,6 +1263,19 @@ function SwitchPositionsEditor({
   // positions editor) just leave it unset/unshown — passed through to each
   // position's LabelFields below.
   showLabelAnchor?: boolean
+  // Toggle switch only — its position names are fixed (Top/Middle/Bottom,
+  // see ToggleSwitchWidget's own comment in shared/types.ts), not freely
+  // editable like Rocker/Dial/Dropdown's, so it hides this input entirely
+  // rather than showing one that would just get silently overwritten the
+  // next time a position is added/removed/reordered.
+  showPositionName?: boolean
+  // Toggle switch only — a physical lever only has a sensible 2-throw or
+  // 3-throw (with a centered neutral) reading, unlike Rocker/Dial's
+  // unlimited segments/detents, so it caps how many positions the "+"
+  // button below will add. The 2-position floor is already enforced
+  // unconditionally further down (see confirmDeletePosition/the "×" button's
+  // own `positions.length > 2` guard) — this only adds a ceiling.
+  maxPositions?: number
 }): React.JSX.Element {
   const positionIndex = Math.min(activePositionIndex, positions.length - 1)
   const activePosition = positions[positionIndex] ?? positions[0]
@@ -1370,9 +1388,11 @@ function SwitchPositionsEditor({
                     )}
                   </div>
                 ))}
-                <button type="button" className="state-tab state-tab--add" onClick={handleAddPosition} title="Add position">
-                  +
-                </button>
+                {(maxPositions === undefined || positions.length < maxPositions) && (
+                  <button type="button" className="state-tab state-tab--add" onClick={handleAddPosition} title="Add position">
+                    +
+                  </button>
+                )}
               </div>
             </div>
             {activePositionExpr !== undefined ? (
@@ -1431,10 +1451,12 @@ function SwitchPositionsEditor({
           />
         )}
 
-        <label className="properties__field">
-          <span>Position name</span>
-          <input value={activePosition.name} onChange={(e) => renamePosition(positionIndex, e.target.value)} />
-        </label>
+        {showPositionName && (
+          <label className="properties__field">
+            <span>Position name</span>
+            <input value={activePosition.name} onChange={(e) => renamePosition(positionIndex, e.target.value)} />
+          </label>
+        )}
 
         <div className="properties__divider" />
 
@@ -2520,6 +2542,274 @@ export function PropertiesPanel(): React.JSX.Element {
           activePositionExprExpanded={activePositionExprExpanded}
           setActivePositionExprExpanded={setActivePositionExprExpanded}
           confirm={confirm}
+        />
+
+        <PropertiesSection title="Advanced" open={false}>
+          <span className="properties__section-label">Position & Size</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={sw.x} onChange={(e) => patchSwitch({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={sw.y} onChange={(e) => patchSwitch({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>W</span>
+              <input type="number" min={minSize} value={sw.w} onChange={(e) => patchSwitch({ w: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+            <label className="properties__field">
+              <span>H</span>
+              <input type="number" min={minSize} value={sw.h} onChange={(e) => patchSwitch({ h: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={sw.zIndex ?? 0} onChange={(e) => patchSwitch({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteSwitch}>
+          Delete widget
+        </button>
+      </aside>
+    )
+  }
+
+  if (widget.type === 'switch-toggle') {
+    const sw = widget
+    const minSize = snapToGrid ? gridSize : 1
+    const isTrackExpr = sw.track.colorExpr !== undefined
+    const isFillExpr = sw.fill.colorExpr !== undefined
+    const isBorderExpr = sw.borderColorExpr !== undefined
+    const canvasPositionIndex = selectedBlockId ? sw.positions.findIndex((p) => p.id === selectedBlockId) : -1
+    const effectiveActivePositionIndex = canvasPositionIndex >= 0 ? canvasPositionIndex : activePositionIndex
+
+    function patchSwitch(fields: Partial<ToggleSwitchWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === sw.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    async function handleDeleteSwitch(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(sw.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <h2 className="properties__title">Properties</h2>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
+
+        <div className="properties__layer-row">
+          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
+            <span aria-hidden="true">⬆</span> Bring to front
+          </button>
+          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
+            <span aria-hidden="true">⬇</span> Send to back
+          </button>
+        </div>
+
+        <PropertiesSection title="Style" open>
+          <label className="properties__field">
+            <span>Orientation</span>
+            <select value={sw.orientation ?? 'vertical'} onChange={(e) => patchSwitch({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
+              <option value="vertical">Vertical</option>
+              <option value="horizontal">Horizontal</option>
+            </select>
+          </label>
+
+          <label className="properties__field">
+            <span>Base circle size</span>
+            <input
+              type="number"
+              min={1}
+              value={sw.bezelRadius ?? 45}
+              onChange={(e) => patchSwitch({ bezelRadius: Math.max(1, Number(e.target.value)) })}
+            />
+          </label>
+
+          <label className="properties__field">
+            <span>Interaction</span>
+            <select
+              value={sw.interactionMode ?? 'tap'}
+              onChange={(e) => patchSwitch({ interactionMode: e.target.value === 'tap' ? undefined : (e.target.value as ToggleSwitchWidget['interactionMode']) })}
+            >
+              <option value="tap">Tap a position</option>
+              <option value="drag">Press and drag toward a position</option>
+            </select>
+          </label>
+          <p className="properties__hint">
+            {(sw.interactionMode ?? 'tap') === 'tap'
+              ? 'Tap directly on a position (top/middle/bottom, or its label) to select it.'
+              : "Press anywhere on the toggle and drag toward the position you want — you can drag past the widget's own edges. The lever snaps live to whichever position is nearest, so you can see what releasing will select."}
+          </p>
+        </PropertiesSection>
+
+        {sw.positions.length === 3 && (
+          <PropertiesSection title="Momentary" open>
+            <p className="properties__hint">
+              A momentary Top/Bottom position only stays selected while pressed (or dragged onto, in drag mode) — release it and it
+              springs back to Middle, firing Middle's own action too.
+            </p>
+            {sw.positions.map((position, index) => {
+              if (isMiddleTogglePosition(index, sw.positions.length)) return null
+              return (
+                <label key={position.id} className="properties__checkbox">
+                  <input
+                    type="checkbox"
+                    checked={position.momentary ?? false}
+                    onChange={(e) =>
+                      patchSwitch({ positions: sw.positions.map((p, i) => (i === index ? { ...p, momentary: e.target.checked } : p)) })
+                    }
+                  />
+                  {position.name}
+                </label>
+              )
+            })}
+          </PropertiesSection>
+        )}
+
+        <PropertiesSection title="Colors" open>
+          <div className="properties__field">
+            <span>Base color</span>
+            <ColorPickerButton
+              value={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ track: { ...sw.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={sw.track.colorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ track: { ...sw.track, colorExpr: code } })}
+              onEnterExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: sw.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: undefined } })}
+              opacity={sw.track.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ track: { ...sw.track, backgroundOpacity: v } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Lever color</span>
+            <ColorPickerButton
+              value={sw.fill.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ fill: { ...sw.fill, color, colorExpr: undefined } })}
+              isExpr={isFillExpr}
+              exprValue={sw.fill.colorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ fill: { ...sw.fill, colorExpr: code } })}
+              onEnterExpr={() => patchSwitch({ fill: { ...sw.fill, colorExpr: sw.fill.colorExpr ?? '' } })}
+              onClearExpr={() => patchSwitch({ fill: { ...sw.fill, colorExpr: undefined } })}
+              opacity={sw.fill.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ fill: { ...sw.fill, backgroundOpacity: v } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={sw.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={sw.borderColorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ borderColorExpr: code })}
+              onEnterExpr={() => patchSwitch({ borderColorExpr: sw.borderColorExpr ?? '' })}
+              onClearExpr={() => patchSwitch({ borderColorExpr: undefined })}
+              opacity={sw.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ borderOpacity: v })}
+            />
+          </div>
+        </PropertiesSection>
+
+        <PropertiesSection title="Lever" open={false}>
+          <label className="properties__field">
+            <span>Lever length</span>
+            <input
+              type="number"
+              min={1}
+              value={sw.leverLength ?? 36}
+              onChange={(e) => patchSwitch({ leverLength: Math.max(1, Number(e.target.value)) })}
+            />
+          </label>
+          <label className="properties__field">
+            <span>Lever border width</span>
+            <input
+              type="number"
+              min={0}
+              value={sw.leverBorderWidth ?? 0}
+              onChange={(e) => patchSwitch({ leverBorderWidth: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <div className="properties__field">
+            <span>Lever border color</span>
+            <ColorPickerButton
+              value={sw.leverBorderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ leverBorderColor: color })}
+            />
+          </div>
+        </PropertiesSection>
+
+        {sw.positions.length === 3 && (
+          <PropertiesSection title="Circle (middle position)" open={false}>
+            <label className="properties__field">
+              <span>Circle size</span>
+              <input
+                type="number"
+                min={1}
+                value={sw.circleRadius ?? 9}
+                onChange={(e) => patchSwitch({ circleRadius: Math.max(1, Number(e.target.value)) })}
+              />
+            </label>
+            <div className="properties__field">
+              <span>Circle color</span>
+              <ColorPickerButton
+                value={sw.circleColor ?? sw.fill.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => patchSwitch({ circleColor: color })}
+                auto={sw.circleColor === undefined}
+                onAuto={() => patchSwitch({ circleColor: undefined })}
+                opacity={sw.circleOpacity ?? sw.fill.backgroundOpacity ?? 1}
+                onOpacityChange={(v) => patchSwitch({ circleOpacity: v })}
+              />
+            </div>
+            <label className="properties__field">
+              <span>Circle border width</span>
+              <input
+                type="number"
+                min={0}
+                value={sw.circleBorderWidth ?? 0}
+                onChange={(e) => patchSwitch({ circleBorderWidth: Math.max(0, Number(e.target.value)) })}
+              />
+            </label>
+            <div className="properties__field">
+              <span>Circle border color</span>
+              <ColorPickerButton
+                value={sw.circleBorderColor ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => patchSwitch({ circleBorderColor: color })}
+              />
+            </div>
+          </PropertiesSection>
+        )}
+
+        <SwitchPositionsEditor
+          positions={sw.positions}
+          activePositionExpr={sw.activePositionExpr}
+          onPatchPositions={(positions) =>
+            patchSwitch({ positions: positions.map((p, i) => ({ ...p, name: toggleNameForIndex(i, positions.length) })) })
+          }
+          onPatchActivePositionExpr={(activePositionExpr) => patchSwitch({ activePositionExpr })}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
+          activePositionIndex={effectiveActivePositionIndex}
+          setActivePositionIndex={setActivePositionIndex}
+          onActivePositionIdChange={selectBlock}
+          dragPositionIndex={dragPositionIndex}
+          activePositionExprExpanded={activePositionExprExpanded}
+          setActivePositionExprExpanded={setActivePositionExprExpanded}
+          confirm={confirm}
+          showLabelAnchor
+          showPositionName={false}
+          maxPositions={3}
         />
 
         <PropertiesSection title="Advanced" open={false}>

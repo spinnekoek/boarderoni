@@ -6,7 +6,16 @@ import { getKeepScreenOnPreference } from '../id'
 import { getEffectiveStates } from '@shared/states'
 import { morphFootprint } from '@shared/morph'
 import { resolveColor, toVariableMap, type VariableMap } from '@shared/expr'
-import type { AdjusterWidget, DialSwitchWidget, DropdownWidget, EncoderWidget, RockerSwitchWidget, StatefulWidget, Widget } from '@shared/types'
+import type {
+  AdjusterWidget,
+  DialSwitchWidget,
+  DropdownWidget,
+  EncoderWidget,
+  RockerSwitchWidget,
+  StatefulWidget,
+  ToggleSwitchWidget,
+  Widget
+} from '@shared/types'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
 import { GaugeWidgetContent } from './widgets/GaugeWidget'
@@ -14,11 +23,14 @@ import { AdjusterWidgetContent } from './widgets/AdjusterWidget'
 import { EncoderWidgetContent } from './widgets/EncoderWidget'
 import { RockerSwitchWidgetContent } from './widgets/RockerSwitchWidget'
 import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
+import { ToggleSwitchWidgetContent } from './widgets/ToggleSwitchWidget'
 import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { useAdjusterDrag } from '../useAdjusterDrag'
 import { useEncoderDrag } from '../useEncoderDrag'
 import { useSwitchPosition } from '../useSwitchPosition'
 import { useDialSwitchDrag } from '../useDialSwitchDrag'
+import { useToggleSwitchDrag } from '../useToggleSwitchDrag'
+import { isMiddlePosition as isMiddleTogglePosition } from './widgets/ToggleSwitchWidget'
 import { useDropdownDrag } from '../useDropdownDrag'
 import { DeviceSettingsModal } from './DeviceSettingsModal'
 import { ToastStack } from './ToastStack'
@@ -71,6 +83,51 @@ function EncoderView({ widget, variables }: { widget: EncoderWidget; variables: 
 function RockerSwitchView({ widget, variables }: { widget: RockerSwitchWidget; variables: VariableMap }): React.JSX.Element {
   const { activeIndex, select } = useSwitchPosition(widget, variables)
   return <RockerSwitchWidgetContent widget={widget} variables={variables} interactive activeIndex={activeIndex} onSelect={select} />
+}
+
+// Same two-interaction-mode split as DialSwitchView below, plus momentary
+// handling (see SwitchPosition.momentary) in both: a momentary position
+// (only ever the first/last, never the middle) selects immediately on
+// press, and springs back to the middle position the instant you release —
+// tap mode does that itself here (onZonePointerDown/onZonePointerUp);
+// drag mode's own spring-back lives inside useToggleSwitchDrag.ts, since it
+// also has to fire mid-drag, not just on release.
+function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; variables: VariableMap }): React.JSX.Element {
+  const { activeIndex, select } = useSwitchPosition(widget, variables)
+  const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useToggleSwitchDrag(widget, select)
+  const count = widget.positions.length
+  const middleIndex = count % 2 === 1 ? (count - 1) / 2 : -1
+
+  if (widget.interactionMode === 'drag') {
+    return (
+      <ToggleSwitchWidgetContent
+        widget={widget}
+        variables={variables}
+        interactive
+        activeIndex={activeIndex}
+        dragIndex={dragIndex}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+      />
+    )
+  }
+
+  function handleZonePointerUp(index: number): void {
+    const isMomentary = !isMiddleTogglePosition(index, count) && (widget.positions[index]?.momentary ?? false)
+    if (isMomentary && middleIndex >= 0) select(middleIndex)
+  }
+
+  return (
+    <ToggleSwitchWidgetContent
+      widget={widget}
+      variables={variables}
+      interactive
+      activeIndex={activeIndex}
+      onZonePointerDown={select}
+      onZonePointerUp={handleZonePointerUp}
+    />
+  )
 }
 
 // Two interaction modes (see widget.interactionMode) share the same
@@ -248,6 +305,7 @@ function ViewWidget({
   if (widget.type === 'encoder') return <EncoderView widget={widget} variables={variables} />
   if (widget.type === 'switch-rocker') return <RockerSwitchView widget={widget} variables={variables} />
   if (widget.type === 'switch-dial') return <DialSwitchView widget={widget} variables={variables} />
+  if (widget.type === 'switch-toggle') return <ToggleSwitchView widget={widget} variables={variables} />
   if (widget.type === 'dropdown') return <DropdownView widget={widget} variables={variables} />
   return <TriggerableViewWidget widget={widget} variables={variables} error={error} />
 }
