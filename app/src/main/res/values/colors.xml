@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="status_overlay_background">#FFFFFFFF</color>
-    <color name="status_text_color">#FF1A1A1A</color>
+    <!-- Matches DEFAULT_DASHBOARD.backgroundColor in shared/types.ts — the
+         window/overlay/WebView all sit at this same color so nothing flashes
+         white during launch or while a page is loading/reloading. -->
+    <color name="status_overlay_background">#FF14161B</color>
+    <color name="status_text_color">#FFF5F5F5</color>
     <color name="ic_launcher_background">#FF3A6DF0</color>
 </resources>

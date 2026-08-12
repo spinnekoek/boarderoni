@@ -131,6 +131,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setUpWebView() {
+        // WebView paints white by default until the page's own CSS has
+        // something to show — visible as a bright flash on every load/
+        // reload (a new deck, a reconnect, `changeServer()`) even with the
+        // status overlay covering everything else. Matches
+        // DEFAULT_DASHBOARD.backgroundColor (shared/types.ts) and
+        // status_overlay_background (colors.xml) so there's no seam between
+        // this, the overlay, and whatever the loaded dashboard itself paints.
+        webView.setBackgroundColor(Color.parseColor("#14161B"))
+
         val settings = webView.settings
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
