@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { useDashboardStore } from './store'
 import { useEditorSettings } from './settingsStore'
+import { getSubDeckWidgets } from '@shared/subDecks'
 import type { Widget } from '@shared/types'
 
 const DRAG_THRESHOLD = 3
@@ -57,7 +58,7 @@ export function useWidgetDrag(
     }
 
     const activeIds = useDashboardStore.getState().selectedWidgetIds
-    const liveWidgets = useDashboardStore.getState().dashboard.widgets
+    const liveWidgets = getSubDeckWidgets(useDashboardStore.getState().dashboard, useDashboardStore.getState().editingSubDeckId)
     const origins = new Map(
       activeIds.map((id) => {
         const w = liveWidgets.find((ww) => ww.id === id)
@@ -82,7 +83,7 @@ export function useWidgetDrag(
     const dy = (e.clientY - drag.startY) / zoom
     if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) drag.moved = true
     if (drag.moved) {
-      const liveWidgets = useDashboardStore.getState().dashboard.widgets
+      const liveWidgets = getSubDeckWidgets(useDashboardStore.getState().dashboard, useDashboardStore.getState().editingSubDeckId)
       updateWidgets(
         liveWidgets.map((w) => {
           const origin = drag.origins.get(w.id)

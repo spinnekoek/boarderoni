@@ -7,13 +7,28 @@ import {
   type Dashboard,
   type DeckSummary,
   type DeviceInfo,
+  type OverlayEdge,
+  type OverlaySizeUnit,
+  type ScreenRegion,
   type SequenceStep,
   type ServerToClient,
+  type SubDeck,
   type Widget,
   type WidgetEventKind
 } from '@shared/types'
+import { getSubDeckWidgets, setSubDeckWidgets, findWidgetAnywhere } from '@shared/subDecks'
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSettings, DcsBiosStatus, DcsBiosWorkerStats } from '@shared/dcsBiosTypes'
 import { getDeviceId, setLastDeckId, clearLastDeckId, nextId } from './id'
+
+// A slide-over sub-deck currently open on the view client — client-local,
+// never persisted/synced beyond the single subdeck:open-overlay message
+// that set it (see OpenOverlayAction's own comment in shared/types.ts).
+export interface ActiveOverlay {
+  subDeckId: string
+  edge: OverlayEdge
+  size: number
+  sizeUnit: OverlaySizeUnit
+}
 
 // A widget action-sequence failure surfaced prominently on the deployed view
 // client (see ToastStack.tsx) — distinct from `errors` (below), which is
@@ -46,6 +61,23 @@ interface DashboardStore {
   // for "which screen is showing" (see App.tsx).
   deckId: string | null
   dashboard: Dashboard
+  // Edit mode only — which deck view the toolbar/canvas/properties panel is
+  // currently designing. null = the deck's own main view; otherwise a
+  // Dashboard.subDecks id. Distinct from activeSubDeckId/activeOverlay
+  // below, which are view-mode runtime state driven by server pushes, not
+  // a toolbar choice.
+  editingSubDeckId: string | null
+  // View mode only — which deck view is fullscreen right now, driven
+  // exclusively by incoming subdeck:navigate messages (see NavigateSubDeckAction's
+  // own comment in shared/types.ts for why this is per-client, never set
+  // locally in response to a click).
+  activeSubDeckId: string | null
+  // View mode only — the currently-open slide-over panel, if any. Only one
+  // at a time; a new subdeck:open-overlay message replaces whatever was
+  // open. Cleared locally by closeOverlay() (tap-outside-to-dismiss, no
+  // server round trip) as well as by an incoming subdeck:navigate/
+  // subdeck:close-overlay message.
+  activeOverlay: ActiveOverlay | null
   mode: Mode
   connected: boolean
   errors: Record<string, string>
@@ -104,6 +136,16 @@ interface DashboardStore {
   // "Enabled data sources" gate (see appSettings.ts) — null until first
   // requested. EventsModal's add-picker filters EVENT_SOURCE_TYPES by this.
   enabledDataSources: string[] | null
+  // ScreenCaptureWidget's Properties monitor dropdown — null until first
+  // requested (see PropertiesPanel.tsx, fetched once its Region section
+  // mounts), same "null vs. empty" convention as dcsBiosAircraft above.
+  screenCaptureDisplays: { id: number; label: string; bounds: ScreenRegion }[] | null
+  requestScreenCaptureDisplays: () => void
+  // No reply to await here — the picked region reaches every client
+  // (including this one) through the normal dashboard:sync broadcast, same
+  // as background-image:upload's result does (see screen-capture:pick-region's
+  // own comment in shared/types.ts).
+  pickScreenCaptureRegion: (widgetId: string, displayId: number) => void
   requestDcsBiosAircraftList: () => void
   requestDcsBiosFieldCatalog: (aircraft: string) => void
   requestDcsBiosCommandCatalog: (aircraft: string) => void
@@ -136,6 +178,19 @@ interface DashboardStore {
   ) => void
   uploadBackgroundImage: (dataUrl: string) => void
   clearBackgroundImage: () => void
+  // Edit mode's toolbar screen switcher. Also resets selection state — a
+  // selection made on one deck view has no meaning on another, same as
+  // selectWidget(null) already does on every other selection-invalidating
+  // change.
+  setEditingSubDeck: (subDeckId: string | null) => void
+  // Creates a new sub-deck and immediately switches the editor into it,
+  // same "jump straight into it" convention pasteWidgets already follows
+  // for a freshly pasted batch.
+  addSubDeck: (name: string) => void
+  renameSubDeck: (id: string, name: string) => void
+  // If the removed sub-deck was the one being edited, falls back the editor
+  // to the main view rather than leaving it pointed at a deleted screen.
+  removeSubDeck: (id: string) => void
   addWidget: (widget: Widget) => void
   pasteWidgets: (widgets: Widget[]) => void
   bringToFront: (ids: string[]) => void
@@ -148,6 +203,10 @@ interface DashboardStore {
   // (debounced server-side save instead of a synchronous one); omit/true for
   // a press/release event or the drag's final commit on pointer-up.
   triggerWidget: (id: string, event: WidgetEventKind, value?: number, final?: boolean) => void
+  // View mode's tap-outside-the-scrim dismiss — pure client-local state
+  // change, distinct from the server-round-tripped CloseOverlayAction (see
+  // its own comment in shared/types.ts) triggered by an in-panel widget.
+  closeOverlay: () => void
   dismissToast: (id: string) => void
   selectWidget: (id: string | null, options?: { additive?: boolean }) => void
   // Marquee (shift-drag) selection — replaces the current selection by
@@ -208,7 +267,18 @@ function sendHello(mode: Mode): void {
 // and by the close listener's DECK_CLOSE_CODE_UNKNOWN branch below.
 function pickerResetState(): Pick<
   DashboardStore,
-  'deckId' | 'connected' | 'dashboard' | 'devices' | 'errors' | 'toasts' | 'selectedWidgetIds' | 'selectedBlockId' | 'activeStateIndex'
+  | 'deckId'
+  | 'connected'
+  | 'dashboard'
+  | 'devices'
+  | 'errors'
+  | 'toasts'
+  | 'selectedWidgetIds'
+  | 'selectedBlockId'
+  | 'activeStateIndex'
+  | 'editingSubDeckId'
+  | 'activeSubDeckId'
+  | 'activeOverlay'
 > {
   return {
     deckId: null,
@@ -219,27 +289,35 @@ function pickerResetState(): Pick<
     toasts: [],
     selectedWidgetIds: [],
     selectedBlockId: null,
-    activeStateIndex: 0
+    activeStateIndex: 0,
+    editingSubDeckId: null,
+    activeSubDeckId: null,
+    activeOverlay: null
   }
 }
 
 // Button/Morph keep labels per-state (states[0].labels[0]); Gauge/Adjuster/
 // Encoder keep a flat labels[]; the switch widgets keep labels per-position
-// (positions[0].labels[0]) — no single field works for all of them, hence
-// the switch. Gauge is included even though it can't actually fire an
-// action/error, purely so this stays a total function over Widget rather
-// than needing its own narrower parameter type.
+// (positions[0].labels[0]); ScreenCaptureWidget has no labels concept at
+// all — no single field works for all of them, hence the switch. Gauge is
+// included even though it can't actually fire an action/error, purely so
+// this stays a total function over Widget rather than needing its own
+// narrower parameter type.
 function widgetDisplayLabel(widget: Widget | undefined): string | undefined {
   if (!widget) return undefined
   if (widget.type === 'button' || widget.type === 'morph') return widget.states[0]?.labels[0]?.text
   if (widget.type === 'switch-rocker' || widget.type === 'switch-dial' || widget.type === 'switch-toggle' || widget.type === 'dropdown')
     return widget.positions[0]?.labels[0]?.text
+  if (widget.type === 'screen-capture') return undefined
   return widget.labels[0]?.text
 }
 
 export const useDashboardStore = create<DashboardStore>((set, get) => ({
   deckId: null,
   dashboard: DEFAULT_DASHBOARD,
+  editingSubDeckId: null,
+  activeSubDeckId: null,
+  activeOverlay: null,
   mode: 'edit',
   connected: false,
   errors: {},
@@ -263,6 +341,15 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   dcsBiosPickedFolder: null,
   dcsBiosSendCommandResult: null,
   enabledDataSources: null,
+  screenCaptureDisplays: null,
+
+  requestScreenCaptureDisplays: () => {
+    send({ type: 'screen-capture:list-displays' })
+  },
+
+  pickScreenCaptureRegion: (widgetId, displayId) => {
+    send({ type: 'screen-capture:pick-region', widgetId, displayId })
+  },
 
   requestDcsBiosAircraftList: () => {
     send({ type: 'dcsbios:list-aircraft' })
@@ -334,6 +421,16 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // next launch would just try to restore this same dead id again.
         clearLastDeckId()
         set(pickerResetState())
+        // A view client's picker reads the deck list from the lobby
+        // connection (see connectLobby/DeckPicker), which App.tsx's mount
+        // effect only opens when there's NO remembered deck to connect to
+        // instead. Falling back here means that never happened this
+        // session — without this, the picker sits on "Loading decks…"
+        // forever (only a full app restart, with the id now cleared above,
+        // would take the connectLobby branch and actually fetch it). Edit
+        // mode's picker doesn't need this: it fetches its own list over
+        // REST on mount instead.
+        if (mode === 'view') get().connectLobby()
         return
       }
       if (event.code === DECK_CLOSE_CODE_DENIED) {
@@ -372,9 +469,20 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // etc. at their existing references instead of replacing the whole
         // object graph — see ServerToClient's own comment on this message.
         set((s) => ({ dashboard: { ...s.dashboard, variables: message.variables } }))
+      } else if (message.type === 'subdeck:navigate') {
+        set({
+          activeSubDeckId: message.target.type === 'sub-deck' ? message.target.subDeckId : null,
+          activeOverlay: null
+        })
+      } else if (message.type === 'subdeck:open-overlay') {
+        set({
+          activeOverlay: { subDeckId: message.subDeckId, edge: message.edge, size: message.size, sizeUnit: message.sizeUnit }
+        })
+      } else if (message.type === 'subdeck:close-overlay') {
+        set({ activeOverlay: null })
       } else if (message.type === 'action:error') {
         set((s) => ({ errors: { ...s.errors, [message.widgetId]: message.message } }))
-        const widget = get().dashboard.widgets.find((w) => w.id === message.widgetId)
+        const widget = findWidgetAnywhere(get().dashboard, message.widgetId)
         const toast: ActionErrorToast = {
           id: nextId(),
           widgetId: message.widgetId,
@@ -388,6 +496,8 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set((s) => ({ toasts: [...s.toasts, toast].slice(-5) }))
       } else if (message.type === 'devices:sync') {
         set({ devices: message.devices })
+      } else if (message.type === 'screen-capture:displays') {
+        set({ screenCaptureDisplays: message.displays })
       } else if (message.type === 'dcsbios:aircraft-list') {
         set({ dcsBiosAircraft: message.aircraft })
       } else if (message.type === 'dcsbios:field-catalog') {
@@ -499,7 +609,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   },
 
   updateWidgets: (widgets) => {
-    const dashboard = { ...get().dashboard, widgets }
+    const dashboard = setSubDeckWidgets(get().dashboard, get().editingSubDeckId, widgets)
     set({ dashboard })
     send({ type: 'dashboard:update', dashboard })
   },
@@ -519,13 +629,13 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   },
 
   addWidget: (widget) => {
-    get().updateWidgets([...get().dashboard.widgets, widget])
+    get().updateWidgets([...getSubDeckWidgets(get().dashboard, get().editingSubDeckId), widget])
   },
 
   // Pasted widgets replace the current selection with themselves, so a
   // pasted batch is immediately draggable as a group without an extra click.
   pasteWidgets: (widgets) => {
-    get().updateWidgets([...get().dashboard.widgets, ...widgets])
+    get().updateWidgets([...getSubDeckWidgets(get().dashboard, get().editingSubDeckId), ...widgets])
     set({ selectedWidgetIds: widgets.map((w) => w.id), selectedBlockId: null, activeStateIndex: 0 })
   },
 
@@ -535,25 +645,53 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   // overlaps without an explicit per-widget z-index.
   bringToFront: (ids) => {
     const idSet = new Set(ids)
-    const widgets = get().dashboard.widgets
+    const widgets = getSubDeckWidgets(get().dashboard, get().editingSubDeckId)
     get().updateWidgets([...widgets.filter((w) => !idSet.has(w.id)), ...widgets.filter((w) => idSet.has(w.id))])
   },
 
   sendToBack: (ids) => {
     const idSet = new Set(ids)
-    const widgets = get().dashboard.widgets
+    const widgets = getSubDeckWidgets(get().dashboard, get().editingSubDeckId)
     get().updateWidgets([...widgets.filter((w) => idSet.has(w.id)), ...widgets.filter((w) => !idSet.has(w.id))])
   },
 
   removeWidget: (id) => {
-    get().updateWidgets(get().dashboard.widgets.filter((w) => w.id !== id))
+    get().updateWidgets(getSubDeckWidgets(get().dashboard, get().editingSubDeckId).filter((w) => w.id !== id))
     set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => w !== id), selectedBlockId: null }))
   },
 
   removeWidgets: (ids) => {
     const idSet = new Set(ids)
-    get().updateWidgets(get().dashboard.widgets.filter((w) => !idSet.has(w.id)))
+    get().updateWidgets(getSubDeckWidgets(get().dashboard, get().editingSubDeckId).filter((w) => !idSet.has(w.id)))
     set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => !idSet.has(w)), selectedBlockId: null }))
+  },
+
+  setEditingSubDeck: (subDeckId) => {
+    set({ editingSubDeckId: subDeckId, selectedWidgetIds: [], selectedBlockId: null, activeStateIndex: 0 })
+  },
+
+  addSubDeck: (name) => {
+    const subDeck: SubDeck = { id: nextId(), name, widgets: [] }
+    const dashboard = { ...get().dashboard, subDecks: [...(get().dashboard.subDecks ?? []), subDeck] }
+    set({ dashboard })
+    send({ type: 'dashboard:update', dashboard })
+    get().setEditingSubDeck(subDeck.id)
+  },
+
+  renameSubDeck: (id, name) => {
+    const dashboard = {
+      ...get().dashboard,
+      subDecks: (get().dashboard.subDecks ?? []).map((sd) => (sd.id === id ? { ...sd, name } : sd))
+    }
+    set({ dashboard })
+    send({ type: 'dashboard:update', dashboard })
+  },
+
+  removeSubDeck: (id) => {
+    const dashboard = { ...get().dashboard, subDecks: (get().dashboard.subDecks ?? []).filter((sd) => sd.id !== id) }
+    set({ dashboard })
+    send({ type: 'dashboard:update', dashboard })
+    if (get().editingSubDeckId === id) get().setEditingSubDeck(null)
   },
 
   triggerWidget: (id, event, value, final) => {
@@ -568,6 +706,10 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       return { errors }
     })
     send({ type: 'action:trigger', widgetId: id, event, ...(value !== undefined && { value }), ...(final === false && { final }) })
+  },
+
+  closeOverlay: () => {
+    set({ activeOverlay: null })
   },
 
   dismissToast: (id) => {

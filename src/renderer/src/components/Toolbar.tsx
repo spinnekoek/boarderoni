@@ -7,6 +7,7 @@ import { VariablesModal } from './VariablesModal'
 import { EventsModal } from './EventsModal'
 import { SettingsModal } from './SettingsModal'
 import { MobileAppModal } from './MobileAppModal'
+import { ScreenSwitcher } from './ScreenSwitcher'
 
 export function Toolbar(): React.JSX.Element {
   const [variablesOpen, setVariablesOpen] = useState(false)
@@ -31,6 +32,7 @@ export function Toolbar(): React.JSX.Element {
 
   return (
     <div className="toolbar">
+      <ScreenSwitcher />
       <label className="toolbar__control">
         <span>Device</span>
         <select value={selectedDeviceId} onChange={(e) => setSelectedDeviceId(e.target.value)}>

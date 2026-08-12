@@ -5,6 +5,7 @@ import { useEditorShortcuts } from '../useEditorShortcuts'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { morphFootprint } from '@shared/morph'
 import { resolveColor, toVariableMap } from '@shared/expr'
+import { getSubDeckWidgets } from '@shared/subDecks'
 import { CanvasWidget } from './CanvasWidget'
 import { MorphCanvasWidget } from './MorphCanvasWidget'
 import { ContextMenu } from './ContextMenu'
@@ -47,7 +48,18 @@ interface MarqueeState {
 }
 
 export function Canvas(): React.JSX.Element {
-  const widgets = useDashboardStore((s) => s.dashboard.widgets)
+  // Selected separately from the whole `dashboard` (rather than one
+  // `s.dashboard` selector destructured below) so this component doesn't
+  // re-render on every variables:sync tick, which leaves widgets/subDecks
+  // references unchanged.
+  const rootWidgets = useDashboardStore((s) => s.dashboard.widgets)
+  const subDecks = useDashboardStore((s) => s.dashboard.subDecks)
+  const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
+  const widgets = useMemo(
+    () => getSubDeckWidgets({ widgets: rootWidgets, subDecks }, editingSubDeckId),
+    [rootWidgets, subDecks, editingSubDeckId]
+  )
+  const editingSubDeckName = subDecks?.find((sd) => sd.id === editingSubDeckId)?.name
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
   const backgroundColorExpr = useDashboardStore((s) => s.dashboard.backgroundColorExpr)
   const backgroundImageVersion = useDashboardStore((s) => s.dashboard.backgroundImageVersion)
@@ -185,6 +197,7 @@ export function Canvas(): React.JSX.Element {
   return (
     <div className="canvas-viewport" ref={viewportRef} onWheel={handleWheel}>
       <div className="canvas-toolbar">
+        <span className="canvas-toolbar__screen">Editing: {editingSubDeckId ? (editingSubDeckName ?? 'Main deck') : 'Main deck'}</span>
         <span className="canvas-toolbar__zoom">{Math.round(camera.zoom * 100)}%</span>
         <button className="canvas-toolbar__button" onClick={() => setCamera(INITIAL_CAMERA)}>
           Reset view

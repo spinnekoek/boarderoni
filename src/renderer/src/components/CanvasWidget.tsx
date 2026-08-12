@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
+import { getSubDeckWidgets } from '@shared/subDecks'
 import { useEditorSettings } from '../settingsStore'
 import { useWidgetDrag } from '../useWidgetDrag'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
@@ -10,6 +11,7 @@ import { RockerSwitchWidgetContent } from './widgets/RockerSwitchWidget'
 import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
 import { ToggleSwitchWidgetContent } from './widgets/ToggleSwitchWidget'
 import { DropdownWidgetContent } from './widgets/DropdownWidget'
+import { ScreenCaptureWidgetContent } from './widgets/ScreenCaptureWidget'
 import { resolveActivePositionIndex } from '@shared/switchPosition'
 import type { VariableMap } from '@shared/expr'
 import type { BoxWidget } from '@shared/types'
@@ -33,7 +35,14 @@ export function CanvasWidget({
   onContextMenu: (e: React.MouseEvent) => void
 }): React.JSX.Element {
   const { selected, selectedWidgetIds, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
-  const widgets = useDashboardStore((s) => s.dashboard.widgets)
+  const deckId = useDashboardStore((s) => s.deckId)
+  const rootWidgets = useDashboardStore((s) => s.dashboard.widgets)
+  const subDecks = useDashboardStore((s) => s.dashboard.subDecks)
+  const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
+  const widgets = useMemo(
+    () => getSubDeckWidgets({ widgets: rootWidgets, subDecks }, editingSubDeckId),
+    [rootWidgets, subDecks, editingSubDeckId]
+  )
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
   const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
   const selectedBlockId = useDashboardStore((s) => s.selectedBlockId)
@@ -111,6 +120,7 @@ export function CanvasWidget({
         <ButtonWidgetContent widget={widget} state={previewState} interactive={false} variables={variables} />
       )}
       {widget.type === 'gauge' && <GaugeWidgetContent widget={widget} variables={variables} />}
+      {widget.type === 'screen-capture' && <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />}
       {widget.type === 'adjuster' && <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} />}
       {widget.type === 'encoder' && <EncoderWidgetContent widget={widget} variables={variables} interactive={false} />}
       {widget.type === 'switch-rocker' && (

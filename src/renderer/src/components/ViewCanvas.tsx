@@ -6,6 +6,7 @@ import { getKeepScreenOnPreference } from '../id'
 import { getEffectiveStates } from '@shared/states'
 import { morphFootprint } from '@shared/morph'
 import { resolveColor, toVariableMap, type VariableMap } from '@shared/expr'
+import { findSubDeck, getSubDeckWidgets } from '@shared/subDecks'
 import type {
   AdjusterWidget,
   DialSwitchWidget,
@@ -16,9 +17,11 @@ import type {
   ToggleSwitchWidget,
   Widget
 } from '@shared/types'
+import { OverlayPanel } from './OverlayPanel'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
 import { GaugeWidgetContent } from './widgets/GaugeWidget'
+import { ScreenCaptureWidgetContent } from './widgets/ScreenCaptureWidget'
 import { AdjusterWidgetContent } from './widgets/AdjusterWidget'
 import { EncoderWidgetContent } from './widgets/EncoderWidget'
 import { RockerSwitchWidgetContent } from './widgets/RockerSwitchWidget'
@@ -294,13 +297,16 @@ function TriggerableViewWidget({
 function ViewWidget({
   widget,
   variables,
+  deckId,
   error
 }: {
   widget: Widget
   variables: VariableMap
+  deckId: string | null
   error?: string
 }): React.JSX.Element {
   if (widget.type === 'gauge') return <GaugeWidgetContent widget={widget} variables={variables} />
+  if (widget.type === 'screen-capture') return <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />
   if (widget.type === 'adjuster') return <AdjusterView widget={widget} variables={variables} />
   if (widget.type === 'encoder') return <EncoderView widget={widget} variables={variables} />
   if (widget.type === 'switch-rocker') return <RockerSwitchView widget={widget} variables={variables} />
@@ -310,8 +316,56 @@ function ViewWidget({
   return <TriggerableViewWidget widget={widget} variables={variables} error={error} />
 }
 
+// One deck view's worth of widgets, absolutely positioned within whatever
+// positioned box contains this — the fullscreen root canvas below, or an
+// OverlayPanel's own smaller box. Extracted so both render sites share the
+// exact same morph-footprint/keying logic instead of duplicating it.
+export function ScreenWidgetsLayer({
+  widgets,
+  variables,
+  deckId,
+  errors
+}: {
+  widgets: Widget[]
+  variables: VariableMap
+  deckId: string | null
+  errors: Record<string, string>
+}): React.JSX.Element {
+  return (
+    <>
+      {widgets.map((widget) => {
+        const rendered = widget.type === 'morph' ? morphFootprint(widget) : widget
+        return (
+          <div
+            key={widget.id}
+            className={`view-canvas__widget${widget.type === 'morph' ? ' view-canvas__widget--morph' : ''}`}
+            style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
+          >
+            <ViewWidget widget={widget} variables={variables} deckId={deckId} error={errors[widget.id]} />
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
 export function ViewCanvas(): React.JSX.Element {
-  const widgets = useDashboardStore((s) => s.dashboard.widgets)
+  // Selected separately from the whole `dashboard` (rather than one
+  // `s.dashboard` selector destructured below) so this component doesn't
+  // re-render on every variables:sync tick, which leaves widgets/subDecks
+  // references unchanged.
+  const rootWidgets = useDashboardStore((s) => s.dashboard.widgets)
+  const subDecks = useDashboardStore((s) => s.dashboard.subDecks)
+  const activeSubDeckId = useDashboardStore((s) => s.activeSubDeckId)
+  const activeOverlay = useDashboardStore((s) => s.activeOverlay)
+  const closeOverlay = useDashboardStore((s) => s.closeOverlay)
+  const widgets = useMemo(
+    () => getSubDeckWidgets({ widgets: rootWidgets, subDecks }, activeSubDeckId),
+    [rootWidgets, subDecks, activeSubDeckId]
+  )
+  // Guards against a stale reference — the sub-deck an open overlay names
+  // may have been deleted (from the editor) while it was showing.
+  const overlaySubDeck = activeOverlay ? findSubDeck({ subDecks }, activeOverlay.subDeckId) : undefined
   const variables = useDashboardStore((s) => s.dashboard.variables)
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
   const backgroundColorExpr = useDashboardStore((s) => s.dashboard.backgroundColorExpr)
@@ -381,18 +435,23 @@ export function ViewCanvas(): React.JSX.Element {
           }}
         />
       )}
-      {widgets.map((widget) => {
-        const rendered = widget.type === 'morph' ? morphFootprint(widget) : widget
-        return (
-          <div
-            key={widget.id}
-            className={`view-canvas__widget${widget.type === 'morph' ? ' view-canvas__widget--morph' : ''}`}
-            style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
-          >
-            <ViewWidget widget={widget} variables={variableMap} error={errors[widget.id]} />
-          </div>
-        )
-      })}
+      <ScreenWidgetsLayer widgets={widgets} variables={variableMap} deckId={deckId} errors={errors} />
+      {activeOverlay && overlaySubDeck && (
+        <OverlayPanel
+          subDeck={overlaySubDeck}
+          edge={activeOverlay.edge}
+          size={activeOverlay.size}
+          sizeUnit={activeOverlay.sizeUnit}
+          variables={variableMap}
+          deckId={deckId}
+          errors={errors}
+          backgroundColor={resolvedBackgroundColor}
+          backgroundImageVersion={backgroundImageVersion}
+          backgroundFit={backgroundFit}
+          backgroundAnchor={backgroundAnchor}
+          onDismiss={closeOverlay}
+        />
+      )}
       {settingsOpen && <DeviceSettingsModal onClose={() => setSettingsOpen(false)} />}
       <ToastStack />
     </div>

@@ -42,14 +42,28 @@ const ALIGN_ITEMS: Record<NonNullable<WidgetLabel['verticalAlign']>, string> = {
 // positions, one detent-anchored wrapper per label — see DialSwitchWidget.tsx).
 export function renderWidgetLabel(label: WidgetLabel, backgroundColor: string, variables: VariableMap): React.JSX.Element {
   const resolvedTextColor = resolveTextColor(label, backgroundColor, variables)
+  const padding = label.padding ?? DEFAULT_WIDGET_PADDING
+  const align = label.align ?? 'center'
+  const verticalAlign = label.verticalAlign ?? 'center'
+  // CSS padding can't go negative — the browser drops the whole declaration
+  // rather than clamping it, so a negative value would silently act like 0.
+  // What actually reaches `padding` below is clamped at 0; anything past
+  // that instead pushes the label beyond its own edge via translate, in
+  // whichever direction align/verticalAlign already anchor it to (center on
+  // either axis has no edge to push past, so it stays a no-op there — same
+  // as positive padding already was at center).
+  const overflow = Math.min(padding, 0)
+  const dx = align === 'left' ? overflow : align === 'right' ? -overflow : 0
+  const dy = verticalAlign === 'top' ? overflow : verticalAlign === 'bottom' ? -overflow : 0
   const labelStyle: React.CSSProperties = {
-    padding: label.padding ?? DEFAULT_WIDGET_PADDING,
+    padding: Math.max(padding, 0),
+    transform: overflow !== 0 ? `translate(${dx}px, ${dy}px)` : undefined,
     fontFamily: resolveFont(label.fontFamily).cssFamily,
     fontSize: label.fontSize ?? DEFAULT_WIDGET_FONT_SIZE,
     color: withOpacity(resolvedTextColor.color, resolvedTextColor.opacity ?? label.textOpacity ?? 1),
-    justifyContent: JUSTIFY_CONTENT[label.align ?? 'center'],
-    alignItems: ALIGN_ITEMS[label.verticalAlign ?? 'center'],
-    textAlign: label.align ?? 'center'
+    justifyContent: JUSTIFY_CONTENT[align],
+    alignItems: ALIGN_ITEMS[verticalAlign],
+    textAlign: label.textAlign ?? align
   }
   return (
     <span key={label.id} className="deck-button__label" style={labelStyle}>

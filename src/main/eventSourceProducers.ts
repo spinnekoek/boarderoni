@@ -32,12 +32,14 @@ function computeDatetimeFields(): Record<string, unknown> {
   const year = now.getFullYear()
   const minute = now.getMinutes()
   const second = now.getSeconds()
+  const secondHalf = second + (now.getMilliseconds() >= 500 ? 0.5 : 0)
 
   return {
     hour24,
     hour12,
     minute,
     second,
+    secondHalf,
     ampm: hour24 < 12 ? 'AM' : 'PM',
     dayOfWeek: now.getDay(),
     dayOfWeekName: DAY_NAMES[now.getDay()],
@@ -70,9 +72,15 @@ export interface EventSourceProducer {
 export const EVENT_SOURCE_PRODUCERS: Record<string, EventSourceProducer> = {
   datetime: {
     start(_instance, emit) {
+      // 250ms, not 1000ms, so `secondHalf` actually resolves at that
+      // granularity (any slower and a 500ms-wide window could get missed
+      // entirely) — cheap even for consumers that don't map it:
+      // syncEventSources only broadcasts a field whose value actually
+      // changed since the last tick, so a mapping on e.g. `second` still
+      // only fires once a second.
       const tick = (): void => emit(computeDatetimeFields())
       tick()
-      const intervalId = setInterval(tick, 1000)
+      const intervalId = setInterval(tick, 250)
       return () => clearInterval(intervalId)
     }
   },

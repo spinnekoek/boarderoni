@@ -29,8 +29,11 @@ import {
   type DeviceInfo,
   type DialSwitchWidget,
   type DropdownWidget,
+  type ToggleSwitchWidget,
   type EventSource,
   type KeypressAction,
+  type ScreenCaptureWidget,
+  type ScreenRegion,
   type SendDcsCommandAction,
   type SequenceStep,
   type ServerToClient,
@@ -41,8 +44,10 @@ import {
   type WidgetEventKind
 } from '../shared/types'
 import { getEventSteps } from '../shared/widgetEvents'
+import { findSubDeck, findWidgetAnywhere } from '../shared/subDecks'
 import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression } from '../shared/expr'
 import { EVENT_SOURCE_PRODUCERS } from './eventSourceProducers'
+import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuality, addMjpegViewer } from './screenCapture'
 import { getAppSettings, updateAppSettings } from './appSettings'
 import { isDeviceApproved, approveDevice, revokeDevice, renameApprovedDevice, listApprovedDevices } from './deviceApproval'
 import { displayDeviceName } from '../shared/deviceName'
@@ -166,6 +171,15 @@ function migrateDialSwitchLabelAnchor(widget: DialSwitchWidget & LegacyDialSwitc
   return { ...rest, positions }
 }
 
+// DialSwitchWidget/ToggleSwitchWidget gained their own flat, whole-widget
+// `labels[]` (same convention as Gauge/Adjuster/Encoder) after already
+// shipping with only per-position labels — a dashboard saved before that
+// needs the field backfilled, same as `variables`/`eventSources` get
+// defaulted in loadDeckDashboard, just per-widget instead of per-dashboard.
+function migrateSwitchWidgetTopLevelLabels<T extends DialSwitchWidget | ToggleSwitchWidget>(widget: T): T {
+  return Array.isArray(widget.labels) ? widget : { ...widget, labels: [] }
+}
+
 function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget): Widget {
   widget = migrateWidgetEvents(widget) as Widget & LegacyButtonWidget & LegacyActionWidget
   widget = migrateSwitchWidget(widget) as Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget
@@ -175,20 +189,24 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
   // like the others below.
   if (widget.type === 'dropdown') return migrateDropdownOrientation(widget)
 
-  if (widget.type === 'switch-dial') return migrateDialSwitchLabelAnchor(widget as DialSwitchWidget & LegacyDialSwitchWidget)
+  if (widget.type === 'switch-dial') {
+    return migrateSwitchWidgetTopLevelLabels(migrateDialSwitchLabelAnchor(widget as DialSwitchWidget & LegacyDialSwitchWidget))
+  }
 
-  // Morph/gauge/adjuster/encoder/switch widgets never existed in any of the
-  // legacy shapes below — they're always created with their current shape
-  // from the start (morph with states[]/blocks[], the rest with no
-  // states[] at all, the switch type with positions[] instead of a flat
-  // labels[]).
+  if (widget.type === 'switch-toggle') return migrateSwitchWidgetTopLevelLabels(widget)
+
+  // Morph/gauge/adjuster/encoder/rocker/screen-capture widgets never
+  // existed in any of the legacy shapes below — they're always created
+  // with their current shape from the start (morph with states[]/blocks[],
+  // the rest with no states[] at all, rocker with positions[] instead of a
+  // flat labels[], screen-capture with no labels concept at all).
   if (
     widget.type === 'morph' ||
     widget.type === 'gauge' ||
     widget.type === 'adjuster' ||
     widget.type === 'encoder' ||
     widget.type === 'switch-rocker' ||
-    widget.type === 'switch-toggle'
+    widget.type === 'screen-capture'
   ) {
     return widget
   }
@@ -300,6 +318,10 @@ function loadDeckDashboard(deckId: string): Dashboard | null {
     // all — normalize once here so nothing downstream needs `?? []`.
     loaded.variables = loaded.variables ?? []
     loaded.eventSources = loaded.eventSources ?? []
+    // Same normalization for sub-decks, saved before SubDeck existed — and
+    // each sub-deck's own widgets need the same migrateWidget treatment the
+    // main deck's widgets just got above.
+    loaded.subDecks = (loaded.subDecks ?? []).map((sd) => ({ ...sd, widgets: sd.widgets.map(migrateWidget) }))
     return loaded
   } catch (err) {
     // A single corrupted deck must not take down the picker list or the app —
@@ -350,6 +372,7 @@ function migrateLegacyDashboard(): void {
       loaded.widgets = loaded.widgets.map(migrateWidget)
       loaded.variables = loaded.variables ?? []
       loaded.eventSources = loaded.eventSources ?? []
+      loaded.subDecks = (loaded.subDecks ?? []).map((sd) => ({ ...sd, widgets: sd.widgets.map(migrateWidget) }))
       const id = loaded.id || 'default'
       mkdirSync(deckDir(id), { recursive: true })
       writeFileSync(deckDashboardFile(id), JSON.stringify({ ...loaded, id }, null, 2), 'utf-8')
@@ -427,6 +450,74 @@ function serveBackgroundImage(res: ServerResponse, deckId: string): void {
     }
     res.writeHead(200, { 'Content-Type': room.dashboard.backgroundImageMime!, 'Cache-Control': 'public, max-age=31536000, immutable' })
     res.end(data)
+  })
+}
+
+// Patches one widget by id, wherever it lives (main deck or a sub-deck) —
+// write-side counterpart to findWidgetAnywhere for handlers (like
+// screen-capture:pick-region below) that need to update a widget without
+// knowing which deck view owns it. A no-op (dashboard unchanged) if the id
+// isn't found anywhere.
+function updateWidgetById(dashboard: Dashboard, widgetId: string, update: (widget: Widget) => Widget): Dashboard {
+  if (dashboard.widgets.some((w) => w.id === widgetId)) {
+    return { ...dashboard, widgets: dashboard.widgets.map((w) => (w.id === widgetId ? update(w) : w)) }
+  }
+  const subDecks = dashboard.subDecks ?? []
+  const ownerIndex = subDecks.findIndex((sd) => sd.widgets.some((w) => w.id === widgetId))
+  if (ownerIndex === -1) return dashboard
+  return {
+    ...dashboard,
+    subDecks: subDecks.map((sd, i) => (i === ownerIndex ? { ...sd, widgets: sd.widgets.map((w) => (w.id === widgetId ? update(w) : w)) } : sd))
+  }
+}
+
+// Shared by both routes below — a screen-capture widget with no region
+// picked yet (or one that's been deleted since a client last saw it) has
+// nothing to serve.
+function findScreenCaptureWidget(room: DeckRoom, widgetId: string): (ScreenCaptureWidget & { region: ScreenRegion; displayId: number }) | null {
+  const widget = findWidgetAnywhere(room.dashboard, widgetId)
+  if (!widget || widget.type !== 'screen-capture' || !widget.region || widget.displayId === undefined) return null
+  return widget as ScreenCaptureWidget & { region: ScreenRegion; displayId: number }
+}
+
+// Poll mode — one capture per request, fully stateless (see
+// ScreenCaptureWidget.streamMode in shared/types.ts).
+function serveScreenCaptureFrame(res: ServerResponse, deckId: string, widgetId: string): void {
+  const room = getOrLoadRoom(deckId)
+  const widget = room && findScreenCaptureWidget(room, widgetId)
+  if (!widget) {
+    res.writeHead(404)
+    res.end('No region configured')
+    return
+  }
+  captureRegionJpeg(widget.region, widget.displayId, clampQuality(widget.quality), widget.sharpen ?? false)
+    .then((frame) => {
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' })
+      res.end(frame)
+    })
+    .catch((err) => {
+      console.error(`[boarderoni] screen capture frame failed (widget ${widgetId})`, err)
+      res.writeHead(500)
+      res.end('Capture failed')
+    })
+}
+
+// Live mode — multipart/x-mixed-replace, one shared capture loop per
+// widget fanned out to every simultaneous viewer (see
+// screenCapture.ts's addMjpegViewer).
+function serveScreenCaptureStream(res: ServerResponse, deckId: string, widgetId: string): void {
+  const room = getOrLoadRoom(deckId)
+  const widget = room && findScreenCaptureWidget(room, widgetId)
+  if (!widget) {
+    res.writeHead(404)
+    res.end('No region configured')
+    return
+  }
+  addMjpegViewer(widgetId, res, () => {
+    const current = room && findScreenCaptureWidget(room, widgetId)
+    return current
+      ? { region: current.region, displayId: current.displayId, quality: clampQuality(current.quality), sharpen: current.sharpen ?? false, fps: clampFps(current.fps) }
+      : null
   })
 }
 
@@ -676,6 +767,16 @@ const httpServer = createServer((req, res) => {
 
   if (url.pathname === '/background-image') {
     serveBackgroundImage(res, url.searchParams.get('deck') ?? '')
+    return
+  }
+
+  if (url.pathname === '/screen-capture/frame') {
+    serveScreenCaptureFrame(res, url.searchParams.get('deck') ?? '', url.searchParams.get('widget') ?? '')
+    return
+  }
+
+  if (url.pathname === '/screen-capture/stream') {
+    serveScreenCaptureStream(res, url.searchParams.get('deck') ?? '', url.searchParams.get('widget') ?? '')
     return
   }
 
@@ -994,15 +1095,48 @@ async function runKeypressAction(action: KeypressAction): Promise<void> {
   if (mode !== 'down') await keyboard.releaseKey(...keys)
 }
 
-// One action step's dispatch by kind — the same three branches
-// triggerAction used to run directly, now shared by runSequence's loop.
-async function runActionStep(room: DeckRoom, action: WidgetAction, value: number | undefined, final: boolean): Promise<void> {
+// A navigate-subdeck/open-overlay action naming a sub-deck must still name
+// a REAL one — thrown here, caught by runSequence's own try/catch same as
+// any other step failure, reported via the normal action:error toast.
+function requireSubDeck(room: DeckRoom, subDeckId: string): void {
+  if (!findSubDeck(room.dashboard, subDeckId)) throw new Error('Target sub-deck no longer exists')
+}
+
+// One action step's dispatch by kind — the same branches triggerAction used
+// to run directly, now shared by runSequence's loop. `ws` is only used by
+// the navigate-subdeck/open-overlay/close-overlay branches, whose whole
+// effect is a targeted (not room-broadcast) reply to the ONE socket that
+// triggered them — see each's own comment in shared/types.ts for why this
+// is client-local state rather than shared dashboard state.
+async function runActionStep(room: DeckRoom, action: WidgetAction, value: number | undefined, final: boolean, ws: WebSocket): Promise<void> {
   if (action.kind === 'update-state') {
     runUpdateState(room, action.code, value, final) // throws synchronously on failure
     return
   }
   if (action.kind === 'send-dcs-command') {
     await runSendDcsCommand(room, action, value)
+    return
+  }
+  if (action.kind === 'navigate-subdeck') {
+    if (action.target.type === 'sub-deck') requireSubDeck(room, action.target.subDeckId)
+    ws.send(JSON.stringify({ type: 'subdeck:navigate', target: action.target } satisfies ServerToClient))
+    return
+  }
+  if (action.kind === 'open-overlay') {
+    requireSubDeck(room, action.subDeckId)
+    ws.send(
+      JSON.stringify({
+        type: 'subdeck:open-overlay',
+        subDeckId: action.subDeckId,
+        edge: action.edge,
+        size: action.size,
+        sizeUnit: action.sizeUnit
+      } satisfies ServerToClient)
+    )
+    return
+  }
+  if (action.kind === 'close-overlay') {
+    ws.send(JSON.stringify({ type: 'subdeck:close-overlay' } satisfies ServerToClient))
     return
   }
   await runKeypressAction(action)
@@ -1030,7 +1164,7 @@ async function runSequence(
       if (step.kind === 'delay') {
         await sleep(step.delayMs)
       } else {
-        await runActionStep(room, step.action, value, final)
+        await runActionStep(room, step.action, value, final, ws)
       }
     } catch (err) {
       sendError(ws, widgetId, err instanceof Error ? err.message : String(err), { event, stepIndex: i, stepKind: step.kind })
@@ -1047,16 +1181,16 @@ async function triggerAction(
   value: number | undefined,
   final: boolean
 ): Promise<void> {
-  const widget = room.dashboard.widgets.find((w) => w.id === widgetId)
+  const widget = findWidgetAnywhere(room.dashboard, widgetId)
   if (!widget) {
     sendError(ws, widgetId, 'Widget not found')
     return
   }
 
-  // Gauge is passive — it has no `.events` at all, so a stale/malicious
-  // action:trigger naming one lands here rather than crashing on
-  // getEventSteps below.
-  if (widget.type === 'gauge') {
+  // Gauge/screen-capture are passive — neither has `.events` at all, so a
+  // stale/malicious action:trigger naming one lands here rather than
+  // crashing on getEventSteps below (which assumes EventfulWidget).
+  if (widget.type === 'gauge' || widget.type === 'screen-capture') {
     sendError(ws, widgetId, 'This widget cannot be triggered')
     return
   }
@@ -1443,6 +1577,28 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         // Toggling a kind takes effect immediately, not just on the next
         // unrelated dashboard:update — see resyncAllRoomsEventSources.
         resyncAllRoomsEventSources()
+        break
+      }
+      case 'screen-capture:list-displays': {
+        ws.send(JSON.stringify({ type: 'screen-capture:displays', displays: listDisplays() } satisfies ServerToClient))
+        break
+      }
+      case 'screen-capture:pick-region': {
+        if (!activeRoom) break
+        const region = await openRegionPicker(message.displayId)
+        // No reply message for the result itself — same as
+        // background-image:upload, the picked region is written straight
+        // into the widget and reaches every client (including this one)
+        // via the normal dashboard:sync broadcast below. null (cancelled)
+        // just does nothing.
+        if (region) {
+          const { widgetId, displayId } = message
+          activeRoom.dashboard = updateWidgetById(activeRoom.dashboard, widgetId, (w) =>
+            w.type === 'screen-capture' ? { ...w, region, displayId } : w
+          )
+          saveDeckDashboard(activeRoom)
+          broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
+        }
         break
       }
     }

@@ -1,7 +1,7 @@
 import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, type VariableMap } from '@shared/expr'
 import type { SwitchPosition, ToggleSwitchWidget } from '@shared/types'
-import { renderWidgetLabel } from './labels'
+import { renderWidgetLabel, renderWidgetLabels } from './labels'
 import { labelAnchorPoint, polarToCartesian, viewBoxToPixel } from './arcPath'
 
 const BEZEL_RADIUS = 45 // default for widget.bezelRadius, same convention as DialSwitchWidget's dial-face radius
@@ -238,6 +238,7 @@ export function ToggleSwitchWidgetContent({
           )
         })
       })}
+      {renderWidgetLabels(widget.labels, trackColor, variables)}
     </div>
   )
 }

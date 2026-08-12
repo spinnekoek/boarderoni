@@ -1,7 +1,7 @@
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, type VariableMap } from '@shared/expr'
 import type { DetentStyle, DialSwitchWidget } from '@shared/types'
-import { renderWidgetLabel } from './labels'
+import { renderWidgetLabel, renderWidgetLabels } from './labels'
 import { labelAnchorPoint, needlePoints, polarToCartesian, viewBoxToPixel } from './arcPath'
 
 // The default 2-position dial's own two detents sit at these — mirrored
@@ -196,7 +196,14 @@ export function DialSwitchWidgetContent({
   const circleBorderWidth = widget.circleBorderWidth ?? 0
   const circleColor = widget.circleColor ?? needleColor
   const circleBorderColor = widget.circleBorderColor ?? 'transparent'
-  const circleIndicatorPoint = polarToCartesian(50, 50, circleSize / 2, needleAngle)
+  // Defaults to each shape's own edge (where the marker used to be pinned
+  // unconditionally) so an untouched indicator looks the same as before this
+  // became configurable.
+  const indicatorDistance = widget.indicatorDistance ?? (dialShape === 'square' ? squareHeight / 2 : circleSize / 2)
+  const circleIndicatorPoint = polarToCartesian(50, 50, indicatorDistance, needleAngle)
+  const circleIndentCount = widget.circleIndentCount ?? 0
+  const circleIndentSize = widget.circleIndentSize ?? circleSize / 6
+  const circleIndentColor = widget.circleIndentColor ?? trackColor
 
   const shapeColor = dialShape === 'square' ? squareColor : circleColor
   const indicatorShape = widget.indicatorShape ?? 'circle'
@@ -205,10 +212,9 @@ export function DialSwitchWidgetContent({
   const indicatorHeight = widget.indicatorStyle?.height ?? indicatorBaseSize.height
   const indicatorBorderWidth = widget.indicatorStyle?.borderWidth ?? 0
   const indicatorBorderRadius = widget.indicatorStyle?.borderRadius ?? DEFAULT_DETENT_BORDER_RADIUS[indicatorShape] ?? 0
-  // Auto-lightened, like a switch position's own active-color default (see
-  // pickAutoActiveColor below) — reads clearly against the shape by default
-  // instead of collapsing into the same color until explicitly overridden.
-  const indicatorColor = widget.indicatorColor ?? pickAutoActiveColor(shapeColor)
+  // Defaults to the dial shape's own color, so an untouched indicator reads
+  // as part of the shape rather than a separately-colored overlay.
+  const indicatorColor = widget.indicatorColor ?? shapeColor
   const indicatorBorderColor = widget.indicatorStyle?.borderColor ?? 'transparent'
 
   return (
@@ -232,9 +238,10 @@ export function DialSwitchWidgetContent({
           // Unrotated, the rect's top edge points up (angle 0) — same
           // convention as the tick/triangle detents — so rotating the whole
           // group by needleAngle makes that edge point at the active detent.
-          // The indicator marker rides along on that same edge, at its
-          // midpoint, so it never needs its own rotation (it's already
-          // "facing" the right way in the group's local, unrotated frame).
+          // The indicator marker rides along that same up axis, at
+          // indicatorDistance from center (defaulting to the edge), so it
+          // never needs its own rotation (it's already "facing" the right
+          // way in the group's local, unrotated frame).
           <g transform={`rotate(${needleAngle} 50 50)`}>
             <rect
               x={50 - squareWidth / 2}
@@ -249,7 +256,7 @@ export function DialSwitchWidgetContent({
             <DetentIndicatorShape
               shape={indicatorShape}
               cx={50}
-              cy={50 - squareHeight / 2}
+              cy={50 - indicatorDistance}
               width={indicatorWidth}
               height={indicatorHeight}
               borderRadius={indicatorBorderRadius}
@@ -263,6 +270,11 @@ export function DialSwitchWidgetContent({
         {dialShape === 'circle' && (
           <>
             <circle cx={50} cy={50} r={circleSize / 2} fill={circleColor} stroke={circleBorderColor} strokeWidth={circleBorderWidth} />
+            {Array.from({ length: circleIndentCount }, (_, i) => {
+              const indentAngle = needleAngle + (i * 360) / circleIndentCount
+              const indentPoint = polarToCartesian(50, 50, circleSize / 2, indentAngle)
+              return <circle key={i} cx={indentPoint.x} cy={indentPoint.y} r={circleIndentSize} fill={circleIndentColor} />
+            })}
             <DetentIndicatorShape
               shape={indicatorShape}
               cx={circleIndicatorPoint.x}
@@ -349,6 +361,7 @@ export function DialSwitchWidgetContent({
           </div>
         )
       })}
+      {renderWidgetLabels(widget.labels, trackColor, variables)}
     </div>
   )
 }

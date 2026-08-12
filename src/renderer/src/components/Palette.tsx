@@ -11,6 +11,7 @@ import type {
   GaugeWidget,
   MorphButtonWidget,
   RockerSwitchWidget,
+  ScreenCaptureWidget,
   ToggleSwitchWidget
 } from '@shared/types'
 
@@ -165,6 +166,7 @@ export function Palette(): React.JSX.Element {
       w: 120,
       h: 120,
       positions: defaultPositions(),
+      labels: [],
       track: { color: DEFAULT_WIDGET_COLOR },
       fill: { color: '#5b8def' }
     }
@@ -194,6 +196,7 @@ export function Palette(): React.JSX.Element {
       h: 130,
       orientation: 'vertical',
       positions: defaultTogglePositions(),
+      labels: [],
       track: { color: DEFAULT_WIDGET_COLOR },
       fill: { color: '#5b8def' }
     }
@@ -213,6 +216,22 @@ export function Palette(): React.JSX.Element {
       positions: defaultPositions(),
       events: { press: [], release: [] },
       track: { color: DEFAULT_WIDGET_COLOR }
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
+  function handleAddScreenCapture(): void {
+    const widget: ScreenCaptureWidget = {
+      id: nextId(),
+      type: 'screen-capture',
+      x: 40,
+      y: 40,
+      w: 240,
+      h: 160,
+      streamMode: 'poll',
+      fps: 5,
+      quality: 70
     }
     addWidget(widget)
     selectWidget(widget.id)
@@ -247,6 +266,9 @@ export function Palette(): React.JSX.Element {
       </button>
       <button className="palette__item" onClick={handleAddDropdown}>
         + Dropdown
+      </button>
+      <button className="palette__item" onClick={handleAddScreenCapture}>
+        + Screen capture
       </button>
       <p className="palette__hint">Click a widget on the canvas to edit its label, keybind, and position in the properties panel.</p>
       <p className="palette__hint">

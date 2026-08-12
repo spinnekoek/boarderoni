@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useDashboardStore } from './store'
 import { useConfirmStore } from './confirmStore'
 import { useClipboardStore } from './clipboardStore'
+import { getSubDeckWidgets } from '@shared/subDecks'
 
 export function isTextInputElement(el: Element | null): boolean {
   return el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
@@ -36,11 +37,11 @@ export function useEditorShortcuts(): void {
 
       const key = e.key.toLowerCase()
       if (key === 'c') {
-        const { selectedWidgetIds, dashboard } = useDashboardStore.getState()
+        const { selectedWidgetIds, dashboard, editingSubDeckId } = useDashboardStore.getState()
         if (selectedWidgetIds.length === 0) return
         e.preventDefault()
         const idSet = new Set(selectedWidgetIds)
-        useClipboardStore.getState().copy(dashboard.widgets.filter((w) => idSet.has(w.id)))
+        useClipboardStore.getState().copy(getSubDeckWidgets(dashboard, editingSubDeckId).filter((w) => idSet.has(w.id)))
       } else if (key === 'v') {
         e.preventDefault()
         useClipboardStore.getState().paste()

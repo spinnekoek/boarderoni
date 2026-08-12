@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useWidgetDrag } from '../useWidgetDrag'
 import { morphFootprint, normalizeMorphBlocks, blockNeighbors, neighborCount } from '@shared/morph'
+import { getSubDeckWidgets } from '@shared/subDecks'
 import { nextId } from '../id'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
 import type { VariableMap } from '@shared/expr'
@@ -112,7 +113,13 @@ export function MorphCanvasWidget({
   onContextMenu: (e: React.MouseEvent) => void
 }): React.JSX.Element {
   const { selected, selectedWidgetIds, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
-  const widgets = useDashboardStore((s) => s.dashboard.widgets)
+  const rootWidgets = useDashboardStore((s) => s.dashboard.widgets)
+  const subDecks = useDashboardStore((s) => s.dashboard.subDecks)
+  const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
+  const widgets = useMemo(
+    () => getSubDeckWidgets({ widgets: rootWidgets, subDecks }, editingSubDeckId),
+    [rootWidgets, subDecks, editingSubDeckId]
+  )
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
   const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
   const selectedBlockId = useDashboardStore((s) => s.selectedBlockId)

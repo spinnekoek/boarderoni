@@ -33,6 +33,11 @@ function cloneWidget(widget: Widget, offset: number): Widget {
     }
   }
 
+  // No nested labels/positions/states to regenerate ids for at all.
+  if (widget.type === 'screen-capture') {
+    return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset }
+  }
+
   // Tracks old state id -> new state id so a morph widget's blocks (below)
   // can rekey their perState overrides onto the states they actually get
   // cloned alongside, instead of pointing at ids that no longer exist.

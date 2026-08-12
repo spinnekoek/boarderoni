@@ -2,9 +2,22 @@ import type { EventfulWidget, SequenceStep, WidgetAction } from './types'
 import { EVENT_LABELS, eventKindsFor, getEventSteps } from './widgetEvents'
 
 function actionKindTitle(action: WidgetAction): string {
-  if (action.kind !== 'keypress') return action.kind === 'update-state' ? 'Update state' : 'Send DCS command'
-  const modeSuffix = action.mode && action.mode !== 'press' ? ` (${action.mode})` : ''
-  return action.keys.join(' + ') + modeSuffix
+  switch (action.kind) {
+    case 'keypress': {
+      const modeSuffix = action.mode && action.mode !== 'press' ? ` (${action.mode})` : ''
+      return action.keys.join(' + ') + modeSuffix
+    }
+    case 'update-state':
+      return 'Update state'
+    case 'send-dcs-command':
+      return 'Send DCS command'
+    case 'navigate-subdeck':
+      return 'Navigate to screen'
+    case 'open-overlay':
+      return 'Open overlay'
+    case 'close-overlay':
+      return 'Close overlay'
+  }
 }
 
 function stepTitle(step: SequenceStep): string {

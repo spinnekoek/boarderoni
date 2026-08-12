@@ -56,7 +56,66 @@ export interface SendDcsCommandAction {
   argumentExpr?: string
 }
 
-export type WidgetAction = KeypressAction | UpdateStateAction | SendDcsCommandAction
+// Which deck view an action targets: the deck's own main view (its root
+// `widgets`), or one specific sub-deck by id. A tiny discriminated union
+// rather than a bare nullable id string so "go back to the main deck" is a
+// real, self-documenting case instead of a magic null/empty-string
+// sentinel. Named distinctly from ScreenRegion/ScreenCaptureWidget's
+// "screen" (a physical monitor) — this is a deck-internal view, unrelated.
+export type SubDeckTarget = { type: 'main-deck' } | { type: 'sub-deck'; subDeckId: string }
+
+// Switches which deck view is fullscreen on the triggering client — same
+// visual effect as picking a different deck from the deck picker, but
+// instant (no socket reconnect) since a sub-deck lives in the same
+// Dashboard document (see SubDeck below). Client-local: two devices
+// connected to the same deck can be on two different views at once (see
+// runActionStep in main/index.ts, which replies to the triggering
+// WebSocket only, never broadcasts this). Implicitly closes any open
+// overlay (see OpenOverlayAction) — a fullscreen switch replaces the whole
+// view an overlay would have been layered on top of.
+export interface NavigateSubDeckAction {
+  kind: 'navigate-subdeck'
+  target: SubDeckTarget
+}
+
+export type OverlayEdge = 'top' | 'bottom' | 'left' | 'right'
+export type OverlaySizeUnit = 'px' | 'percent'
+
+// Slides a sub-deck in as a panel anchored to one edge of the screen,
+// layered over whatever's currently fullscreen — a lighter-weight
+// alternative to NavigateSubDeckAction for e.g. a settings/menu panel that
+// shouldn't replace the whole view. Always names a specific sub-deck
+// (unlike NavigateSubDeckAction.target, there's no 'main-deck' case here —
+// "slide the main deck in as a panel over itself" isn't a meaningful
+// action). Only one overlay open at a time on a given client; opening a
+// second one replaces whichever was already open, and the client also
+// supports dismissing it locally (tap outside, no server round trip) —
+// see CloseOverlayAction for the explicit, sequenceable alternative meant
+// for a close/back button placed inside the panel itself.
+export interface OpenOverlayAction {
+  kind: 'open-overlay'
+  subDeckId: string
+  edge: OverlayEdge
+  size: number
+  sizeUnit: OverlaySizeUnit
+}
+
+// Dismisses whichever overlay (if any) is currently open on the device
+// that triggers this — a no-op if none is open. Round-trips through the
+// server like every other action kind (rather than being intercepted
+// client-side) so it composes with delays/other steps in the same
+// sequence, same reasoning as NavigateSubDeckAction/OpenOverlayAction.
+export interface CloseOverlayAction {
+  kind: 'close-overlay'
+}
+
+export type WidgetAction =
+  | KeypressAction
+  | UpdateStateAction
+  | SendDcsCommandAction
+  | NavigateSubDeckAction
+  | OpenOverlayAction
+  | CloseOverlayAction
 
 // A pause between two steps in an event's sequence (see SequenceStep) —
 // not a field on the following action step, so it can be added/removed/
@@ -126,8 +185,17 @@ export interface WidgetLabel {
   // displayed text content, not its color.
   textColorExpr?: string
   textOpacity?: number
+  // Where this label's box sits within the widget it belongs to (or, for a
+  // detent-anchored label, within its own small wrapper — see labelAnchor
+  // below).
   align?: HorizontalAlign
   verticalAlign?: VerticalAlign
+  // How the text itself is set within that box — independent of `align`
+  // above, so e.g. a label box pinned to the right edge can still have its
+  // (possibly multi-line, via a ␤ token) text centered within itself rather
+  // than also hugging the right. Unset defaults to `align`, matching the
+  // single shared value this used to be before the two were split.
+  textAlign?: HorizontalAlign
   padding?: number
   // DialSwitchWidget only — where THIS label sits relative to its position's
   // detent dot. Unset (the default) places it radially outward along that
@@ -545,6 +613,11 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   y: number
   w: number
   h: number
+  // Labels anchored to the widget as a whole (e.g. a switch name/legend),
+  // independent of each position's own labels (SwitchPosition.labels) —
+  // same flat-list convention as Gauge/Adjuster/Encoder's own `labels`,
+  // rendered as absolutely-positioned overlays via renderWidgetLabels.
+  labels: WidgetLabel[]
   orientation?: 'horizontal' | 'vertical' // default 'vertical'
   // 'tap' (default): tap a zone (or its label) to select that position
   // directly. 'drag': press anywhere on the widget and drag toward the
@@ -612,6 +685,11 @@ export interface DialSwitchWidget extends SwitchWidgetBase {
   y: number
   w: number
   h: number
+  // Labels anchored to the widget as a whole (e.g. a switch name/legend),
+  // independent of each position's own labels (SwitchPosition.labels) —
+  // same flat-list convention as Gauge/Adjuster/Encoder's own `labels`,
+  // rendered as absolutely-positioned overlays via renderWidgetLabels.
+  labels: WidgetLabel[]
   startAngle?: number // degrees, default 135
   endAngle?: number // degrees, default 405
   // 'tap' (default): tap a detent directly to select it. 'drag': press
@@ -660,6 +738,15 @@ export interface DialSwitchWidget extends SwitchWidgetBase {
   circleBorderWidth?: number
   circleColor?: string
   circleBorderColor?: string
+  // 'circle' dialShape only — half-circle notches bitten into the knob's
+  // rim, evenly spaced starting at the active indicator angle (so they
+  // rotate along with it) rather than at a fixed angle. Unset/0 draws none.
+  circleIndentCount?: number
+  // Radius, in the same 0-100 viewBox units as circleSize, of each notch.
+  circleIndentSize?: number
+  // Defaults to the dial face/track color, so a notch reads as the face
+  // showing through a bite taken out of the knob rather than a flat dot.
+  circleIndentColor?: string
   // The small marker on the dial's own shape (square/circle dialShape only)
   // that shows the active angle — same shape/style vocabulary as the ring
   // detents above (see detentShape/detentStyle), just a second independent
@@ -670,6 +757,11 @@ export interface DialSwitchWidget extends SwitchWidgetBase {
   indicatorShape?: 'circle' | 'square' | 'tick' | 'triangle'
   indicatorStyle?: DetentStyle
   indicatorColor?: string
+  // Distance from the dial's center to the indicator marker, in the same
+  // 0-100 viewBox units as everything else here. Unset defaults to the
+  // shape's own edge (squareHeight/2 for 'square', circleSize/2 for
+  // 'circle') — where the marker sat before this became configurable.
+  indicatorDistance?: number
 }
 
 // A collapsed picker — CDU page selector, radio channel select. Normally
@@ -727,6 +819,64 @@ export interface DropdownWidget extends SwitchWidgetBase {
   borderOpacity?: number
 }
 
+// Absolute virtual-desktop pixel coordinates — the same coordinate space
+// Electron's own `display.bounds` uses, so a region picked on any monitor
+// (see displayId below) is captured correctly without needing to also
+// track "relative to which display's origin."
+export interface ScreenRegion {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+// A live view of a region of the desktop's own screen, streamed to every
+// connected client — passive, like GaugeWidget: nothing to trigger, so it's
+// never clickable on the view client. `region` is unset until "Pick
+// region" (see ScreenCaptureWidget's own properties-panel section) has
+// been used at least once; the widget renders a placeholder until then.
+export interface ScreenCaptureWidget {
+  id: string
+  type: 'screen-capture'
+  x: number
+  y: number
+  w: number
+  h: number
+  // Which physical display `region` was picked on (Electron's stable
+  // per-display Display.id) — drives the properties panel's monitor
+  // dropdown and re-scopes a later re-pick to the right screen. UI-only:
+  // capture itself only ever needs `region`, already in absolute
+  // virtual-desktop coordinates.
+  displayId?: number
+  region?: ScreenRegion
+  // 'poll' (default): the client re-fetches a fresh JPEG over plain HTTP
+  // on its own timer — simplest, stateless, one request per frame. 'mjpeg':
+  // a single persistent multipart/x-mixed-replace HTTP connection the
+  // server pushes frames into — smoother, and one capture loop serves
+  // every simultaneous viewer of this widget, but needs server-side
+  // connection lifecycle management. See main/screenCapture.ts.
+  streamMode?: 'poll' | 'mjpeg'
+  fps?: number // clamped server-side, default 5
+  quality?: number // JPEG quality 1-100, default 70
+  // Reuses Dashboard's own BackgroundFit vocabulary/UI for consistency —
+  // 'tile' isn't meaningful for a live feed and is treated as 'cover'.
+  fit?: BackgroundFit
+  // Cheap, always-on CSS filter() knobs — applied client-side, no capture-
+  // side cost regardless of value. Each defaults to 1 (no-op).
+  brightness?: number
+  contrast?: number
+  saturation?: number
+  // Opt-in: unlike the above, this is real per-frame CPU work on the
+  // capture side (routed through `sharp` instead of the default
+  // nativeImage JPEG encode — see main/screenCapture.ts), so it's off by
+  // default rather than always applied.
+  sharpen?: boolean
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+  zIndex?: number
+}
+
 export type Widget =
   | ButtonWidget
   | MorphButtonWidget
@@ -737,6 +887,7 @@ export type Widget =
   | DialSwitchWidget
   | ToggleSwitchWidget
   | DropdownWidget
+  | ScreenCaptureWidget
 
 // A plain draggable/resizable x/y/w/h rectangle in the editor (unlike
 // MorphButtonWidget's cellW/cellH+blocks shape) — shared prop type for
@@ -750,6 +901,7 @@ export type BoxWidget =
   | DialSwitchWidget
   | ToggleSwitchWidget
   | DropdownWidget
+  | ScreenCaptureWidget
 
 // Widgets driven by the WidgetState/statesEnabled/activeStateExpr machinery
 // — used to narrow getEffectiveStates now that Widget includes types
@@ -844,6 +996,23 @@ export interface EventSource {
   config?: Record<string, unknown>
 }
 
+// One additional, nameable view within a deck — its own widgets, same
+// shape/behavior as the deck's own root view, reachable via
+// NavigateSubDeckAction/OpenOverlayAction. Deliberately one level deep
+// only: a SubDeck has no subDecks of its own, so SubDeckTarget/
+// OpenOverlayAction's subDeckId can never point at anything but 'main-deck'
+// or one of Dashboard.subDecks's own entries. Shares the parent deck's
+// background/variables/eventSources — only the widget list differs per
+// view. Widget ids stay globally unique across the whole Dashboard (every
+// widget everywhere is minted from the same nextId()/randomUUID() pool),
+// so a widget can be found by id without knowing which view owns it — see
+// findWidgetAnywhere in shared/subDecks.ts.
+export interface SubDeck {
+  id: string
+  name: string
+  widgets: Widget[]
+}
+
 export interface Dashboard {
   id: string
   name: string
@@ -871,6 +1040,11 @@ export interface Dashboard {
   // main/index.ts).
   eventSources?: EventSource[]
   widgets: Widget[]
+  // Same optional-for-old-dashboards treatment as `variables`/`eventSources`
+  // above — normalized to [] once at load time (see loadDeckDashboard in
+  // main/index.ts). See SubDeck's own comment for the one-level-deep and
+  // shared-background/variables/eventSources rules.
+  subDecks?: SubDeck[]
 }
 
 export interface DeviceInfo {
@@ -957,6 +1131,16 @@ export type ClientToServer =
   | { type: 'dcsbios:send-command'; identifier: string; argument: string }
   | { type: 'app-settings:get' }
   | { type: 'app-settings:update'; enabledDataSources: string[] }
+  | { type: 'screen-capture:list-displays' }
+  // Opens a native full-screen overlay (see main/screenCapture.ts) on the
+  // chosen display for a drag-to-select rectangle. Unlike
+  // dcsbios:pick-docs-folder, there's no matching reply type here — the
+  // picked region is written straight into the widget's own fields on
+  // room.dashboard.widgets server-side and delivered via the normal
+  // dashboard:sync broadcast, the same way background-image:upload's
+  // result reaches every client through backgroundImageVersion rather
+  // than a dedicated reply.
+  | { type: 'screen-capture:pick-region'; widgetId: string; displayId: number }
 
 export type ServerToClient =
   | { type: 'dashboard:sync'; dashboard: Dashboard }
@@ -1007,6 +1191,17 @@ export type ServerToClient =
   | { type: 'dcsbios:command-catalog-error'; aircraft: string; message: string }
   | { type: 'dcsbios:send-command-result'; ok: boolean; error?: string }
   | { type: 'app-settings:settings'; enabledDataSources: string[] }
+  | { type: 'screen-capture:displays'; displays: { id: number; label: string; bounds: ScreenRegion }[] }
+  // Targeted at the ONE socket that triggered the navigate-subdeck action,
+  // never broadcast — which deck view is "current" is per-client UI state,
+  // not shared dashboard state (see NavigateSubDeckAction's own comment).
+  // Two clients on the same deck can be on two different views at once.
+  | { type: 'subdeck:navigate'; target: SubDeckTarget }
+  // Same per-socket-only targeting as subdeck:navigate. subDeckId always
+  // names a sub-deck (see OpenOverlayAction's own comment for why
+  // 'main-deck' doesn't apply here).
+  | { type: 'subdeck:open-overlay'; subDeckId: string; edge: OverlayEdge; size: number; sizeUnit: OverlaySizeUnit }
+  | { type: 'subdeck:close-overlay' }
 
 export const DEFAULT_DASHBOARD: Dashboard = {
   id: 'default',
@@ -1016,5 +1211,6 @@ export const DEFAULT_DASHBOARD: Dashboard = {
   backgroundAnchor: 'center',
   variables: [],
   eventSources: [],
-  widgets: []
+  widgets: [],
+  subDecks: []
 }

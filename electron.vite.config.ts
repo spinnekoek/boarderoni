@@ -41,7 +41,20 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        // regionPicker is a second, independently-loadable preload — the
+        // screen-region picker overlay (src/main/screenCapture.ts) is its
+        // own ephemeral, non-deck-aware window with its own tiny
+        // contextBridge surface, not the main app's, so it gets its own
+        // preload bundle rather than growing index.ts's.
+        input: {
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          regionPicker: resolve(__dirname, 'src/preload/regionPicker.ts')
+        }
+      }
+    }
   },
   renderer: {
     root: 'src/renderer',

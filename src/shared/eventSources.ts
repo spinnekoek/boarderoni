@@ -34,6 +34,7 @@ export const EVENT_SOURCE_TYPES: EventSourceTypeMeta[] = [
       { key: 'hour12', label: 'Hour (12h)' },
       { key: 'minute', label: 'Minute' },
       { key: 'second', label: 'Second' },
+      { key: 'secondHalf', label: 'Second + half (e.g. 12.5)' },
       { key: 'ampm', label: 'AM/PM' },
       { key: 'dayOfWeek', label: 'Day of week (number, 0=Sunday)' },
       { key: 'dayOfWeekName', label: 'Day of week (name)' },

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useDashboardStore } from '../store'
 import { useConfirmStore } from '../confirmStore'
 import { useClipboardStore } from '../clipboardStore'
+import { getSubDeckWidgets } from '@shared/subDecks'
 
 // widgetIds is null for a right-click on empty canvas (paste-only); set for
 // a right-click on a widget, in which case it's whatever's selected at open
@@ -18,6 +19,7 @@ export function ContextMenu({
   onClose: () => void
 }): React.JSX.Element {
   const dashboard = useDashboardStore((s) => s.dashboard)
+  const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
   const bringToFront = useDashboardStore((s) => s.bringToFront)
   const sendToBack = useDashboardStore((s) => s.sendToBack)
   const removeWidgets = useDashboardStore((s) => s.removeWidgets)
@@ -69,7 +71,7 @@ export function ContextMenu({
   function handleCopy(): void {
     if (!widgetIds) return
     const idSet = new Set(widgetIds)
-    copy(dashboard.widgets.filter((w) => idSet.has(w.id)))
+    copy(getSubDeckWidgets(dashboard, editingSubDeckId).filter((w) => idSet.has(w.id)))
     onClose()
   }
 

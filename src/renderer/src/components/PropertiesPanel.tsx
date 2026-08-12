@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useConfirmStore } from '../confirmStore'
-import { nextId } from '../id'
+import { nextId, isSectionOpen, setSectionOpen } from '../id'
 import { FONT_OPTIONS, resolveFont } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, pickAutoBorderColor, pickLegibleTextColor } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
 import { deriveClickedState } from '@shared/states'
 import { blockMerge, type BlockMerge } from '@shared/morph'
 import { toVariableMap, tryEvaluateExpression } from '@shared/expr'
+import { getSubDeckWidgets } from '@shared/subDecks'
 import { ANCHOR_OPTIONS } from '../background'
 import { KeyCapture } from './KeyCapture'
 import { ColorPickerButton } from './ColorPickerButton'
@@ -31,10 +32,15 @@ import type {
   KeypressAction,
   MorphBlock,
   MorphBlockStateOverride,
+  NavigateSubDeckAction,
+  OpenOverlayAction,
+  OverlayEdge,
   RockerSwitchWidget,
+  ScreenCaptureWidget,
   SendDcsCommandAction,
   SequenceStep,
   StatefulWidget,
+  SubDeck,
   SwitchPosition,
   ToggleSwitchWidget,
   VerticalAlign,
@@ -62,7 +68,8 @@ const WIDGET_TYPE_LABELS: Record<Widget['type'], string> = {
   'switch-rocker': 'Rocker switch',
   'switch-dial': 'Dial switch',
   'switch-toggle': 'Toggle switch',
-  dropdown: 'Dropdown'
+  dropdown: 'Dropdown',
+  'screen-capture': 'Screen capture'
 }
 
 // One 3x3 grid replaces the old separate horizontal/vertical button rows —
@@ -113,16 +120,30 @@ interface SideFieldProps {
 function PropertiesSection({
   title,
   badge,
-  open,
+  sectionKey,
   children
 }: {
   title: string
   badge?: number
-  open: boolean
+  // Persistence key for remembering this section's open/closed state (see
+  // id.ts's isSectionOpen/setSectionOpen) — defaults to `title`. Per-label
+  // sections pass the label's own id instead: several labels can share the
+  // same title ("Untitled label") but shouldn't share open state.
+  sectionKey?: string
   children: React.ReactNode
 }): React.JSX.Element {
+  const key = sectionKey ?? title
+  const [open, setOpen] = useState(() => isSectionOpen(key))
   return (
-    <details className="properties-section" open={open}>
+    <details
+      className="properties-section"
+      open={open}
+      onToggle={(e) => {
+        const next = e.currentTarget.open
+        setOpen(next)
+        setSectionOpen(key, next)
+      }}
+    >
       <summary>
         {title}
         {badge ? ` (${badge})` : ''}
@@ -363,12 +384,7 @@ function LabelFields({
 
       <label className="properties__field">
         <span>Padding</span>
-        <input
-          type="number"
-          min={0}
-          value={label.padding ?? DEFAULT_WIDGET_PADDING}
-          onChange={(e) => onChange({ padding: Math.max(0, Number(e.target.value)) })}
-        />
+        <input type="number" value={label.padding ?? DEFAULT_WIDGET_PADDING} onChange={(e) => onChange({ padding: Number(e.target.value) })} />
       </label>
 
       <div className="properties__field">
@@ -413,6 +429,23 @@ function LabelFields({
           })}
         </div>
       </label>
+
+      <label className="properties__field">
+        <span>Text align</span>
+        <select
+          value={label.textAlign ?? ''}
+          onChange={(e) => onChange({ textAlign: e.target.value === '' ? undefined : (e.target.value as HorizontalAlign) })}
+        >
+          <option value="">Same as align</option>
+          <option value="left">Left</option>
+          <option value="center">Center</option>
+          <option value="right">Right</option>
+        </select>
+      </label>
+      <p className="properties__hint">
+        How the text itself sits within its label box, independent of where that box is placed by Align above — e.g. a box pinned to
+        the right can still have its own (possibly multi-line) text centered.
+      </p>
 
       {showAnchor && (
         <>
@@ -571,6 +604,12 @@ function ActionFields({
   onChange: (action: WidgetAction) => void
   dcsBiosActionEnabled: boolean
 }): React.JSX.Element {
+  // Own selector rather than a threaded prop — ActionFields is nested
+  // several components deep (SequenceStepFields/EventSequenceEditor/every
+  // widget's own properties section), so a prop would need plumbing
+  // through all of them just for this one default/picker.
+  const subDecks = useDashboardStore((s) => s.dashboard.subDecks) ?? []
+
   return (
     <>
       <label className="properties__field">
@@ -581,12 +620,19 @@ function ActionFields({
             const kind = e.target.value
             if (kind === 'keypress') onChange({ kind: 'keypress', keys: [] })
             else if (kind === 'update-state') onChange({ kind: 'update-state', code: '' })
-            else onChange({ kind: 'send-dcs-command', aircraft: '', identifier: '', interface: 'action', argument: '' })
+            else if (kind === 'send-dcs-command') onChange({ kind: 'send-dcs-command', aircraft: '', identifier: '', interface: 'action', argument: '' })
+            else if (kind === 'navigate-subdeck') onChange({ kind: 'navigate-subdeck', target: { type: 'main-deck' } })
+            else if (kind === 'open-overlay')
+              onChange({ kind: 'open-overlay', subDeckId: subDecks[0]?.id ?? '', edge: 'right', size: 320, sizeUnit: 'px' })
+            else onChange({ kind: 'close-overlay' })
           }}
         >
           <option value="keypress">Keypress</option>
           <option value="update-state">Update state</option>
           {(dcsBiosActionEnabled || action.kind === 'send-dcs-command') && <option value="send-dcs-command">Send DCS command</option>}
+          <option value="navigate-subdeck">Navigate to screen</option>
+          <option value="open-overlay">Open overlay</option>
+          <option value="close-overlay">Close overlay</option>
         </select>
       </label>
 
@@ -643,8 +689,20 @@ function ActionFields({
             <code>{'{ name: newValue }'}</code> pairs to update them (unknown names get created).
           </p>
         </>
+      ) : action.kind === 'navigate-subdeck' ? (
+        <NavigateSubDeckActionEditor
+          action={action}
+          subDecks={subDecks}
+          onPatch={(fields) => onChange({ ...action, ...fields })}
+        />
+      ) : action.kind === 'open-overlay' ? (
+        <OpenOverlayActionEditor action={action} subDecks={subDecks} onPatch={(fields) => onChange({ ...action, ...fields })} />
+      ) : action.kind === 'close-overlay' ? (
+        <p className="properties__hint">
+          Closes whichever slide-over panel is currently open on the device that triggers this. No effect if none is open.
+        </p>
       ) : (
-        // Narrowed by the two kind checks above, but TS doesn't retain that
+        // Narrowed by every kind check above, but TS doesn't retain that
         // narrowing inside the onChange closure below (a callback could in
         // principle run after `action` changes) — the cast reflects what's
         // already true at this point in the ternary, not a real unsafe leap.
@@ -743,7 +801,7 @@ function EventSequenceEditor({
   }
 
   return (
-    <PropertiesSection title={title} badge={steps.length} open={steps.length > 0}>
+    <PropertiesSection title={title} badge={steps.length}>
       {steps.length === 0 && <p className="properties__hint">No actions on this event.</p>}
       {steps.map((step, index) => (
         <div
@@ -1009,6 +1067,95 @@ function groupCommandsByCategory(entries: DcsBiosCommandCatalogEntry[]): { categ
 // immediately, using this editor's own live dashboard.variables for
 // argumentExpr — useful for confirming a command actually does what's
 // expected before wiring it to a real button click.
+const OVERLAY_EDGE_OPTIONS: { value: OverlayEdge; label: string }[] = [
+  { value: 'top', label: 'Top' },
+  { value: 'bottom', label: 'Bottom' },
+  { value: 'left', label: 'Left' },
+  { value: 'right', label: 'Right' }
+]
+
+function NavigateSubDeckActionEditor({
+  action,
+  subDecks,
+  onPatch
+}: {
+  action: NavigateSubDeckAction
+  subDecks: SubDeck[]
+  onPatch: (fields: Partial<NavigateSubDeckAction>) => void
+}): React.JSX.Element {
+  return (
+    <label className="properties__field">
+      <span>Target screen</span>
+      <select
+        value={action.target.type === 'sub-deck' ? action.target.subDeckId : ''}
+        onChange={(e) => onPatch({ target: e.target.value ? { type: 'sub-deck', subDeckId: e.target.value } : { type: 'main-deck' } })}
+      >
+        <option value="">Main deck</option>
+        {subDecks.map((sd) => (
+          <option key={sd.id} value={sd.id}>
+            {sd.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+function OpenOverlayActionEditor({
+  action,
+  subDecks,
+  onPatch
+}: {
+  action: OpenOverlayAction
+  subDecks: SubDeck[]
+  onPatch: (fields: Partial<OpenOverlayAction>) => void
+}): React.JSX.Element {
+  return (
+    <>
+      <label className="properties__field">
+        <span>Target screen</span>
+        {subDecks.length === 0 ? (
+          <span className="properties__hint-inline">No screens yet — add one from the toolbar's Screens button first.</span>
+        ) : (
+          <select value={action.subDeckId} onChange={(e) => onPatch({ subDeckId: e.target.value })}>
+            {subDecks.map((sd) => (
+              <option key={sd.id} value={sd.id}>
+                {sd.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </label>
+
+      <label className="properties__field">
+        <span>Anchor edge</span>
+        <select value={action.edge} onChange={(e) => onPatch({ edge: e.target.value as OverlayEdge })}>
+          {OVERLAY_EDGE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="properties__field">
+        <span>Size</span>
+        <div className="properties__file-row">
+          <input type="number" min={1} value={action.size} onChange={(e) => onPatch({ size: Number(e.target.value) })} />
+          <button
+            type="button"
+            className="unit-toggle"
+            title="Toggle between pixels and percent of screen"
+            onClick={() => onPatch({ sizeUnit: action.sizeUnit === 'px' ? 'percent' : 'px' })}
+          >
+            {action.sizeUnit === 'px' ? 'px' : '%'}
+          </button>
+        </div>
+      </label>
+    </>
+  )
+}
+
 function SendDcsCommandActionEditor({
   action,
   onPatch
@@ -1348,7 +1495,7 @@ function SwitchPositionsEditor({
 
   return (
     <>
-      <PropertiesSection title="Positions" badge={positions.length} open>
+      <PropertiesSection title="Positions" badge={positions.length}>
         <p className="properties__hint">
           Each position is directly selectable (tap a segment/detent on the deployed switch) and fires its own action — see "Actions"
           below. Which one LOOKS active is normally just whichever this device last tapped; set "Active position" below to derive it
@@ -1498,7 +1645,7 @@ function SwitchPositionsEditor({
 
         <span className="properties__section-label">Labels</span>
         {activePosition.labels.map((label) => (
-          <PropertiesSection key={label.id} title={labelSectionTitle(label)} open={false}>
+          <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
             <LabelFields
               label={label}
               backgroundColor={activePosition.color ?? DEFAULT_WIDGET_COLOR}
@@ -1513,7 +1660,7 @@ function SwitchPositionsEditor({
         </button>
       </PropertiesSection>
 
-      <PropertiesSection title="Actions" badge={positions.length} open>
+      <PropertiesSection title="Actions" badge={positions.length}>
         <p className="properties__hint">
           Every position's own sequence — each runs once, server-side, whenever that position is tapped. Editing here is independent
           of which position tab is selected above for color/label editing.
@@ -1534,7 +1681,8 @@ function SwitchPositionsEditor({
 
 export function PropertiesPanel(): React.JSX.Element {
   const dashboard = useDashboardStore((s) => s.dashboard)
-  const widgets = dashboard.widgets
+  const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
+  const widgets = getSubDeckWidgets(dashboard, editingSubDeckId)
   const selectedWidgetIds = useDashboardStore((s) => s.selectedWidgetIds)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
   const updateDashboardMeta = useDashboardStore((s) => s.updateDashboardMeta)
@@ -1561,6 +1709,26 @@ export function PropertiesPanel(): React.JSX.Element {
     if (enabledDataSources === null) requestAppSettings()
   }, [enabledDataSources, requestAppSettings])
   const dcsBiosActionEnabled = enabledDataSources === null || enabledDataSources.includes('dcsbios')
+
+  // Same "fetch once if null" shape as enabledDataSources above, for
+  // ScreenCaptureWidget's monitor dropdown — plus `connected` in the deps:
+  // this component mounts (and this effect first fires) the instant a deck
+  // id is set, which is synchronous and happens before the WebSocket's own
+  // 'open' event — send() silently no-ops on a not-yet-open socket with no
+  // retry of its own, so without `connected` here the very first request
+  // routinely got dropped on the floor, leaving the dropdown empty forever.
+  const connected = useDashboardStore((s) => s.connected)
+  const screenCaptureDisplays = useDashboardStore((s) => s.screenCaptureDisplays)
+  const requestScreenCaptureDisplays = useDashboardStore((s) => s.requestScreenCaptureDisplays)
+  const pickScreenCaptureRegion = useDashboardStore((s) => s.pickScreenCaptureRegion)
+  useEffect(() => {
+    if (screenCaptureDisplays === null && connected) requestScreenCaptureDisplays()
+  }, [screenCaptureDisplays, connected, requestScreenCaptureDisplays])
+  // Which monitor "Pick region" targets next — local UI state, not saved
+  // onto the widget until a region is actually picked (see the
+  // screen-capture branch below), so changing this alone never leaves a
+  // saved region mismatched against a different displayId.
+  const [pickerDisplayId, setPickerDisplayId] = useState<number | null>(null)
 
   const propertiesWidth = useEditorSettings((s) => s.propertiesWidth)
   const setPropertiesWidth = useEditorSettings((s) => s.setPropertiesWidth)
@@ -1677,7 +1845,7 @@ export function PropertiesPanel(): React.JSX.Element {
 
         <div className="properties__divider" />
 
-        <PropertiesSection title="Background image" open={false}>
+        <PropertiesSection title="Background image">
           <label className="properties__field">
             <span>Image</span>
             <div className="properties__file-row">
@@ -1782,7 +1950,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </div>
 
-        <PropertiesSection title="Style & Value" open>
+        <PropertiesSection title="Style & Value">
           <label className="properties__field">
             <span>Style</span>
             <select value={gauge.style} onChange={(e) => patchGauge({ style: e.target.value as GaugeWidget['style'] })}>
@@ -1839,7 +2007,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Colors" open>
+        <PropertiesSection title="Colors">
           <div className="properties__field">
             <span>Fill color</span>
             <ColorPickerButton
@@ -1888,7 +2056,7 @@ export function PropertiesPanel(): React.JSX.Element {
           )}
         </PropertiesSection>
 
-        <PropertiesSection title="Border shape" open={false}>
+        <PropertiesSection title="Border shape">
           {gauge.style === 'bar' ? (
             <>
               <span className="properties__section-label">Border radius</span>
@@ -1914,9 +2082,9 @@ export function PropertiesPanel(): React.JSX.Element {
           )}
         </PropertiesSection>
 
-        <PropertiesSection title="Labels" badge={gauge.labels.length} open>
+        <PropertiesSection title="Labels" badge={gauge.labels.length}>
           {gauge.labels.map((label) => (
-            <PropertiesSection key={label.id} title={labelSectionTitle(label)} open={false}>
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
               <LabelFields
                 label={label}
                 backgroundColor={gauge.track.color ?? DEFAULT_WIDGET_COLOR}
@@ -1930,7 +2098,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </PropertiesSection>
 
-        <PropertiesSection title="Position & Size" open={false}>
+        <PropertiesSection title="Position & Size">
           <div className="properties__grid2">
             <label className="properties__field">
               <span>X</span>
@@ -2012,7 +2180,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </div>
 
-        <PropertiesSection title="Style & Value" open>
+        <PropertiesSection title="Style & Value">
           <label className="properties__field">
             <span>Style</span>
             <select value={adjuster.style} onChange={(e) => patchAdjuster({ style: e.target.value as AdjusterWidget['style'] })}>
@@ -2068,7 +2236,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Colors" open>
+        <PropertiesSection title="Colors">
           <div className="properties__field">
             <span>Fill color</span>
             <ColorPickerButton
@@ -2117,7 +2285,7 @@ export function PropertiesPanel(): React.JSX.Element {
           )}
         </PropertiesSection>
 
-        <PropertiesSection title="Border shape" open={false}>
+        <PropertiesSection title="Border shape">
           {adjuster.style === 'slider' ? (
             <>
               <span className="properties__section-label">Border radius</span>
@@ -2143,7 +2311,7 @@ export function PropertiesPanel(): React.JSX.Element {
           )}
         </PropertiesSection>
 
-        <PropertiesSection title="Actions" badge={3} open>
+        <PropertiesSection title="Actions" badge={3}>
           <EventSequenceEditor
             title="Press"
             steps={adjuster.events.press}
@@ -2169,9 +2337,9 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Labels" badge={adjuster.labels.length} open>
+        <PropertiesSection title="Labels" badge={adjuster.labels.length}>
           {adjuster.labels.map((label) => (
-            <PropertiesSection key={label.id} title={labelSectionTitle(label)} open={false}>
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
               <LabelFields
                 label={label}
                 backgroundColor={adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
@@ -2185,7 +2353,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </PropertiesSection>
 
-        <PropertiesSection title="Position & Size" open={false}>
+        <PropertiesSection title="Position & Size">
           <div className="properties__grid2">
             <label className="properties__field">
               <span>X</span>
@@ -2267,7 +2435,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </div>
 
-        <PropertiesSection title="Step" open>
+        <PropertiesSection title="Step">
           <label className="properties__field">
             <span>Degrees per step</span>
             <input
@@ -2298,7 +2466,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Colors" open>
+        <PropertiesSection title="Colors">
           <div className="properties__field">
             <span>Grip color</span>
             <ColorPickerButton
@@ -2345,7 +2513,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </div>
         </PropertiesSection>
 
-        <PropertiesSection title="Actions" badge={4} open>
+        <PropertiesSection title="Actions" badge={4}>
           <EventSequenceEditor
             title="Press"
             steps={encoder.events.press}
@@ -2376,9 +2544,9 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Labels" badge={encoder.labels.length} open>
+        <PropertiesSection title="Labels" badge={encoder.labels.length}>
           {encoder.labels.map((label) => (
-            <PropertiesSection key={label.id} title={labelSectionTitle(label)} open={false}>
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
               <LabelFields
                 label={label}
                 backgroundColor={encoder.track.color ?? DEFAULT_WIDGET_COLOR}
@@ -2392,7 +2560,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </PropertiesSection>
 
-        <PropertiesSection title="Position & Size" open={false}>
+        <PropertiesSection title="Position & Size">
           <div className="properties__grid2">
             <label className="properties__field">
               <span>X</span>
@@ -2467,7 +2635,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </div>
 
-        <PropertiesSection title="Style" open>
+        <PropertiesSection title="Style">
           <label className="properties__field">
             <span>Orientation</span>
             <select value={sw.orientation ?? 'vertical'} onChange={(e) => patchSwitch({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
@@ -2477,7 +2645,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </label>
         </PropertiesSection>
 
-        <PropertiesSection title="Colors" open>
+        <PropertiesSection title="Colors">
           <div className="properties__field">
             <span>Base color</span>
             <ColorPickerButton
@@ -2544,7 +2712,7 @@ export function PropertiesPanel(): React.JSX.Element {
           confirm={confirm}
         />
 
-        <PropertiesSection title="Advanced" open={false}>
+        <PropertiesSection title="Advanced">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -2593,6 +2761,19 @@ export function PropertiesPanel(): React.JSX.Element {
       updateWidgets(widgets.map((w) => (w.id === sw.id ? ({ ...w, ...fields } as Widget) : w)))
     }
 
+    function patchSwitchLabel(labelId: string, fields: Partial<WidgetLabel>): void {
+      patchSwitch({ labels: sw.labels.map((l) => (l.id === labelId ? { ...l, ...fields } : l)) })
+    }
+
+    function addSwitchLabel(): void {
+      patchSwitch({ labels: [...sw.labels, { id: nextId(), text: 'New Label', align: 'center', verticalAlign: 'center' }] })
+    }
+
+    async function confirmRemoveSwitchLabel(labelId: string): Promise<void> {
+      const ok = await confirm('Remove this label? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchSwitch({ labels: sw.labels.filter((l) => l.id !== labelId) })
+    }
+
     async function handleDeleteSwitch(): Promise<void> {
       const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
       if (ok) {
@@ -2616,7 +2797,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </div>
 
-        <PropertiesSection title="Style" open>
+        <PropertiesSection title="Style">
           <label className="properties__field">
             <span>Orientation</span>
             <select value={sw.orientation ?? 'vertical'} onChange={(e) => patchSwitch({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
@@ -2653,7 +2834,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </PropertiesSection>
 
         {sw.positions.length === 3 && (
-          <PropertiesSection title="Momentary" open>
+          <PropertiesSection title="Momentary">
             <p className="properties__hint">
               A momentary Top/Bottom position only stays selected while pressed (or dragged onto, in drag mode) — release it and it
               springs back to Middle, firing Middle's own action too.
@@ -2676,7 +2857,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </PropertiesSection>
         )}
 
-        <PropertiesSection title="Colors" open>
+        <PropertiesSection title="Colors">
           <div className="properties__field">
             <span>Base color</span>
             <ColorPickerButton
@@ -2723,7 +2904,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </div>
         </PropertiesSection>
 
-        <PropertiesSection title="Lever" open={false}>
+        <PropertiesSection title="Lever">
           <label className="properties__field">
             <span>Lever length</span>
             <input
@@ -2752,7 +2933,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </PropertiesSection>
 
         {sw.positions.length === 3 && (
-          <PropertiesSection title="Circle (middle position)" open={false}>
+          <PropertiesSection title="Circle (middle position)">
             <label className="properties__field">
               <span>Circle size</span>
               <input
@@ -2812,7 +2993,24 @@ export function PropertiesPanel(): React.JSX.Element {
           maxPositions={3}
         />
 
-        <PropertiesSection title="Advanced" open={false}>
+        <PropertiesSection title="Labels" badge={sw.labels.length}>
+          <p className="properties__hint">Anchored to the widget as a whole, independent of each position's own labels above.</p>
+          {sw.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+              <LabelFields
+                label={label}
+                backgroundColor={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchSwitchLabel(label.id, fields)}
+                onRemove={() => confirmRemoveSwitchLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addSwitchLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
+
+        <PropertiesSection title="Advanced">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -2859,6 +3057,19 @@ export function PropertiesPanel(): React.JSX.Element {
       updateWidgets(widgets.map((w) => (w.id === sw.id ? ({ ...w, ...fields } as Widget) : w)))
     }
 
+    function patchSwitchLabel(labelId: string, fields: Partial<WidgetLabel>): void {
+      patchSwitch({ labels: sw.labels.map((l) => (l.id === labelId ? { ...l, ...fields } : l)) })
+    }
+
+    function addSwitchLabel(): void {
+      patchSwitch({ labels: [...sw.labels, { id: nextId(), text: 'New Label', align: 'center', verticalAlign: 'center' }] })
+    }
+
+    async function confirmRemoveSwitchLabel(labelId: string): Promise<void> {
+      const ok = await confirm('Remove this label? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchSwitch({ labels: sw.labels.filter((l) => l.id !== labelId) })
+    }
+
     async function handleDeleteSwitch(): Promise<void> {
       const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
       if (ok) {
@@ -2882,7 +3093,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </div>
 
-        <PropertiesSection title="Style" open>
+        <PropertiesSection title="Style">
           <div className="properties__grid2">
             <label className="properties__field">
               <span>Start angle</span>
@@ -2894,7 +3105,7 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
           </div>
 
-          <PropertiesSection title="Detents" open>
+          <PropertiesSection title="Detents">
             <DetentShapeEditor
               shape={sw.detentShape ?? 'circle'}
               onShapeChange={(shape) => patchSwitch({ detentShape: shape === 'circle' ? undefined : shape })}
@@ -2912,7 +3123,7 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
           </PropertiesSection>
 
-          <PropertiesSection title="Dial shape" open>
+          <PropertiesSection title="Dial shape">
             <label className="properties__field">
               <span>Shape</span>
               <select
@@ -3041,12 +3252,41 @@ export function PropertiesPanel(): React.JSX.Element {
                     onChange={(color) => patchSwitch({ circleBorderColor: color })}
                   />
                 </div>
+                <div className="properties__grid2">
+                  <label className="properties__field">
+                    <span>Indent count</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={sw.circleIndentCount ?? 0}
+                      onChange={(e) => patchSwitch({ circleIndentCount: Math.max(0, Number(e.target.value)) })}
+                    />
+                  </label>
+                  <label className="properties__field">
+                    <span>Indent size</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={sw.circleIndentSize ?? Math.round(((sw.circleSize ?? 20) / 6) * 10) / 10}
+                      onChange={(e) => patchSwitch({ circleIndentSize: Math.max(0, Number(e.target.value)) })}
+                    />
+                  </label>
+                </div>
+                <div className="properties__field">
+                  <span>Indent color</span>
+                  <ColorPickerButton
+                    value={sw.circleIndentColor ?? sw.track.color ?? DEFAULT_WIDGET_COLOR}
+                    onChange={(color) => patchSwitch({ circleIndentColor: color })}
+                    auto={sw.circleIndentColor === undefined}
+                    onAuto={() => patchSwitch({ circleIndentColor: undefined })}
+                  />
+                </div>
               </>
             )}
           </PropertiesSection>
 
           {(sw.dialShape === 'square' || sw.dialShape === 'circle') && (
-            <PropertiesSection title="Indicator" open>
+            <PropertiesSection title="Indicator">
               <DetentShapeEditor
                 shape={sw.indicatorShape ?? 'circle'}
                 onShapeChange={(shape) => patchSwitch({ indicatorShape: shape === 'circle' ? undefined : shape })}
@@ -3059,13 +3299,22 @@ export function PropertiesPanel(): React.JSX.Element {
                 <ColorPickerButton
                   value={
                     sw.indicatorColor ??
-                    pickAutoActiveColor((sw.dialShape === 'square' ? sw.squareColor : sw.circleColor) ?? sw.fill.color ?? DEFAULT_WIDGET_COLOR)
+                    ((sw.dialShape === 'square' ? sw.squareColor : sw.circleColor) ?? sw.fill.color ?? DEFAULT_WIDGET_COLOR)
                   }
                   onChange={(color) => patchSwitch({ indicatorColor: color })}
                   auto={sw.indicatorColor === undefined}
                   onAuto={() => patchSwitch({ indicatorColor: undefined })}
                 />
               </div>
+              <label className="properties__field">
+                <span>Indicator distance</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={sw.indicatorDistance ?? (sw.dialShape === 'square' ? (sw.squareHeight ?? 24) / 2 : (sw.circleSize ?? 20) / 2)}
+                  onChange={(e) => patchSwitch({ indicatorDistance: Math.max(0, Number(e.target.value)) })}
+                />
+              </label>
             </PropertiesSection>
           )}
 
@@ -3086,7 +3335,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Colors" open>
+        <PropertiesSection title="Colors">
           <div className="properties__field">
             <span>Dial face color</span>
             <ColorPickerButton
@@ -3133,7 +3382,24 @@ export function PropertiesPanel(): React.JSX.Element {
           showLabelAnchor
         />
 
-        <PropertiesSection title="Advanced" open={false}>
+        <PropertiesSection title="Labels" badge={sw.labels.length}>
+          <p className="properties__hint">Anchored to the widget as a whole, independent of each position's own labels above.</p>
+          {sw.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+              <LabelFields
+                label={label}
+                backgroundColor={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchSwitchLabel(label.id, fields)}
+                onRemove={() => confirmRemoveSwitchLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addSwitchLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
+
+        <PropertiesSection title="Advanced">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -3202,7 +3468,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </div>
 
-        <PropertiesSection title="Style" open>
+        <PropertiesSection title="Style">
           <label className="properties__field">
             <span>Expand mode</span>
             <select
@@ -3230,7 +3496,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </label>
         </PropertiesSection>
 
-        <PropertiesSection title="Colors" open>
+        <PropertiesSection title="Colors">
           <div className="properties__field">
             <span>Base color</span>
             <ColorPickerButton
@@ -3282,7 +3548,7 @@ export function PropertiesPanel(): React.JSX.Element {
           />
         </PropertiesSection>
 
-        <PropertiesSection title="Actions" badge={2} open>
+        <PropertiesSection title="Actions" badge={2}>
           <EventSequenceEditor
             title="Press"
             steps={dd.events.press}
@@ -3316,7 +3582,7 @@ export function PropertiesPanel(): React.JSX.Element {
           confirm={confirm}
         />
 
-        <PropertiesSection title="Advanced" open={false}>
+        <PropertiesSection title="Advanced">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -3352,9 +3618,204 @@ export function PropertiesPanel(): React.JSX.Element {
     )
   }
 
-  // Only reached once gauge/adjuster/encoder/switch/dropdown have returned
-  // early above, so widget is known to be a ButtonWidget | MorphButtonWidget
-  // here —
+  if (widget.type === 'screen-capture') {
+    const sc = widget
+    const minSize = snapToGrid ? gridSize : 1
+    const isBorderExpr = sc.borderColorExpr !== undefined
+    // "Pick region" targets whichever monitor the dropdown currently shows
+    // — the local override if the user's touched it this session, else the
+    // widget's last-picked display, else just the first one available.
+    const effectiveDisplayId = pickerDisplayId ?? sc.displayId ?? screenCaptureDisplays?.[0]?.id
+    const regionSummary = sc.region
+      ? `${Math.round(sc.region.width)}×${Math.round(sc.region.height)} at (${Math.round(sc.region.x)}, ${Math.round(sc.region.y)})`
+      : 'No region selected'
+
+    function patchScreenCapture(fields: Partial<ScreenCaptureWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === sc.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    async function handleDeleteScreenCapture(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(sc.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <h2 className="properties__title">Properties</h2>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sc.type]}</p>
+
+        <div className="properties__layer-row">
+          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
+            <span aria-hidden="true">⬆</span> Bring to front
+          </button>
+          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
+            <span aria-hidden="true">⬇</span> Send to back
+          </button>
+        </div>
+
+        <PropertiesSection title="Region">
+          <label className="properties__field">
+            <span>Monitor</span>
+            <select value={effectiveDisplayId ?? ''} onChange={(e) => setPickerDisplayId(Number(e.target.value))}>
+              {(screenCaptureDisplays ?? []).map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="properties__hint">{regionSummary}</p>
+          <button
+            type="button"
+            className="properties__file-button"
+            disabled={effectiveDisplayId === undefined}
+            onClick={() => effectiveDisplayId !== undefined && pickScreenCaptureRegion(sc.id, effectiveDisplayId)}
+          >
+            Pick region…
+          </button>
+        </PropertiesSection>
+
+        <PropertiesSection title="Stream">
+          <label className="properties__field">
+            <span>Mode</span>
+            <select value={sc.streamMode ?? 'poll'} onChange={(e) => patchScreenCapture({ streamMode: e.target.value as ScreenCaptureWidget['streamMode'] })}>
+              <option value="poll">Poll (simple, one request per frame)</option>
+              <option value="mjpeg">Live (persistent stream)</option>
+            </select>
+          </label>
+          <label className="properties__field">
+            <span>FPS</span>
+            <input
+              type="number"
+              min={1}
+              max={15}
+              value={sc.fps ?? 5}
+              onChange={(e) => patchScreenCapture({ fps: Math.min(15, Math.max(1, Number(e.target.value))) })}
+            />
+          </label>
+          <label className="properties__field">
+            <span>Quality</span>
+            <input
+              type="number"
+              min={10}
+              max={100}
+              value={sc.quality ?? 70}
+              onChange={(e) => patchScreenCapture({ quality: Math.min(100, Math.max(10, Number(e.target.value))) })}
+            />
+          </label>
+        </PropertiesSection>
+
+        <PropertiesSection title="Fit">
+          <label className="properties__field">
+            <span>Fit</span>
+            <select value={sc.fit ?? 'cover'} onChange={(e) => patchScreenCapture({ fit: e.target.value as BackgroundFit })}>
+              {BACKGROUND_FITS.filter((f) => f.value !== 'tile').map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </PropertiesSection>
+
+        <PropertiesSection title="Adjustments">
+          <label className="properties__field">
+            <span>Brightness</span>
+            <input
+              type="number"
+              step={0.05}
+              min={0}
+              value={sc.brightness ?? 1}
+              onChange={(e) => patchScreenCapture({ brightness: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <label className="properties__field">
+            <span>Contrast</span>
+            <input
+              type="number"
+              step={0.05}
+              min={0}
+              value={sc.contrast ?? 1}
+              onChange={(e) => patchScreenCapture({ contrast: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <label className="properties__field">
+            <span>Saturation</span>
+            <input
+              type="number"
+              step={0.05}
+              min={0}
+              value={sc.saturation ?? 1}
+              onChange={(e) => patchScreenCapture({ saturation: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <label className="properties__checkbox">
+            <input type="checkbox" checked={sc.sharpen ?? false} onChange={(e) => patchScreenCapture({ sharpen: e.target.checked })} />
+            Sharpen
+          </label>
+          <p className="properties__hint">Costs real CPU on the desktop per captured frame — off by default.</p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Border">
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={sc.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchScreenCapture({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={sc.borderColorExpr ?? ''}
+              onExprChange={(code) => patchScreenCapture({ borderColorExpr: code })}
+              onEnterExpr={() => patchScreenCapture({ borderColorExpr: sc.borderColorExpr ?? '' })}
+              onClearExpr={() => patchScreenCapture({ borderColorExpr: undefined })}
+              opacity={sc.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchScreenCapture({ borderOpacity: v })}
+            />
+          </div>
+        </PropertiesSection>
+
+        <PropertiesSection title="Advanced">
+          <span className="properties__section-label">Position & Size</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={sc.x} onChange={(e) => patchScreenCapture({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={sc.y} onChange={(e) => patchScreenCapture({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>W</span>
+              <input type="number" min={minSize} value={sc.w} onChange={(e) => patchScreenCapture({ w: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+            <label className="properties__field">
+              <span>H</span>
+              <input type="number" min={minSize} value={sc.h} onChange={(e) => patchScreenCapture({ h: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={sc.zIndex ?? 0} onChange={(e) => patchScreenCapture({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteScreenCapture}>
+          Delete widget
+        </button>
+      </aside>
+    )
+  }
+
+  // Only reached once gauge/adjuster/encoder/switch/dropdown/screen-capture
+  // have returned early above, so widget is known to be a
+  // ButtonWidget | MorphButtonWidget here —
   // captured into a const for the same reason as those branches' own capture
   // above (TS doesn't retain narrowing inside nested closures like the
   // functions below).
@@ -3499,7 +3960,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </button>
       </div>
 
-      <PropertiesSection title="States" open>
+      <PropertiesSection title="States">
         <label className="properties__toggle">
           <input
             type="checkbox"
@@ -3629,9 +4090,9 @@ export function PropertiesPanel(): React.JSX.Element {
         )}
       </PropertiesSection>
 
-      <PropertiesSection title="Labels" badge={activeState.labels.length} open>
+      <PropertiesSection title="Labels" badge={activeState.labels.length}>
         {activeState.labels.map((label) => (
-          <PropertiesSection key={label.id} title={labelSectionTitle(label)} open={false}>
+          <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
             <LabelFields
               label={label}
               backgroundColor={effectiveColor}
@@ -3645,7 +4106,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </button>
       </PropertiesSection>
 
-      <PropertiesSection title="Color" open>
+      <PropertiesSection title="Color">
         {widget.type === 'button' || selectedBlockId === null ? (
           <>
             {/* A plain div, not a <label> — ColorPickerButton's popover nests
@@ -3700,7 +4161,7 @@ export function PropertiesPanel(): React.JSX.Element {
         )}
       </PropertiesSection>
 
-      <PropertiesSection title="Appearance" open={false}>
+      <PropertiesSection title="Appearance">
         {widget.type === 'button' ? (
           <>
             <span className="properties__section-label">Spacing</span>
@@ -3755,7 +4216,7 @@ export function PropertiesPanel(): React.JSX.Element {
         )}
       </PropertiesSection>
 
-      <PropertiesSection title="Actions" badge={2} open>
+      <PropertiesSection title="Actions" badge={2}>
         <EventSequenceEditor
           title="Press"
           steps={eventfulWidget.events.press}
@@ -3770,7 +4231,7 @@ export function PropertiesPanel(): React.JSX.Element {
         />
       </PropertiesSection>
 
-      <PropertiesSection title="Position & Size" open={false}>
+      <PropertiesSection title="Position & Size">
         <div className="properties__grid2">
           <label className="properties__field">
             <span>X</span>
