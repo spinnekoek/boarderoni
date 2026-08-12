@@ -1,11 +1,12 @@
-import { BrowserWindow, desktopCapturer, ipcMain, screen, type Display, type NativeImage } from 'electron'
+import { BrowserWindow, ipcMain, screen, type Display } from 'electron'
 import { join } from 'node:path'
 import type { ServerResponse } from 'node:http'
-import sharp from 'sharp'
 import type { ScreenRegion } from '../shared/types'
+import { WorkerHost } from './workerHost'
+import type { ScreenCaptureWorkerRequest, ScreenCaptureWorkerResponse } from './screenCaptureMessages'
 
 const MIN_FPS = 1
-const MAX_FPS = 15
+const MAX_FPS = 60
 const DEFAULT_FPS = 5
 const MIN_QUALITY = 10
 const MAX_QUALITY = 100
@@ -28,67 +29,38 @@ export function listDisplays(): { id: number; label: string; bounds: ScreenRegio
   }))
 }
 
-// nut-js's screen.grab()/grabRegion() are documented as scoped to "a
-// system's MAIN display" only — no good for capturing an arbitrary picked
-// monitor. desktopCapturer (built into Electron, so still zero new
-// dependency for this path) captures any display by id instead — but it's
-// a main-process-only API (unlike DCS-BIOS's own worker_threads worker,
-// see main/dcsBios/worker.ts, desktopCapturer simply doesn't exist in a
-// plain Node worker context), so every capture necessarily runs on the
-// same thread as the rest of the app, and its own captured resolution is
-// the one lever that actually matters for cost: it always captures the
-// ENTIRE display at whatever `thumbnailSize` is requested, transferred
-// over IPC, before we crop it down — asking for less than full native
-// resolution when the picked region is much smaller than the display (the
-// common case) is a large, direct saving, not a micro-optimization.
-const MAX_CAPTURE_DIMENSION = 1920
-// A little bigger than the region's own pixel size so the crop still looks
-// sharp (matters most for 'contain'/'none' fit, or a widget box larger
-// than the region), without paying for detail nobody will ever see.
-const REGION_OVERSAMPLE = 2
-
-async function captureDisplay(display: Display, region: ScreenRegion): Promise<NativeImage> {
-  const physicalWidth = display.size.width * display.scaleFactor
-  const physicalHeight = display.size.height * display.scaleFactor
-  const desiredForRegion = Math.max(region.width, region.height) * display.scaleFactor * REGION_OVERSAMPLE
-  const targetMaxDimension = Math.min(MAX_CAPTURE_DIMENSION, Math.max(desiredForRegion, 200))
-  const scale = Math.min(1, targetMaxDimension / Math.max(physicalWidth, physicalHeight))
-  const thumbnailSize = { width: Math.round(physicalWidth * scale), height: Math.round(physicalHeight * scale) }
-  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize })
-  const source = sources.find((s) => s.display_id === String(display.id)) ?? sources[0]
-  if (!source) throw new Error('No screen source available')
-  return source.thumbnail
+// The actual grab + encode used to run inline here via Electron's
+// `desktopCapturer` — main-process-only, so unlike DCS-BIOS's own
+// worker_threads worker (see main/dcsBios/worker.ts) there was no way off
+// the app's own UI thread, and every capture stalled it. node-screenshots
+// is a native N-API addon with no Electron dependency, so it can run in a
+// plain worker instead (see screenCaptureWorker.ts) — this host just
+// forwards requests to it and never touches image bytes itself.
+const screenCaptureHost = new WorkerHost<ScreenCaptureWorkerRequest, ScreenCaptureWorkerResponse, never>({
+  scriptPath: join(__dirname, 'screenCaptureWorker.js')
+})
+// Acquired lazily on first actual capture, never released — an idle worker
+// thread costs effectively nothing, and avoids spawn/teardown churn between
+// rapid viewer connect/disconnect cycles (see addMjpegViewer below).
+let hostAcquired = false
+function ensureHostAcquired(): void {
+  if (hostAcquired) return
+  hostAcquired = true
+  screenCaptureHost.acquire()
 }
 
-// `region`/`display.bounds` are DIP (CSS-pixel-equivalent) coordinates —
-// the same space Electron's own window/display geometry uses throughout,
-// including what the region-picker overlay hands back. The captured
-// thumbnail's actual size (not necessarily exactly what was requested —
-// desktopCapturer/Chromium can round it, on top of our own deliberate
-// downscale above) is what the crop rect needs scaling into, so this reads
-// the image's own returned dimensions rather than assuming
-// `display.scaleFactor` directly.
 export async function captureRegionJpeg(region: ScreenRegion, displayId: number, quality: number, sharpen: boolean): Promise<Buffer> {
   const display = screen.getAllDisplays().find((d) => d.id === displayId)
   if (!display) throw new Error(`Display ${displayId} not found`)
-  const image = await captureDisplay(display, region)
-  const actualSize = image.getSize()
-  const scaleX = actualSize.width / display.bounds.width
-  const scaleY = actualSize.height / display.bounds.height
-  const local = {
-    x: Math.round((region.x - display.bounds.x) * scaleX),
-    y: Math.round((region.y - display.bounds.y) * scaleY),
-    width: Math.round(region.width * scaleX),
-    height: Math.round(region.height * scaleY)
-  }
-  const cropped = image.crop(local)
-  if (!sharpen) return cropped.toJPEG(quality)
-  // The one path with real per-frame CPU cost — routed through `sharp`
-  // (the only new dependency this feature adds) instead of Electron's own
-  // encoder, only when explicitly opted into (see ScreenCaptureWidget.sharpen).
-  // PNG round-trip rather than raw bitmap bytes sidesteps having to know/
-  // match nativeImage's internal channel order.
-  return sharp(cropped.toPNG()).sharpen().jpeg({ quality }).toBuffer()
+  ensureHostAcquired()
+  const { jpeg } = await screenCaptureHost.request({
+    region,
+    displayBounds: display.bounds,
+    displayScaleFactor: display.scaleFactor,
+    quality,
+    sharpen
+  })
+  return jpeg
 }
 
 // Self-contained overlay page — deliberately not part of the built React

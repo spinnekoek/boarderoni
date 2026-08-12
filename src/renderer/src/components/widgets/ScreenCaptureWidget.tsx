@@ -80,6 +80,13 @@ export function ScreenCaptureWidgetContent({
         className="deck-screen-capture__img"
         src={src}
         alt=""
+        // Browsers make <img> natively draggable by default (HTML5 drag-
+        // and-drop) — left on, that hijacks the pointer mid-gesture and
+        // breaks the widget's own pointer-capture-based drag/resize (see
+        // useWidgetDrag.ts): the widget doesn't move while the mouse is
+        // still held, then keeps tracking the cursor after release since
+        // the drag's pointerup never arrived to clear its state.
+        draggable={false}
         style={{ objectFit: OBJECT_FIT[widget.fit ?? 'cover'], filter: filters.length > 0 ? filters.join(' ') : undefined }}
       />
     </div>

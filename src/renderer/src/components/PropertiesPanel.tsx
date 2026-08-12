@@ -3692,9 +3692,9 @@ export function PropertiesPanel(): React.JSX.Element {
             <input
               type="number"
               min={1}
-              max={15}
+              max={60}
               value={sc.fps ?? 5}
-              onChange={(e) => patchScreenCapture({ fps: Math.min(15, Math.max(1, Number(e.target.value))) })}
+              onChange={(e) => patchScreenCapture({ fps: Math.min(60, Math.max(1, Number(e.target.value))) })}
             />
           </label>
           <label className="properties__field">
