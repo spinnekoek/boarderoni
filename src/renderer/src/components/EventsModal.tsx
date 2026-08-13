@@ -8,7 +8,7 @@ import { uniqueVariableName } from '../variableNaming'
 import { CodeEditor } from './CodeEditor'
 import { ExpressionEditorModal } from './ExpressionEditorModal'
 import { EVENT_SOURCE_TYPES, getEventSourceType, type EventSourceTypeMeta } from '@shared/eventSources'
-import type { EventSource, EventSourceMapping } from '@shared/types'
+import type { EventSource, EventSourceMapping, ScreenRegion } from '@shared/types'
 import type { DcsBiosFieldCatalogEntry } from '@shared/dcsBiosTypes'
 
 // Kept to a single line deliberately — CodeMirror's placeholder extension
@@ -22,6 +22,14 @@ const MAX_UPDATE_HZ = 25
 const DEFAULT_UPDATE_HZ = 10
 const FIELD_VIRTUALIZE_THRESHOLD = 100
 const FIELD_ROW_HEIGHT = 40
+
+// Matches the clamp range in main/eventSourceProducers.ts's ocrRegion
+// producer — kept in sync manually since one's a renderer-side slider and
+// the other's the main-process tick scheduler, with no shared module
+// between them for a single small numeric range.
+const MIN_OCR_INTERVAL_MS = 200
+const MAX_OCR_INTERVAL_MS = 5000
+const DEFAULT_OCR_INTERVAL_MS = 1000
 
 // Matches DCS-BIOS's own identifier casing (ALL_CAPS_WITH_UNDERSCORES) —
 // its field keys are already exactly this shape, so this is a no-op for the
@@ -447,8 +455,12 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
   const dcsBiosSettings = useDashboardStore((s) => s.dcsBiosSettings)
   const requestDcsBiosSettings = useDashboardStore((s) => s.requestDcsBiosSettings)
   const openSettings = useEditorSettings((s) => s.openSettings)
+  const screenCaptureDisplays = useDashboardStore((s) => s.screenCaptureDisplays)
+  const requestScreenCaptureDisplays = useDashboardStore((s) => s.requestScreenCaptureDisplays)
+  const pickEventSourceRegion = useDashboardStore((s) => s.pickEventSourceRegion)
 
   const usesDcsBios = eventSources.some((s) => s.kind === 'dcsbios')
+  const usesOcrRegion = eventSources.some((s) => s.kind === 'ocrRegion')
 
   useEffect(() => {
     if (enabledDataSources === null) requestAppSettings()
@@ -461,6 +473,10 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
   useEffect(() => {
     if (usesDcsBios && dcsBiosSettings === null) requestDcsBiosSettings()
   }, [usesDcsBios, dcsBiosSettings, requestDcsBiosSettings])
+
+  useEffect(() => {
+    if (usesOcrRegion && screenCaptureDisplays === null) requestScreenCaptureDisplays()
+  }, [usesOcrRegion, screenCaptureDisplays, requestScreenCaptureDisplays])
 
   const enabledKinds = enabledDataSources ?? EVENT_SOURCE_TYPES.map((t) => t.kind)
   const addableTypes = EVENT_SOURCE_TYPES.filter((t) => enabledKinds.includes(t.kind))
@@ -476,7 +492,12 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
   function addSource(kind: string): void {
     const typeMeta = getEventSourceType(kind)
     if (!typeMeta) return
-    const config = kind === 'dcsbios' ? { aircraft: '', updateHz: dcsBiosSettings?.defaultUpdateHz ?? DEFAULT_UPDATE_HZ } : undefined
+    const config =
+      kind === 'dcsbios'
+        ? { aircraft: '', updateHz: dcsBiosSettings?.defaultUpdateHz ?? DEFAULT_UPDATE_HZ }
+        : kind === 'ocrRegion'
+          ? { intervalMs: DEFAULT_OCR_INTERVAL_MS }
+          : undefined
     const id = nextId()
     updateDashboardMeta({
       eventSources: [...eventSources, { id, kind, name: typeMeta.label, mappings: [], config }]
@@ -563,6 +584,14 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
           const catalogByKey = new Map(catalogEntries.map((e) => [e.key, e]))
           const updateHz = typeof source.config?.updateHz === 'number' ? source.config.updateHz : DEFAULT_UPDATE_HZ
 
+          const isOcrRegion = source.kind === 'ocrRegion'
+          const ocrDisplayId = typeof source.config?.displayId === 'number' ? source.config.displayId : undefined
+          const ocrRegion = source.config?.region as ScreenRegion | undefined
+          const ocrRegionSummary = ocrRegion
+            ? `${Math.round(ocrRegion.width)}×${Math.round(ocrRegion.height)} at (${Math.round(ocrRegion.x)}, ${Math.round(ocrRegion.y)})`
+            : 'No region selected'
+          const ocrIntervalMs = typeof source.config?.intervalMs === 'number' ? source.config.intervalMs : DEFAULT_OCR_INTERVAL_MS
+
           return (
             <div className="events-modal__source">
               <div className="events-modal__source-header">
@@ -629,6 +658,55 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
                     <span className="properties__hint-inline">
                       How often this source's mapped variables refresh — lower this if you don't need every change
                       instantly and want to reduce broadcast/save load.
+                    </span>
+                  </label>
+                </div>
+              )}
+
+              {isOcrRegion && (
+                <div className="events-modal__source-config">
+                  <label className="dcsbios-settings__field">
+                    <span>Monitor</span>
+                    <select
+                      value={ocrDisplayId ?? ''}
+                      onChange={(e) =>
+                        patchSource(source.id, { config: { ...source.config, displayId: Number(e.target.value) } })
+                      }
+                    >
+                      <option value="">Pick a monitor…</option>
+                      {(screenCaptureDisplays ?? []).map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="dcsbios-settings__field">
+                    <span>Region: {ocrRegionSummary}</span>
+                    <button
+                      type="button"
+                      className="properties__file-button"
+                      disabled={(screenCaptureDisplays ?? []).length === 0}
+                      onClick={() => pickEventSourceRegion(source.id, ocrDisplayId ?? screenCaptureDisplays?.[0]?.id ?? 0)}
+                    >
+                      Pick region
+                    </button>
+                  </div>
+                  <label className="dcsbios-settings__field">
+                    <span>Poll interval: {ocrIntervalMs}ms</span>
+                    <input
+                      type="range"
+                      min={MIN_OCR_INTERVAL_MS}
+                      max={MAX_OCR_INTERVAL_MS}
+                      step={100}
+                      value={ocrIntervalMs}
+                      onChange={(e) =>
+                        patchSource(source.id, { config: { ...source.config, intervalMs: Number(e.target.value) } })
+                      }
+                    />
+                    <span className="properties__hint-inline">
+                      How often the region is re-captured and OCR'd. Recognition itself may take longer than this on
+                      a slow machine — ticks never overlap regardless of what this is set to.
                     </span>
                   </label>
                 </div>

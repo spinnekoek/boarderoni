@@ -60,6 +60,19 @@ export const EVENT_SOURCE_TYPES: EventSourceTypeMeta[] = [
     label: 'DCS-BIOS',
     fields: [],
     dynamicFields: true
+  },
+  // Fields are static (unlike 'dcsbios') — the main-process producer (see
+  // main/eventSourceProducers.ts) always emits exactly these two keys,
+  // 'value' only when the recognized text actually contains a number.
+  // config.{region,displayId,intervalMs} are set via the region-picker
+  // overlay + interval slider in EventsModal.tsx, not here.
+  {
+    kind: 'ocrRegion',
+    label: 'Screen OCR',
+    fields: [
+      { key: 'text', label: 'Recognized text' },
+      { key: 'value', label: 'Recognized number' }
+    ]
   }
 ]
 

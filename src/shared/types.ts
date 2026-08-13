@@ -1141,6 +1141,11 @@ export type ClientToServer =
   // result reaches every client through backgroundImageVersion rather
   // than a dedicated reply.
   | { type: 'screen-capture:pick-region'; widgetId: string; displayId: number }
+  // Same picker, same no-dedicated-reply shape as screen-capture:pick-region
+  // above, but writes into the matching entry of
+  // room.dashboard.eventSources (by id) instead of a widget — an
+  // 'ocrRegion' source's config.region/config.displayId, specifically.
+  | { type: 'event-source:pick-region'; sourceId: string; displayId: number }
 
 export type ServerToClient =
   | { type: 'dashboard:sync'; dashboard: Dashboard }

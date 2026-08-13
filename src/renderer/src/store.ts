@@ -146,6 +146,10 @@ interface DashboardStore {
   // as background-image:upload's result does (see screen-capture:pick-region's
   // own comment in shared/types.ts).
   pickScreenCaptureRegion: (widgetId: string, displayId: number) => void
+  // Same shape as pickScreenCaptureRegion above, but for an 'ocrRegion'
+  // event source's own config.region/config.displayId (see EventsModal.tsx)
+  // instead of a widget.
+  pickEventSourceRegion: (sourceId: string, displayId: number) => void
   requestDcsBiosAircraftList: () => void
   requestDcsBiosFieldCatalog: (aircraft: string) => void
   requestDcsBiosCommandCatalog: (aircraft: string) => void
@@ -349,6 +353,10 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   pickScreenCaptureRegion: (widgetId, displayId) => {
     send({ type: 'screen-capture:pick-region', widgetId, displayId })
+  },
+
+  pickEventSourceRegion: (sourceId, displayId) => {
+    send({ type: 'event-source:pick-region', sourceId, displayId })
   },
 
   requestDcsBiosAircraftList: () => {

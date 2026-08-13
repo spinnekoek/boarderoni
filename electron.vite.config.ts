@@ -28,16 +28,17 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
-        // The DCS-BIOS worker and screen-capture worker are each a second/
-        // third, independently-loadable main-process entry point (spawned
-        // at runtime via worker_threads.Worker, not imported) — see
-        // src/main/workerHost.ts, src/main/dcsBios/connectionManager.ts and
-        // src/main/screenCapture.ts, which resolve them by path via
-        // join(__dirname, '<name>.js').
+        // The DCS-BIOS, screen-capture, and OCR workers are each their own
+        // independently-loadable main-process entry point (spawned at
+        // runtime via worker_threads.Worker, not imported) — see
+        // src/main/workerHost.ts and src/main/dcsBios/connectionManager.ts,
+        // src/main/screenCapture.ts, src/main/ocr.ts, which resolve them by
+        // path via join(__dirname, '<name>.js').
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           dcsBiosWorker: resolve(__dirname, 'src/main/dcsBios/worker.ts'),
-          screenCaptureWorker: resolve(__dirname, 'src/main/screenCaptureWorker.ts')
+          screenCaptureWorker: resolve(__dirname, 'src/main/screenCaptureWorker.ts'),
+          ocrWorker: resolve(__dirname, 'src/main/ocrWorker.ts')
         }
       }
     }

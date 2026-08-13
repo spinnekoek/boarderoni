@@ -1601,6 +1601,34 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         }
         break
       }
+      case 'event-source:pick-region': {
+        if (!activeRoom) break
+        const region = await openRegionPicker(message.displayId)
+        // Same no-dedicated-reply shape as screen-capture:pick-region above
+        // — the picked region reaches every client via the normal
+        // dashboard:sync broadcast below. null (cancelled) does nothing.
+        // eventSources is a flat array (unlike widgets, never nested in a
+        // sub-deck), so this patches it directly rather than through
+        // updateWidgetById.
+        if (region) {
+          const { sourceId, displayId } = message
+          activeRoom.dashboard = {
+            ...activeRoom.dashboard,
+            eventSources: (activeRoom.dashboard.eventSources ?? []).map((s) =>
+              s.id === sourceId ? { ...s, config: { ...s.config, region, displayId } } : s
+            )
+          }
+          saveDeckDashboard(activeRoom)
+          broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
+          // Unlike the widget case above, this config change needs to
+          // restart the running producer (its signature just changed) so
+          // the source starts ticking against the new region immediately,
+          // not whenever the next unrelated dashboard:update happens to
+          // arrive.
+          syncEventSources(activeRoom)
+        }
+        break
+      }
     }
   })
 })
