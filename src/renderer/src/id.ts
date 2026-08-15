@@ -52,7 +52,13 @@ export function setKeepScreenOnPreference(enabled: boolean): void {
   localStorage.setItem(KEEP_SCREEN_ON_KEY, enabled ? '1' : '0')
 }
 
-const OPEN_SECTIONS_KEY = 'boarderoni-open-sections'
+// Bumped to -v2 as a deliberate one-time reset: every properties-panel
+// section should read as collapsed again for anyone who already has
+// sections remembered as open under the old key, without giving up the
+// remember-what-you-open behavior going forward (isSectionOpen below simply
+// returns false for a key it's never seen, same as a first-time user). Do
+// not revert this to the unversioned name.
+const OPEN_SECTIONS_KEY = 'boarderoni-open-sections-v2'
 
 // Which PropertiesSection headings the editor remembers as expanded — purely
 // a local UI preference (not synced through the server), and deliberately

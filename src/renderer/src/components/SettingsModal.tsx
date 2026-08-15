@@ -4,6 +4,7 @@ import { useEditorSettings } from '../settingsStore'
 import { useEscapeToClose } from '../useEscapeToClose'
 import { EVENT_SOURCE_TYPES } from '@shared/eventSources'
 import { DATA_SOURCE_SETTINGS_PANELS } from '../dataSourceSettingsPanels'
+import { RestDataSourcesSettingsPanel } from './RestDataSourcesSettingsPanel'
 
 // Generic, not DCS-BIOS-specific — every EVENT_SOURCE_TYPES kind gets a row
 // here automatically. A kind with an entry in DATA_SOURCE_SETTINGS_PANELS
@@ -81,6 +82,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }): React.JSX.E
               })}
             </div>
           </div>
+
+          <h3 className="settings-modal__section-title">REST data sources</h3>
+          <RestDataSourcesSettingsPanel />
 
           <h3 className="settings-modal__section-title">Approved devices</h3>
           <p className="properties__hint">

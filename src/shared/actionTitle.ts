@@ -3,6 +3,8 @@ import { EVENT_LABELS, eventKindsFor, getEventSteps } from './widgetEvents'
 
 function actionKindTitle(action: WidgetAction): string {
   switch (action.kind) {
+    case 'none':
+      return 'No action'
     case 'keypress': {
       const modeSuffix = action.mode && action.mode !== 'press' ? ` (${action.mode})` : ''
       return action.keys.join(' + ') + modeSuffix
@@ -17,6 +19,12 @@ function actionKindTitle(action: WidgetAction): string {
       return 'Open overlay'
     case 'close-overlay':
       return 'Close overlay'
+    case 'call-rest':
+      // Generic, not resolving the target RestDataSource's name — same
+      // precedent as 'send-dcs-command' above, which doesn't resolve its
+      // aircraft either: actionTitle only receives the widget itself, no
+      // external instance list to look a name up in.
+      return 'Call REST'
   }
 }
 

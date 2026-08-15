@@ -9,6 +9,8 @@ import {
   type DeviceInfo,
   type OverlayEdge,
   type OverlaySizeUnit,
+  type RestDataSource,
+  type RestDataSourceStatus,
   type ScreenRegion,
   type SequenceStep,
   type ServerToClient,
@@ -136,6 +138,12 @@ interface DashboardStore {
   // "Enabled data sources" gate (see appSettings.ts) — null until first
   // requested. EventsModal's add-picker filters EVENT_SOURCE_TYPES by this.
   enabledDataSources: string[] | null
+  // App-wide, user-created REST data sources (see main/restDataSources.ts) —
+  // empty until first requested. Settings' RestDataSourcesSettingsPanel
+  // manages the full list; PropertiesPanel's ActionFields reads it to offer
+  // a "Call <name>" action per enabled, outgoing-configured source.
+  restDataSources: RestDataSourceStatus[]
+  restDataSourcesLanAddress: string | null
   // ScreenCaptureWidget's Properties monitor dropdown — null until first
   // requested (see PropertiesPanel.tsx, fetched once its Region section
   // mounts), same "null vs. empty" convention as dcsBiosAircraft above.
@@ -160,6 +168,11 @@ interface DashboardStore {
   pickDcsBiosDocsFolder: () => void
   requestAppSettings: () => void
   updateEnabledDataSources: (enabledDataSources: string[]) => void
+  requestRestDataSources: () => void
+  createRestDataSource: (name: string) => void
+  updateRestDataSources: (sources: RestDataSource[]) => void
+  regenerateRestDataSourceToken: (sourceId: string) => void
+  deleteRestDataSource: (sourceId: string) => void
   connect: (mode: Mode, deckId: string) => void
   // View mode, no deck chosen yet — establishes approval (and the deck
   // list, once approved) before any specific deck is even in the picture.
@@ -345,6 +358,8 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   dcsBiosPickedFolder: null,
   dcsBiosSendCommandResult: null,
   enabledDataSources: null,
+  restDataSources: [],
+  restDataSourcesLanAddress: null,
   screenCaptureDisplays: null,
 
   requestScreenCaptureDisplays: () => {
@@ -399,6 +414,26 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   updateEnabledDataSources: (enabledDataSources) => {
     send({ type: 'app-settings:update', enabledDataSources })
+  },
+
+  requestRestDataSources: () => {
+    send({ type: 'rest-sources:get' })
+  },
+
+  createRestDataSource: (name) => {
+    send({ type: 'rest-sources:create', name })
+  },
+
+  updateRestDataSources: (sources) => {
+    send({ type: 'rest-sources:update', sources })
+  },
+
+  regenerateRestDataSourceToken: (sourceId) => {
+    send({ type: 'rest-sources:regenerate-token', sourceId })
+  },
+
+  deleteRestDataSource: (sourceId) => {
+    send({ type: 'rest-sources:delete', sourceId })
   },
 
   connect: (mode, deckId) => {
@@ -534,6 +569,8 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set({ dcsBiosSendCommandResult: { ok: message.ok, error: message.error } })
       } else if (message.type === 'app-settings:settings') {
         set({ enabledDataSources: message.enabledDataSources })
+      } else if (message.type === 'rest-sources:list') {
+        set({ restDataSources: message.sources, restDataSourcesLanAddress: message.lanAddress })
       }
     })
 

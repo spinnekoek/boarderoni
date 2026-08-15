@@ -6,7 +6,7 @@ import { morphFootprint, normalizeMorphBlocks, blockNeighbors, neighborCount } f
 import { getSubDeckWidgets } from '@shared/subDecks'
 import { nextId } from '../id'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
-import type { VariableMap } from '@shared/expr'
+import { resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { MorphBlock, MorphButtonWidget, MorphCell } from '@shared/types'
 
 interface ResizeState {
@@ -219,6 +219,10 @@ export function MorphCanvasWidget({
         state={previewState}
         interactive={false}
         variables={variables}
+        // Static (no drag hook here — this is the non-interactive editor
+        // preview) rest position, same fallback-to-0 as MorphView's live
+        // version in ViewCanvas.tsx.
+        sliderFraction={widget.valueExpr ? (resolveNumericExpr(widget.valueExpr, variables) ?? 0) / 100 : 0}
         selectedBlockId={isSoleSelection ? selectedBlockId : null}
         onCellPointerDown={handlePointerDown}
         onCellPointerMove={handlePointerMove}

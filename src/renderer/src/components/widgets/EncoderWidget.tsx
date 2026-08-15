@@ -2,8 +2,12 @@ import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { EncoderWidget } from '@shared/types'
 import { renderWidgetLabels } from './labels'
-import { needlePoints } from './arcPath'
+import { DialShapeGraphic, SquareIndicatorOverlay } from './DialShapeGraphic'
 
+// The grip's needle length/tip when dialShape is left unset (the default,
+// preserving this widget's original look byte-for-byte) — see
+// DialShapeGraphic's own needleLength/needleHalfWidth/needleTipLength props.
+// DialSwitchWidget uses its own, shorter set (30/2/10) for the same reason.
 const GRIP_RADIUS = 34
 
 // Shared between the editor preview (CanvasWidget, interactive=false, no
@@ -42,6 +46,10 @@ export function EncoderWidgetContent({
   const trackColor = withOpacity(resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1)
   const resolvedBorder = resolveBorderColor(widget, variables)
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
+  // Passed to SquareIndicatorOverlay below — see its own doc comment (in
+  // DialShapeGraphic.tsx) for why a 'square' indicator renders as an HTML
+  // div instead of joining DialShapeGraphic's own SVG output.
+  const shapeColor = (widget.dialShape ?? 'needle') === 'square' ? (widget.squareColor ?? fillColor) : (widget.circleColor ?? fillColor)
 
   return (
     <div
@@ -54,9 +62,18 @@ export function EncoderWidgetContent({
     >
       <svg className="deck-encoder__dial" viewBox="0 0 100 100">
         <circle cx={50} cy={50} r={45} fill={trackColor} stroke={borderColor} strokeWidth={2} />
-        <polygon points={needlePoints(50, 50, spin, GRIP_RADIUS, 3, 12)} fill={fillColor} />
-        <circle cx={50} cy={50} r={5} fill={fillColor} />
+        <DialShapeGraphic
+          style={widget}
+          angle={spin}
+          fillColor={fillColor}
+          trackColor={trackColor}
+          needleLength={GRIP_RADIUS}
+          needleHalfWidth={3}
+          needleTipLength={12}
+          needleCenterRadius={5}
+        />
       </svg>
+      <SquareIndicatorOverlay style={widget} angle={spin} shapeColor={shapeColor} w={widget.w} h={widget.h} />
       {renderWidgetLabels(widget.labels, trackColor, variables)}
     </div>
   )

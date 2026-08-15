@@ -5,13 +5,14 @@ import { isBoarderoniAndroidApp, setKeepScreenOn } from '../androidBridge'
 import { getKeepScreenOnPreference } from '../id'
 import { getEffectiveStates } from '@shared/states'
 import { morphFootprint } from '@shared/morph'
-import { resolveColor, toVariableMap, type VariableMap } from '@shared/expr'
+import { resolveColor, resolveNumericExpr, toVariableMap, type VariableMap } from '@shared/expr'
 import { findSubDeck, getSubDeckWidgets } from '@shared/subDecks'
 import type {
   AdjusterWidget,
   DialSwitchWidget,
   DropdownWidget,
   EncoderWidget,
+  MorphButtonWidget,
   RockerSwitchWidget,
   StatefulWidget,
   ToggleSwitchWidget,
@@ -29,6 +30,7 @@ import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
 import { ToggleSwitchWidgetContent } from './widgets/ToggleSwitchWidget'
 import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { useAdjusterDrag } from '../useAdjusterDrag'
+import { useMorphSliderDrag } from '../useMorphSliderDrag'
 import { useEncoderDrag } from '../useEncoderDrag'
 import { useSwitchPosition } from '../useSwitchPosition'
 import { useDialSwitchDrag } from '../useDialSwitchDrag'
@@ -190,21 +192,18 @@ function DropdownView({ widget, variables }: { widget: DropdownWidget; variables
   )
 }
 
-// Today's button/morph interactive rendering — press/release + tap-to-
-// trigger. Typed StatefulWidget (not the full Widget union) since it's the
-// only branch that touches getEffectiveStates/states/activeStateExpr.
-// press()/release() now double as the real server triggers (events.press/
+// press()/release() double as the real server triggers (events.press/
 // events.release), not just the visual "Clicked" state they drove before —
-// see EventfulWidget/SequenceStep in shared/types.ts.
-function TriggerableViewWidget({
-  widget,
-  variables,
-  error
-}: {
-  widget: StatefulWidget
-  variables: VariableMap
-  error?: string
-}): React.JSX.Element {
+// see EventfulWidget/SequenceStep in shared/types.ts. Shared by
+// TriggerableViewWidget (plain buttons) and MorphView below — both need the
+// exact same press/release bookkeeping, but MorphView also needs its own
+// unconditionally-called useMorphSliderDrag, which is why morph got split
+// into its own top-level dispatch (mirroring AdjusterView/EncoderView)
+// instead of living inside TriggerableViewWidget as a conditional branch:
+// React's rules of hooks don't allow useMorphSliderDrag to be called from
+// inside an `if (widget.type === 'morph')` block in a component that's also
+// rendered for plain buttons.
+function usePressRelease(widgetId: string): { pressed: boolean; press: () => void; release: () => void } {
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   const [pressed, setPressed] = useState(false)
   // Guards against firing 'release' twice for one gesture — pointerup and
@@ -214,21 +213,40 @@ function TriggerableViewWidget({
   // before press/release carried a real server-side side effect; a
   // double-fire now would run the release sequence twice.
   const releasedRef = useRef(true)
-  const [defaultState, clickedState] = getEffectiveStates(widget, variables)
-  const state = pressed && clickedState ? clickedState : defaultState
 
   function press(): void {
     setPressed(true)
     releasedRef.current = false
-    triggerWidget(widget.id, 'press')
+    triggerWidget(widgetId, 'press')
   }
 
   function release(): void {
     setPressed(false)
     if (releasedRef.current) return
     releasedRef.current = true
-    triggerWidget(widget.id, 'release')
+    triggerWidget(widgetId, 'release')
   }
+
+  return { pressed, press, release }
+}
+
+// Today's plain-button interactive rendering — press/release + tap-to-
+// trigger. Typed StatefulWidget narrowed to ButtonWidget by ViewWidget's own
+// dispatch below (morph now goes through MorphView instead) — kept as
+// StatefulWidget rather than ButtonWidget only because getEffectiveStates
+// takes the shared type.
+function TriggerableViewWidget({
+  widget,
+  variables,
+  error
+}: {
+  widget: StatefulWidget
+  variables: VariableMap
+  error?: string
+}): React.JSX.Element {
+  const { pressed, press, release } = usePressRelease(widget.id)
+  const [defaultState, clickedState] = getEffectiveStates(widget, variables)
+  const state = pressed && clickedState ? clickedState : defaultState
 
   // Keyboard/assistive-tech activation dispatches a synthetic `click` with
   // no pointer events at all — e.detail === 0 is the standard signal a
@@ -240,25 +258,6 @@ function TriggerableViewWidget({
   function handleKeyboardActivate(): void {
     press()
     release()
-  }
-
-  // Morph blocks own their own pointer handling (see MorphButtonWidgetContent)
-  // instead of a single full-bounding-box wrapper, since an irregular shape's
-  // bounding box includes area that isn't actually part of any block (a U's
-  // notch) — a wrapper div there would show "pressed" for taps that don't
-  // land on any real block.
-  if (widget.type === 'morph') {
-    return (
-      <MorphButtonWidgetContent
-        widget={widget}
-        state={state}
-        interactive
-        variables={variables}
-        onPress={press}
-        onRelease={release}
-        error={error}
-      />
-    )
   }
 
   function handlePointerDown(e: React.PointerEvent): void {
@@ -290,10 +289,50 @@ function TriggerableViewWidget({
   )
 }
 
+// Owns both the shared press/release bookkeeping (see usePressRelease above
+// — a morph button fires the exact same press/release events a plain
+// button does) and useMorphSliderDrag, unconditionally, same as
+// AdjusterView/EncoderView own their own drag hook — safe to call
+// unconditionally here because this component is only ever mounted for an
+// actual MorphButtonWidget (see ViewWidget's dispatch), never for a plain
+// button. useMorphSliderDrag itself is cheap to run even when
+// isMorphSliderActive(widget) is false (its handlers just never get wired
+// to any DOM element, since MorphButtonWidgetContent only renders the
+// handle when active).
+function MorphView({ widget, variables, error }: { widget: MorphButtonWidget; variables: VariableMap; error?: string }): React.JSX.Element {
+  const { pressed, press, release } = usePressRelease(widget.id)
+  const [defaultState, clickedState] = getEffectiveStates(widget, variables)
+  const state = pressed && clickedState ? clickedState : defaultState
+  const { dragFraction, handlePointerDown, handlePointerMove, handlePointerUp } = useMorphSliderDrag(widget, variables)
+  const sliderFraction = dragFraction ?? (widget.valueExpr ? (resolveNumericExpr(widget.valueExpr, variables) ?? 0) / 100 : 0)
+
+  // Morph blocks own their own pointer handling (see MorphButtonWidgetContent)
+  // instead of a single full-bounding-box wrapper, since an irregular shape's
+  // bounding box includes area that isn't actually part of any block (a U's
+  // notch) — a wrapper div there would show "pressed" for taps that don't
+  // land on any real block.
+  return (
+    <MorphButtonWidgetContent
+      widget={widget}
+      state={state}
+      interactive
+      variables={variables}
+      onPress={press}
+      onRelease={release}
+      error={error}
+      sliderFraction={sliderFraction}
+      onSliderPointerDown={handlePointerDown}
+      onSliderPointerMove={handlePointerMove}
+      onSliderPointerUp={handlePointerUp}
+    />
+  )
+}
+
 // Dispatches on widget.type before any type-specific hooks run — Gauge is
-// passive (no action, no pointer handling at all) and Adjuster owns its own
-// drag hook (AdjusterView above), neither of which fits
-// TriggerableViewWidget's press/release + getEffectiveStates model.
+// passive (no action, no pointer handling at all), and Adjuster/Encoder/Morph
+// each own their own drag hook (AdjusterView/EncoderView/MorphView above),
+// none of which fits TriggerableViewWidget's plain press/release +
+// getEffectiveStates model on their own.
 function ViewWidget({
   widget,
   variables,
@@ -309,6 +348,7 @@ function ViewWidget({
   if (widget.type === 'screen-capture') return <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />
   if (widget.type === 'adjuster') return <AdjusterView widget={widget} variables={variables} />
   if (widget.type === 'encoder') return <EncoderView widget={widget} variables={variables} />
+  if (widget.type === 'morph') return <MorphView widget={widget} variables={variables} error={error} />
   if (widget.type === 'switch-rocker') return <RockerSwitchView widget={widget} variables={variables} />
   if (widget.type === 'switch-dial') return <DialSwitchView widget={widget} variables={variables} />
   if (widget.type === 'switch-toggle') return <ToggleSwitchView widget={widget} variables={variables} />

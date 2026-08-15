@@ -66,6 +66,37 @@ export function viewBoxToPixel(vx: number, vy: number, w: number, h: number): { 
   return { x: w / 2 + (vx - 50) * scale, y: h / 2 + (vy - 50) * scale }
 }
 
+// SVG path `d` for a closed polygon (any N >= 3 points, in order) with each
+// corner cut by a quadratic-Bezier curve instead of a sharp point — a
+// lightweight "rounded polygon" approximation (not true circular-arc
+// corners, which would need per-vertex arc-flag math for little visible
+// difference at the sizes these shapes render at). `radius` is clamped per
+// vertex to at most half the length of its shorter adjacent edge, so a
+// small/thin shape (e.g. a narrow triangle detent) can't self-intersect.
+// Shared by DialShapeGraphic's triangle detent/indicator (both the ring
+// detent's own <path> and DetentIndicatorShape's triangle branch) so a
+// triangle can have a real stroke AND a border radius, neither of which a
+// CSS clip-path can express (see DialShapeGraphic.tsx for why).
+export function roundedPolygonPath(points: { x: number; y: number }[], radius: number): string {
+  const n = points.length
+  if (n < 3 || radius <= 0) {
+    return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z'
+  }
+  const corners = points.map((curr, i) => {
+    const prev = points[(i - 1 + n) % n]
+    const next = points[(i + 1) % n]
+    const prevLen = Math.hypot(prev.x - curr.x, prev.y - curr.y)
+    const nextLen = Math.hypot(next.x - curr.x, next.y - curr.y)
+    const r = Math.min(radius, prevLen / 2, nextLen / 2)
+    const a = { x: curr.x + ((prev.x - curr.x) / prevLen) * r, y: curr.y + ((prev.y - curr.y) / prevLen) * r }
+    const b = { x: curr.x + ((next.x - curr.x) / nextLen) * r, y: curr.y + ((next.y - curr.y) / nextLen) * r }
+    return { curr, a, b }
+  })
+  const start = corners[n - 1].b
+  const segments = corners.map(({ curr, a, b }) => `L ${a.x} ${a.y} Q ${curr.x} ${curr.y} ${b.x} ${b.y}`)
+  return `M ${start.x} ${start.y} ${segments.join(' ')} Z`
+}
+
 // Where a label sits, in the same viewBox coordinate space as its position's
 // own anchor point `dotVb` — the label's own labelAnchor (WidgetLabel field)
 // wins outright, fixed to that one side; unset means 'auto': radially

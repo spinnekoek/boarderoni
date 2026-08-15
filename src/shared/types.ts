@@ -109,13 +109,49 @@ export interface CloseOverlayAction {
   kind: 'close-overlay'
 }
 
+// The default for a freshly-added sequence step — does nothing when run
+// (see runActionStep in main/index.ts). Lets a step exist as a placeholder
+// (e.g. mid-sequence, or while deciding what it should do) without silently
+// firing a keypress with no keys bound, which is what an empty-default
+// KeypressAction used to do.
+export interface NoneAction {
+  kind: 'none'
+}
+
+// One placeholder's resolved value within a CallRestAction — same
+// value/argumentExpr split as SendDcsCommandAction.argument/argumentExpr:
+// `expr` (when set) takes precedence over the static `value`. `placeholder`
+// matches a {{name}} token found in the target RestDataSource's
+// outgoing.payloadTemplate at execution time (see extractPlaceholders in
+// shared/restPlaceholders.ts) — a stale entry whose token no longer exists
+// in the template is simply ignored, not an error.
+export interface CallRestPlaceholderValue {
+  placeholder: string
+  value: string
+  expr?: string
+}
+
+// Posts a configured RestDataSource's outgoing payload (see main/index.ts's
+// runCallRestAction). Only offered in the properties panel for a
+// currently-enabled, outgoing-configured RestDataSource — or if a widget
+// already has one configured, so disabling/deleting the source later
+// doesn't silently break existing buttons (same convention
+// SendDcsCommandAction's own comment describes for 'dcsbios').
+export interface CallRestAction {
+  kind: 'call-rest'
+  dataSourceId: string
+  values: CallRestPlaceholderValue[]
+}
+
 export type WidgetAction =
+  | NoneAction
   | KeypressAction
   | UpdateStateAction
   | SendDcsCommandAction
   | NavigateSubDeckAction
   | OpenOverlayAction
   | CloseOverlayAction
+  | CallRestAction
 
 // A pause between two steps in an event's sequence (see SequenceStep) —
 // not a field on the following action step, so it can be added/removed/
@@ -362,11 +398,26 @@ export interface MorphButtonWidget {
   cellH: number
   blocks: MorphBlock[]
   // Same press/release event model as ButtonWidget — shared by the whole
-  // fused-block widget, one pair of sequences for all blocks.
-  events: { press: SequenceStep[]; release: SequenceStep[] }
+  // fused-block widget, one pair of sequences for all blocks. `move` is
+  // optional (existing saved dashboards predate it) and only meaningful
+  // when isMorphSliderActive(widget) (see shared/morph.ts) — read sites
+  // default a missing array to [], same as a missing `move` kind on any
+  // other non-adjuster widget already falls back to "no steps."
+  events: { press: SequenceStep[]; release: SequenceStep[]; move?: SequenceStep[] }
   statesEnabled?: boolean
   states: WidgetState[]
   activeStateExpr?: string
+  // Opt-in drag handle that follows the shape's own longest block-to-block
+  // path (see findMorphSliderPath in shared/morph.ts) — only meaningful,
+  // and only ever actually active, when the shape is a loop-free path of
+  // 2+ blocks; see isMorphSliderActive, the single source of truth for
+  // whether the slider actually renders/fires regardless of this flag.
+  sliderEnabled?: boolean
+  // Same meaning as AdjusterWidget.valueExpr below: where the handle sits
+  // (0-100, along the path) while not being dragged, e.g. reflecting
+  // another variable back into the visual. Falls back to 0 if unset or
+  // unresolved.
+  valueExpr?: string
 }
 
 // Passive value display — a filled bar or arc showing valueExpr's result
@@ -469,7 +520,7 @@ export interface AdjusterWidget {
 // "turned one detent" rather than "now at X." A tap that never crosses the
 // threshold instead fires `press`/`release` — many real encoders (CDU data
 // knob, HSI course knob) are also push-buttons.
-export interface EncoderWidget {
+export interface EncoderWidget extends DialShapeStyle {
   id: string
   type: 'encoder'
   x: number
@@ -487,7 +538,10 @@ export interface EncoderWidget {
   // tracks it. Falls back to 0 if unset/unresolved.
   valueExpr?: string
   events: { increment: SequenceStep[]; decrement: SequenceStep[]; press: SequenceStep[]; release: SequenceStep[] }
-  fill: ColorAppearance // grip/marker color
+  // Grip color (used by every dialShape: the needle itself, or the square/
+  // circle knob's own color fallback — see DialShapeStyle's squareColor/
+  // circleColor, which each fall back to this when unset).
+  fill: ColorAppearance
   track: ColorAppearance // dial face color
   labels: WidgetLabel[]
   borderColor?: string
@@ -675,10 +729,113 @@ export interface DetentStyle {
   borderRadius?: number
 }
 
+// Independent per-side border width / per-corner border radius for a
+// square-shaped indicator — same box-model shape as the per-side fields
+// Dropdown/RockerSwitch widgets already use (see SidesInputGrid/
+// CornersInputGrid in PropertiesPanel.tsx). Only meaningful when the field
+// it's attached to (indicatorSquareBorder) is present AND that indicator's
+// shape is 'square' — an SVG <rect> can't express per-side stroke-width or
+// per-corner radius on its own, so a 'square' indicator renders as a plain
+// HTML div using real CSS border-*-width/border-radius instead, which is
+// what this type's fields map onto directly. Any side/corner left unset
+// falls back to the owning DetentStyle's own scalar borderWidth/borderRadius
+// (and ultimately to DetentShapeEditor's per-shape default), so leaving this
+// entirely unset looks identical to the old single-scalar behavior.
+export interface SquareBorderStyle {
+  widthTop?: number
+  widthRight?: number
+  widthBottom?: number
+  widthLeft?: number
+  radiusTopLeft?: number
+  radiusTopRight?: number
+  radiusBottomLeft?: number
+  radiusBottomRight?: number
+}
+
+// The dial-shape/indicator vocabulary shared by DialSwitchWidget's own dial
+// and EncoderWidget's grip — both widgets extend this instead of duplicating
+// it, so a shared renderer (DialShapeGraphic) and shared properties-panel
+// fields (DialShapeFields) can drive either widget type from the same props.
+// Everything here is optional so an existing saved widget with none of these
+// fields set reads exactly as it did before this type existed (a plain
+// needle for DialSwitchWidget, the fixed needle grip for EncoderWidget).
+export interface DialShapeStyle {
+  // What draws the dial's position indicator. 'needle' (the default) is a
+  // line from center to the active angle, same as always. 'square'/'circle'
+  // instead draw that shape at the dial's center plus a small indicator
+  // marker (see indicatorShape/indicatorStyle) at the active angle — on the
+  // shape's own top edge for 'square' (it's already rotated to point there),
+  // on the shape's rim for 'circle' (which isn't rotated, so the marker
+  // itself moves to the active angle instead).
+  dialShape?: 'needle' | 'square' | 'circle'
+  // Distance from the widget's true center to the dial shape's OWN center
+  // (the square/circle knob graphic, not just its indicator marker), along
+  // the same rotating axis as the active angle — same polarToCartesian
+  // technique as indicatorDistance below, just centered on the shape itself.
+  // Unlike every other distance/size field here, this one is deliberately
+  // NOT clamped to >= 0 anywhere it's wired up: a negative value is valid
+  // and flips the shape to the opposite side of center. Unset/0 is today's
+  // behavior (the shape stays centered). 'needle' dialShape ignores this —
+  // it has its own fixed length, not a center-offsettable body.
+  dialDistance?: number
+  // 'square' dialShape only.
+  squareWidth?: number
+  squareHeight?: number
+  squareBorderWidth?: number
+  squareBorderRadius?: number
+  squareColor?: string
+  squareBorderColor?: string
+  // 'circle' dialShape only.
+  circleSize?: number
+  circleBorderWidth?: number
+  circleColor?: string
+  circleBorderColor?: string
+  // 'circle' dialShape only — half-circle notches bitten into the knob's
+  // rim, evenly spaced starting at the active indicator angle (so they
+  // rotate along with it) rather than at a fixed angle. Unset/0 draws none.
+  circleIndentCount?: number
+  // Radius, in the same 0-100 viewBox units as circleSize, of each notch.
+  circleIndentSize?: number
+  // Defaults to the dial face/track color, so a notch reads as the face
+  // showing through a bite taken out of the knob rather than a flat dot.
+  circleIndentColor?: string
+  // Distance from the (possibly dialDistance-offset) shape's own center to
+  // each indent, same 0-100 viewBox convention as indicatorDistance. Unset
+  // defaults to circleSize/2 (the knob's own rim) — where indents sat before
+  // this became configurable.
+  circleIndentDistance?: number
+  // Reuses the same shape vocabulary/renderer as indicatorShape (see
+  // DetentIndicatorShape) instead of an indent always being a plain circle.
+  // Unset defaults to 'circle' — today's only look.
+  circleIndentShape?: 'circle' | 'square' | 'tick' | 'triangle'
+  // The small marker on the dial's own shape (square/circle dialShape only)
+  // that shows the active angle — same shape/style vocabulary as a
+  // DialSwitchWidget ring detent, just a second independent instance of it
+  // since the two markers usually look different in practice. Border color
+  // lives in indicatorStyle.borderColor (DetentStyle), same as a ring
+  // detent's — deliberately no separate indicatorBorderColor field, so
+  // there's exactly one place that sets what the render actually reads.
+  indicatorShape?: 'circle' | 'square' | 'tick' | 'triangle'
+  indicatorStyle?: DetentStyle
+  indicatorColor?: string
+  // Distance from the dial's center to the indicator marker, in the same
+  // 0-100 viewBox units as everything else here. Unset defaults to the
+  // shape's own edge (squareHeight/2 for 'square', circleSize/2 for
+  // 'circle') — where the marker sat before this became configurable.
+  indicatorDistance?: number
+  // 'square' indicatorShape only — per-side border width / per-corner
+  // border radius, overriding indicatorStyle.borderWidth/borderRadius's
+  // scalar values field-by-field where set. indicatorStyle.borderColor still
+  // applies (one color for all sides, matching Dropdown's own border
+  // pattern, which also keeps color as a single field alongside per-side
+  // width/radius).
+  indicatorSquareBorder?: SquareBorderStyle
+}
+
 // A rotary dial switch — HSI/ADI mode selector, ignition/mag switch.
 // Positions render as labeled detents around startAngle..endAngle, with a
 // needle pointing at whichever one is active.
-export interface DialSwitchWidget extends SwitchWidgetBase {
+export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle {
   id: string
   type: 'switch-dial'
   x: number
@@ -718,50 +875,6 @@ export interface DialSwitchWidget extends SwitchWidgetBase {
   // Size/border for whichever detentShape is picked — see DetentStyle. Unset
   // fields fall back to the fixed DETENT_SIZE/CSS defaults for that shape.
   detentStyle?: DetentStyle
-  // What draws the dial's position indicator. 'needle' (the default) is a
-  // line from center to the active angle, same as always. 'square'/'circle'
-  // instead draw that shape at the dial's center plus a small indicator
-  // marker (see indicatorShape/indicatorStyle) at the active angle — on the
-  // shape's own top edge for 'square' (it's already rotated to point there),
-  // on the shape's rim for 'circle' (which isn't rotated, so the marker
-  // itself moves to the active angle instead).
-  dialShape?: 'needle' | 'square' | 'circle'
-  // 'square' dialShape only.
-  squareWidth?: number
-  squareHeight?: number
-  squareBorderWidth?: number
-  squareBorderRadius?: number
-  squareColor?: string
-  squareBorderColor?: string
-  // 'circle' dialShape only.
-  circleSize?: number
-  circleBorderWidth?: number
-  circleColor?: string
-  circleBorderColor?: string
-  // 'circle' dialShape only — half-circle notches bitten into the knob's
-  // rim, evenly spaced starting at the active indicator angle (so they
-  // rotate along with it) rather than at a fixed angle. Unset/0 draws none.
-  circleIndentCount?: number
-  // Radius, in the same 0-100 viewBox units as circleSize, of each notch.
-  circleIndentSize?: number
-  // Defaults to the dial face/track color, so a notch reads as the face
-  // showing through a bite taken out of the knob rather than a flat dot.
-  circleIndentColor?: string
-  // The small marker on the dial's own shape (square/circle dialShape only)
-  // that shows the active angle — same shape/style vocabulary as the ring
-  // detents above (see detentShape/detentStyle), just a second independent
-  // instance of it since the two markers usually look different in practice.
-  // Border color lives in indicatorStyle.borderColor (DetentStyle), same as
-  // a ring detent's — deliberately no separate indicatorBorderColor field,
-  // so there's exactly one place that sets what the render actually reads.
-  indicatorShape?: 'circle' | 'square' | 'tick' | 'triangle'
-  indicatorStyle?: DetentStyle
-  indicatorColor?: string
-  // Distance from the dial's center to the indicator marker, in the same
-  // 0-100 viewBox units as everything else here. Unset defaults to the
-  // shape's own edge (squareHeight/2 for 'square', circleSize/2 for
-  // 'circle') — where the marker sat before this became configurable.
-  indicatorDistance?: number
 }
 
 // A collapsed picker — CDU page selector, radio channel select. Normally
@@ -996,6 +1109,48 @@ export interface EventSource {
   config?: Record<string, unknown>
 }
 
+// Reuses the exact {id, field, variableName, expr} shape EventSourceMapping
+// already has — `field` here is a flattened dot/index path into the incoming
+// JSON body (e.g. "data.temperature", "items.0.value"; see
+// shared/flattenJson.ts), not a catalog key from EVENT_SOURCE_TYPES.
+export type RestIncomingMapping = EventSourceMapping
+
+// A configured, persistent, app-wide REST integration — unlike EventSource,
+// this is NOT per-Dashboard and NOT one of EVENT_SOURCE_TYPES' fixed kinds:
+// the user creates any number of these from the Settings page (see
+// main/restDataSources.ts), each independently named, ported, and tokened.
+export interface RestDataSource {
+  id: string
+  name: string
+  enabled: boolean
+  incoming: {
+    port: number
+    // Generated server-side at creation (see createRestDataSource in
+    // main/restDataSources.ts) — checked against an incoming request's
+    // Authorization: Bearer <token> header (see main/restIncoming.ts).
+    bearerToken: string
+    // Which deck's Variables this source's mappings write into (Variables
+    // are per-Dashboard — see Dashboard.variables — so an app-wide REST
+    // source has to pick one).
+    targetDeckId: string
+    mappings: RestIncomingMapping[]
+  }
+  outgoing: {
+    url: string
+    // Raw JSON text with {{placeholderName}} tokens used as bare (unquoted)
+    // JSON values — substitution always does JSON.stringify(resolvedValue)
+    // (see runCallRestAction in main/index.ts), so a template like
+    // {"temp": {{temperature}}, "unit": {{unit}}} works whether a
+    // placeholder resolves to a number, string, or boolean.
+    payloadTemplate: string
+  }
+}
+
+// RestDataSource plus its live http.createServer status (see
+// main/restIncoming.ts) — what actually travels over the wire in
+// rest-sources:list, and what the renderer store/Settings panel work with.
+export type RestDataSourceStatus = RestDataSource & { listening: boolean; listenError?: string }
+
 // One additional, nameable view within a deck — its own widgets, same
 // shape/behavior as the deck's own root view, reachable via
 // NavigateSubDeckAction/OpenOverlayAction. Deliberately one level deep
@@ -1131,6 +1286,15 @@ export type ClientToServer =
   | { type: 'dcsbios:send-command'; identifier: string; argument: string }
   | { type: 'app-settings:get' }
   | { type: 'app-settings:update'; enabledDataSources: string[] }
+  // Settings modal only, edit-role only (enforced server-side) — same
+  // admin-action reasoning as device:list-approved/revoke above.
+  | { type: 'rest-sources:get' }
+  // Server generates id/incoming.bearerToken (see createRestDataSource in
+  // main/restDataSources.ts) — a renderer never mints its own token.
+  | { type: 'rest-sources:create'; name: string }
+  | { type: 'rest-sources:update'; sources: RestDataSource[] }
+  | { type: 'rest-sources:regenerate-token'; sourceId: string }
+  | { type: 'rest-sources:delete'; sourceId: string }
   | { type: 'screen-capture:list-displays' }
   // Opens a native full-screen overlay (see main/screenCapture.ts) on the
   // chosen display for a drag-to-select rectangle. Unlike
@@ -1196,6 +1360,16 @@ export type ServerToClient =
   | { type: 'dcsbios:command-catalog-error'; aircraft: string; message: string }
   | { type: 'dcsbios:send-command-result'; ok: boolean; error?: string }
   | { type: 'app-settings:settings'; enabledDataSources: string[] }
+  // Reply to rest-sources:get/create/update/regenerate-token/delete — the
+  // full current list either way, same "don't make the client locally patch
+  // its own copy" reasoning as device:approved-list. `listening`/
+  // `listenError` reflect that source's actual http.createServer state (see
+  // main/restIncoming.ts) — a port left configured but failing to bind
+  // (e.g. EADDRINUSE) still round-trips here instead of just vanishing.
+  // `lanAddress` is resolved once server-side (see getLanAddress, already
+  // used for /api/apk-info) so the Settings panel can build
+  // http://<lanAddress>:<port> without a second HTTP round trip.
+  | { type: 'rest-sources:list'; sources: RestDataSourceStatus[]; lanAddress: string | null }
   | { type: 'screen-capture:displays'; displays: { id: number; label: string; bounds: ScreenRegion }[] }
   // Targeted at the ONE socket that triggered the navigate-subdeck action,
   // never broadcast — which deck view is "current" is per-client UI state,

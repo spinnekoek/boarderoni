@@ -2,10 +2,12 @@ import { DEFAULT_WIDGET_COLOR, lighten, pickAutoBorderColor, withOpacity } from 
 import { AUTO_CLICKED_LIGHTEN } from '@shared/constants'
 import { resolveColor, type VariableMap } from '@shared/expr'
 import { actionTitle } from '@shared/actionTitle'
-import { effectiveBlockAppearance, effectiveBlockColor } from '@shared/morph'
+import { effectiveBlockAppearance, effectiveBlockColor, isMorphSliderActive, morphSliderPointAtFraction, morphSliderPoints } from '@shared/morph'
 import type { MorphBlock, MorphButtonWidget, WidgetState } from '@shared/types'
 import { renderWidgetLabels } from './labels'
 import { boxStyle } from './boxStyle'
+
+const SLIDER_HANDLE_RADIUS = 10
 
 export function MorphButtonWidgetContent({
   widget,
@@ -20,7 +22,11 @@ export function MorphButtonWidgetContent({
   onCellPointerMove,
   onCellPointerUp,
   onCellContextMenu,
-  onBlockSelect
+  onBlockSelect,
+  sliderFraction,
+  onSliderPointerDown,
+  onSliderPointerMove,
+  onSliderPointerUp
 }: {
   widget: MorphButtonWidget
   state: WidgetState
@@ -49,6 +55,17 @@ export function MorphButtonWidgetContent({
   // targets — separate from widget selection, which onCellPointerDown
   // already handles via useWidgetDrag.
   onBlockSelect?: (block: MorphBlock) => void
+  // Owner-supplied, same "presentational, caller owns drag state" split
+  // AdjusterWidgetContent uses (see useAdjusterDrag.ts/useMorphSliderDrag.ts)
+  // — 0..1 handle position along the slider path. Undefined (no slider, or
+  // isMorphSliderActive is false) simply skips rendering it. The three
+  // pointer handlers are interactive-only (deployed view, via
+  // useMorphSliderDrag) — the editor preview passes sliderFraction alone,
+  // with no drag handlers, to show a static rest position.
+  sliderFraction?: number
+  onSliderPointerDown?: (e: React.PointerEvent<SVGCircleElement>) => void
+  onSliderPointerMove?: (e: React.PointerEvent<SVGCircleElement>) => void
+  onSliderPointerUp?: (e: React.PointerEvent<SVGCircleElement>) => void
 }): React.JSX.Element {
   // Shared fallback used for the label layer (which isn't per-block) and by
   // any block that doesn't override its own color — see effectiveBlockColor.
@@ -140,10 +157,58 @@ export function MorphButtonWidgetContent({
 
   const labelElements = renderWidgetLabels(state.labels, backgroundColor, variables)
 
+  const width = totalCols * widget.cellW
+  const height = totalRows * widget.cellH
+  // sliderFraction is owner-supplied (see the prop comment above) — even
+  // when isMorphSliderActive(widget), a caller that hasn't computed a
+  // fraction yet (there isn't one, currently) just doesn't render anything
+  // here, rather than assuming 0.
+  const sliderPoints = isMorphSliderActive(widget) && sliderFraction !== undefined ? morphSliderPoints(widget) : null
+  const sliderHandlePoint = sliderPoints ? morphSliderPointAtFraction(sliderPoints, sliderFraction!) : null
+
   return (
-    <div className="deck-morph" style={{ width: totalCols * widget.cellW, height: totalRows * widget.cellH }}>
+    <div className="deck-morph" style={{ width, height }}>
       {blockElements}
       <div className="deck-morph-labels">{labelElements}</div>
+      {sliderPoints && sliderHandlePoint && (
+        // Rendered as a later DOM sibling of blockElements above (not
+        // nested inside any one block), so it always paints on top without
+        // needing z-index — and a pointer hitting the handle is hit-tested
+        // to the circle alone, never bubbling sideways into whichever
+        // block happens to sit underneath it. Only the handle itself
+        // (pointer-events: auto) is draggable; the path line and the rest
+        // of the SVG (pointer-events: none) let clicks fall through to the
+        // blocks below, same as before this existed.
+        <svg
+          className="deck-morph-slider"
+          width={width}
+          height={height}
+          viewBox={`0 0 ${width} ${height}`}
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+        >
+          <polyline
+            points={sliderPoints.map((p) => `${p.x},${p.y}`).join(' ')}
+            fill="none"
+            stroke={withOpacity(pickAutoBorderColor(backgroundColor), 0.6)}
+            strokeWidth={3}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <circle
+            className="deck-morph-slider__handle"
+            cx={sliderHandlePoint.x}
+            cy={sliderHandlePoint.y}
+            r={SLIDER_HANDLE_RADIUS}
+            fill={backgroundColor}
+            stroke={pickAutoBorderColor(backgroundColor)}
+            strokeWidth={2}
+            style={{ pointerEvents: interactive && onSliderPointerDown ? 'auto' : 'none', cursor: interactive ? 'grab' : undefined }}
+            onPointerDown={onSliderPointerDown}
+            onPointerMove={onSliderPointerMove}
+            onPointerUp={onSliderPointerUp}
+          />
+        </svg>
+      )}
       {error && <span className="deck-button__error">{error}</span>}
     </div>
   )

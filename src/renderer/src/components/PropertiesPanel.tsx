@@ -7,13 +7,14 @@ import { FONT_OPTIONS, resolveFont } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, pickAutoBorderColor, pickLegibleTextColor } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
 import { deriveClickedState } from '@shared/states'
-import { blockMerge, type BlockMerge } from '@shared/morph'
+import { blockMerge, hasMorphCycle, isMorphSliderActive, type BlockMerge } from '@shared/morph'
 import { toVariableMap, tryEvaluateExpression } from '@shared/expr'
 import { getSubDeckWidgets } from '@shared/subDecks'
 import { ANCHOR_OPTIONS } from '../background'
 import { KeyCapture } from './KeyCapture'
+import { SequenceRecorder } from './SequenceRecorder'
 import { ColorPickerButton } from './ColorPickerButton'
-import { DETENT_SIZE } from './widgets/DialSwitchWidget'
+import { DETENT_SIZE } from './widgets/DialShapeGraphic'
 import { isMiddlePosition as isMiddleTogglePosition, toggleNameForIndex } from './widgets/ToggleSwitchWidget'
 import { CodeEditor } from './CodeEditor'
 import { ExpressionEditorModal } from './ExpressionEditorModal'
@@ -21,8 +22,12 @@ import type {
   ActionStep,
   AdjusterWidget,
   BackgroundFit,
+  CallRestAction,
+  CallRestPlaceholderValue,
+  ColorAppearance,
   DelayStep,
   DetentStyle,
+  DialShapeStyle,
   DialSwitchWidget,
   DropdownWidget,
   EncoderWidget,
@@ -35,10 +40,12 @@ import type {
   NavigateSubDeckAction,
   OpenOverlayAction,
   OverlayEdge,
+  RestDataSourceStatus,
   RockerSwitchWidget,
   ScreenCaptureWidget,
   SendDcsCommandAction,
   SequenceStep,
+  SquareBorderStyle,
   StatefulWidget,
   SubDeck,
   SwitchPosition,
@@ -49,6 +56,7 @@ import type {
   WidgetLabel,
   WidgetState
 } from '@shared/types'
+import { extractPlaceholders } from '@shared/restPlaceholders'
 import type { DcsBiosCommandCatalogEntry, DcsBiosInputInterface } from '@shared/dcsBiosTypes'
 
 const ACTIVE_STATE_EXPR_PLACEHOLDER = "return variables.BATTERY_SW === 0 ? 'Default' : 'Active';"
@@ -499,26 +507,31 @@ function DetentShapeEditor({
   onShapeChange,
   style,
   onStyleChange,
-  triangleBorderSupported = false
+  squareBorder,
+  onSquareBorderChange
 }: {
   shape: NonNullable<DialSwitchWidget['detentShape']>
   onShapeChange: (shape: NonNullable<DialSwitchWidget['detentShape']>) => void
   style: DetentStyle | undefined
   onStyleChange: (style: DetentStyle) => void
-  // A ring detent is a plain HTML div using CSS clip-path for its triangle —
-  // clip-path crops a border away too, so there's nothing to configure there.
-  // The dial-center indicator's triangle, though, is a real SVG <polygon>
-  // (see DetentIndicatorShape in DialSwitchWidget.tsx), which genuinely
-  // supports a stroke — that caller passes this true to keep width/color
-  // available for its triangle too.
-  triangleBorderSupported?: boolean
+  // Only the dial-center indicator's 'square' shape wires these — a ring
+  // detent's own square stays on the scalar width/radius inputs below (see
+  // the "Detents" PropertiesSection's own DetentShapeEditor call, which
+  // omits both). Presence of the callback (not a separate boolean) gates
+  // the per-side grid, same "optional callback presence enables optional
+  // UI" convention ColorPickerButton's onEnterExpr/onExprChange already use.
+  squareBorder?: SquareBorderStyle
+  onSquareBorderChange?: (value: SquareBorderStyle) => void
 }): React.JSX.Element {
   const defaultSize = DETENT_SIZE[shape]
   const defaultBorderRadius = shape === 'square' ? 2 : 1
-  const showBorder = shape !== 'triangle' || triangleBorderSupported
-  // A polygon has no rx equivalent, and a circle's roundness already comes
-  // from being a circle — radius only means something for square/tick.
-  const showBorderRadius = shape === 'square' || shape === 'tick'
+  // Every shape but circle can show a meaningful border now — a triangle
+  // renders as a real stroked, roundable SVG shape (see DialShapeGraphic.tsx
+  // for the ring-detent path and DetentIndicatorShape for the indicator),
+  // not a border-less CSS clip-path. Circle's roundness already comes from
+  // being a circle/ellipse, so radius has nothing to add there.
+  const showBorderRadius = shape !== 'circle'
+  const showSquareBorderGrid = shape === 'square' && onSquareBorderChange
 
   return (
     <>
@@ -554,7 +567,56 @@ function DetentShapeEditor({
           />
         </label>
       </div>
-      {showBorder ? (
+      {showSquareBorderGrid ? (
+        <>
+          <p className="properties__hint">Border width, per side:</p>
+          <SidesInputGrid
+            top={{ value: squareBorder?.widthTop ?? style?.borderWidth ?? 0, min: 0, onChange: (v) => onSquareBorderChange({ ...squareBorder, widthTop: v }) }}
+            right={{
+              value: squareBorder?.widthRight ?? style?.borderWidth ?? 0,
+              min: 0,
+              onChange: (v) => onSquareBorderChange({ ...squareBorder, widthRight: v })
+            }}
+            bottom={{
+              value: squareBorder?.widthBottom ?? style?.borderWidth ?? 0,
+              min: 0,
+              onChange: (v) => onSquareBorderChange({ ...squareBorder, widthBottom: v })
+            }}
+            left={{
+              value: squareBorder?.widthLeft ?? style?.borderWidth ?? 0,
+              min: 0,
+              onChange: (v) => onSquareBorderChange({ ...squareBorder, widthLeft: v })
+            }}
+          />
+          <p className="properties__hint">Border radius, per corner:</p>
+          <CornersInputGrid
+            topLeft={{
+              value: squareBorder?.radiusTopLeft ?? style?.borderRadius ?? defaultBorderRadius,
+              min: 0,
+              onChange: (v) => onSquareBorderChange({ ...squareBorder, radiusTopLeft: v })
+            }}
+            topRight={{
+              value: squareBorder?.radiusTopRight ?? style?.borderRadius ?? defaultBorderRadius,
+              min: 0,
+              onChange: (v) => onSquareBorderChange({ ...squareBorder, radiusTopRight: v })
+            }}
+            bottomLeft={{
+              value: squareBorder?.radiusBottomLeft ?? style?.borderRadius ?? defaultBorderRadius,
+              min: 0,
+              onChange: (v) => onSquareBorderChange({ ...squareBorder, radiusBottomLeft: v })
+            }}
+            bottomRight={{
+              value: squareBorder?.radiusBottomRight ?? style?.borderRadius ?? defaultBorderRadius,
+              min: 0,
+              onChange: (v) => onSquareBorderChange({ ...squareBorder, radiusBottomRight: v })
+            }}
+          />
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton value={style?.borderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => onStyleChange({ ...style, borderColor: color })} />
+          </div>
+        </>
+      ) : (
         <>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -583,8 +645,233 @@ function DetentShapeEditor({
             <ColorPickerButton value={style?.borderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => onStyleChange({ ...style, borderColor: color })} />
           </div>
         </>
-      ) : (
-        <p className="properties__hint">A triangle's clip-path can't take a border here.</p>
+      )}
+    </>
+  )
+}
+
+// The "Dial shape"/"Indicator" property sections — shared by DialSwitchWidget
+// and EncoderWidget (both `extend DialShapeStyle`, see shared/types.ts), so
+// this is the properties-panel counterpart to DialShapeGraphic.tsx's shared
+// rendering: write the fields once, both widget types get identical
+// shape/indicator controls. `fill`/`onFillChange` are threaded in separately
+// (rather than folded into `value`/`onChange`) since `fill` lives on the
+// widget itself, not on DialShapeStyle — it's what a 'needle' dialShape (and
+// square/circleColor's own fallback) reads its color from on both widgets.
+function DialShapeFields({
+  value,
+  onChange,
+  fill,
+  onFillChange,
+  needleColorLabel
+}: {
+  value: DialShapeStyle
+  onChange: (patch: Partial<DialShapeStyle>) => void
+  fill: ColorAppearance
+  onFillChange: (fill: ColorAppearance) => void
+  needleColorLabel: string
+}): React.JSX.Element {
+  const isFillExpr = fill.colorExpr !== undefined
+  const dialShape = value.dialShape ?? 'needle'
+
+  return (
+    <>
+      <PropertiesSection title="Dial shape">
+        <label className="properties__field">
+          <span>Shape</span>
+          <select value={dialShape} onChange={(e) => onChange({ dialShape: e.target.value === 'needle' ? undefined : (e.target.value as DialShapeStyle['dialShape']) })}>
+            <option value="needle">Needle</option>
+            <option value="square">Square</option>
+            <option value="circle">Circle</option>
+          </select>
+        </label>
+
+        {(dialShape === 'square' || dialShape === 'circle') && (
+          <>
+            <label className="properties__field">
+              <span>Distance from center</span>
+              <input type="number" value={value.dialDistance ?? 0} onChange={(e) => onChange({ dialDistance: Number(e.target.value) })} />
+            </label>
+            <p className="properties__hint">How far the shape itself sits from the dial's center — negative flips it to the opposite side.</p>
+          </>
+        )}
+
+        {dialShape === 'needle' && (
+          <div className="properties__field">
+            <span>{needleColorLabel}</span>
+            <ColorPickerButton
+              value={fill.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => onFillChange({ ...fill, color, colorExpr: undefined })}
+              isExpr={isFillExpr}
+              exprValue={fill.colorExpr ?? ''}
+              onExprChange={(code) => onFillChange({ ...fill, colorExpr: code })}
+              onEnterExpr={() => onFillChange({ ...fill, colorExpr: fill.colorExpr ?? '' })}
+              onClearExpr={() => onFillChange({ ...fill, colorExpr: undefined })}
+              opacity={fill.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => onFillChange({ ...fill, backgroundOpacity: v })}
+            />
+          </div>
+        )}
+
+        {dialShape === 'square' && (
+          <>
+            <div className="properties__grid2">
+              <label className="properties__field">
+                <span>Square width</span>
+                <input type="number" min={1} value={value.squareWidth ?? 24} onChange={(e) => onChange({ squareWidth: Math.max(1, Number(e.target.value)) })} />
+              </label>
+              <label className="properties__field">
+                <span>Square height</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={value.squareHeight ?? 24}
+                  onChange={(e) => onChange({ squareHeight: Math.max(1, Number(e.target.value)) })}
+                />
+              </label>
+            </div>
+            <div className="properties__grid2">
+              <label className="properties__field">
+                <span>Square border width</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={value.squareBorderWidth ?? 0}
+                  onChange={(e) => onChange({ squareBorderWidth: Math.max(0, Number(e.target.value)) })}
+                />
+              </label>
+              <label className="properties__field">
+                <span>Square border radius</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={value.squareBorderRadius ?? 2}
+                  onChange={(e) => onChange({ squareBorderRadius: Math.max(0, Number(e.target.value)) })}
+                />
+              </label>
+            </div>
+            <div className="properties__field">
+              <span>Square color</span>
+              <ColorPickerButton
+                value={value.squareColor ?? fill.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => onChange({ squareColor: color })}
+                auto={value.squareColor === undefined}
+                onAuto={() => onChange({ squareColor: undefined })}
+              />
+            </div>
+            <div className="properties__field">
+              <span>Square border color</span>
+              <ColorPickerButton value={value.squareBorderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => onChange({ squareBorderColor: color })} />
+            </div>
+          </>
+        )}
+
+        {dialShape === 'circle' && (
+          <>
+            <div className="properties__grid2">
+              <label className="properties__field">
+                <span>Circle size</span>
+                <input type="number" min={1} value={value.circleSize ?? 20} onChange={(e) => onChange({ circleSize: Math.max(1, Number(e.target.value)) })} />
+              </label>
+              <label className="properties__field">
+                <span>Circle border width</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={value.circleBorderWidth ?? 0}
+                  onChange={(e) => onChange({ circleBorderWidth: Math.max(0, Number(e.target.value)) })}
+                />
+              </label>
+            </div>
+            <div className="properties__field">
+              <span>Circle color</span>
+              <ColorPickerButton
+                value={value.circleColor ?? fill.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => onChange({ circleColor: color })}
+                auto={value.circleColor === undefined}
+                onAuto={() => onChange({ circleColor: undefined })}
+              />
+            </div>
+            <div className="properties__field">
+              <span>Circle border color</span>
+              <ColorPickerButton value={value.circleBorderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => onChange({ circleBorderColor: color })} />
+            </div>
+            <div className="properties__grid2">
+              <label className="properties__field">
+                <span>Indent count</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={value.circleIndentCount ?? 0}
+                  onChange={(e) => onChange({ circleIndentCount: Math.max(0, Number(e.target.value)) })}
+                />
+              </label>
+              <label className="properties__field">
+                <span>Indent size</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={value.circleIndentSize ?? Math.round(((value.circleSize ?? 20) / 6) * 10) / 10}
+                  onChange={(e) => onChange({ circleIndentSize: Math.max(0, Number(e.target.value)) })}
+                />
+              </label>
+            </div>
+            <div className="properties__grid2">
+              <label className="properties__field">
+                <span>Indent distance</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={value.circleIndentDistance ?? (value.circleSize ?? 20) / 2}
+                  onChange={(e) => onChange({ circleIndentDistance: Math.max(0, Number(e.target.value)) })}
+                />
+              </label>
+              <label className="properties__field">
+                <span>Indent shape</span>
+                <select
+                  value={value.circleIndentShape ?? 'circle'}
+                  onChange={(e) => onChange({ circleIndentShape: e.target.value === 'circle' ? undefined : (e.target.value as DialShapeStyle['circleIndentShape']) })}
+                >
+                  <option value="circle">Circle</option>
+                  <option value="square">Square</option>
+                  <option value="tick">Tick</option>
+                  <option value="triangle">Triangle</option>
+                </select>
+              </label>
+            </div>
+          </>
+        )}
+      </PropertiesSection>
+
+      {(dialShape === 'square' || dialShape === 'circle') && (
+        <PropertiesSection title="Indicator">
+          <DetentShapeEditor
+            shape={value.indicatorShape ?? 'circle'}
+            onShapeChange={(shape) => onChange({ indicatorShape: shape === 'circle' ? undefined : shape })}
+            style={value.indicatorStyle}
+            onStyleChange={(indicatorStyle) => onChange({ indicatorStyle })}
+            squareBorder={value.indicatorSquareBorder}
+            onSquareBorderChange={(indicatorSquareBorder) => onChange({ indicatorSquareBorder })}
+          />
+          <div className="properties__field">
+            <span>Indicator color</span>
+            <ColorPickerButton
+              value={value.indicatorColor ?? ((dialShape === 'square' ? value.squareColor : value.circleColor) ?? fill.color ?? DEFAULT_WIDGET_COLOR)}
+              onChange={(color) => onChange({ indicatorColor: color })}
+              auto={value.indicatorColor === undefined}
+              onAuto={() => onChange({ indicatorColor: undefined })}
+            />
+          </div>
+          <label className="properties__field">
+            <span>Indicator distance</span>
+            <input
+              type="number"
+              min={0}
+              value={value.indicatorDistance ?? (dialShape === 'square' ? (value.squareHeight ?? 24) / 2 : (value.circleSize ?? 20) / 2)}
+              onChange={(e) => onChange({ indicatorDistance: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+        </PropertiesSection>
       )}
     </>
   )
@@ -610,33 +897,60 @@ function ActionFields({
   // through all of them just for this one default/picker.
   const subDecks = useDashboardStore((s) => s.dashboard.subDecks) ?? []
 
+  // Same "own selector" reasoning as subDecks above — restDataSources is
+  // fetched once at the top-level PropertiesPanel component (see its own
+  // requestRestDataSources effect), this just reads the cached result. Only
+  // sources that are enabled AND have an outgoing URL configured are offered
+  // as a new action-kind option, but an already-selected-and-since-removed
+  // source still gets a (labeled) option so it doesn't silently vanish —
+  // same "don't break an existing button" reasoning dcsBiosActionEnabled
+  // uses for send-dcs-command above.
+  const restDataSources = useDashboardStore((s) => s.restDataSources)
+  const callableRestSources = restDataSources.filter((s) => s.enabled && s.outgoing.url.trim())
+  const selectedRestSource = action.kind === 'call-rest' ? restDataSources.find((s) => s.id === action.dataSourceId) : undefined
+
   return (
     <>
-      <label className="properties__field">
+      <label className="properties__field properties__field--inline">
         <span>Action</span>
         <select
-          value={action.kind}
+          value={action.kind === 'call-rest' ? `call-rest:${action.dataSourceId}` : action.kind}
           onChange={(e) => {
             const kind = e.target.value
-            if (kind === 'keypress') onChange({ kind: 'keypress', keys: [] })
+            if (kind === 'none') onChange({ kind: 'none' })
+            else if (kind === 'keypress') onChange({ kind: 'keypress', keys: [] })
             else if (kind === 'update-state') onChange({ kind: 'update-state', code: '' })
             else if (kind === 'send-dcs-command') onChange({ kind: 'send-dcs-command', aircraft: '', identifier: '', interface: 'action', argument: '' })
             else if (kind === 'navigate-subdeck') onChange({ kind: 'navigate-subdeck', target: { type: 'main-deck' } })
             else if (kind === 'open-overlay')
               onChange({ kind: 'open-overlay', subDeckId: subDecks[0]?.id ?? '', edge: 'right', size: 320, sizeUnit: 'px' })
-            else onChange({ kind: 'close-overlay' })
+            else if (kind === 'close-overlay') onChange({ kind: 'close-overlay' })
+            else if (kind.startsWith('call-rest:')) onChange({ kind: 'call-rest', dataSourceId: kind.slice('call-rest:'.length), values: [] })
           }}
         >
+          <option value="none">No action</option>
           <option value="keypress">Keypress</option>
           <option value="update-state">Update state</option>
           {(dcsBiosActionEnabled || action.kind === 'send-dcs-command') && <option value="send-dcs-command">Send DCS command</option>}
           <option value="navigate-subdeck">Navigate to screen</option>
           <option value="open-overlay">Open overlay</option>
           <option value="close-overlay">Close overlay</option>
+          {callableRestSources.map((source) => (
+            <option key={source.id} value={`call-rest:${source.id}`}>
+              Call {source.name}
+            </option>
+          ))}
+          {action.kind === 'call-rest' && !callableRestSources.some((s) => s.id === action.dataSourceId) && (
+            <option value={`call-rest:${action.dataSourceId}`}>
+              Call {selectedRestSource ? `${selectedRestSource.name} (disabled)` : '(deleted REST source)'}
+            </option>
+          )}
         </select>
       </label>
 
-      {action.kind === 'keypress' ? (
+      {action.kind === 'none' ? (
+        <p className="properties__hint">No action — this step does nothing.</p>
+      ) : action.kind === 'keypress' ? (
         <>
           <label className="properties__field">
             <span>Keys</span>
@@ -701,14 +1015,17 @@ function ActionFields({
         <p className="properties__hint">
           Closes whichever slide-over panel is currently open on the device that triggers this. No effect if none is open.
         </p>
+      ) : action.kind === 'send-dcs-command' ? (
+        <SendDcsCommandActionEditor action={action} onPatch={(fields) => onChange({ ...action, ...fields })} />
       ) : (
         // Narrowed by every kind check above, but TS doesn't retain that
         // narrowing inside the onChange closure below (a callback could in
         // principle run after `action` changes) — the cast reflects what's
         // already true at this point in the ternary, not a real unsafe leap.
-        <SendDcsCommandActionEditor
-          action={action as SendDcsCommandAction}
-          onPatch={(fields) => onChange({ ...(action as SendDcsCommandAction), ...fields })}
+        <CallRestActionEditor
+          action={action as CallRestAction}
+          restDataSources={restDataSources}
+          onPatch={(fields) => onChange({ ...(action as CallRestAction), ...fields })}
         />
       )}
     </>
@@ -733,7 +1050,7 @@ function SequenceStepFields({
   if (step.kind === 'delay') {
     return (
       <div className="sequence-step__row">
-        <label className="properties__field">
+        <label className="properties__field properties__field--inline">
           <span>Delay (ms)</span>
           <input
             type="number"
@@ -749,14 +1066,12 @@ function SequenceStepFields({
     )
   }
   return (
-    <div className="sequence-step__row sequence-step__row--action">
-      <div className="sequence-step__fields">
-        <ActionFields action={step.action} onChange={(action) => onChange({ ...step, action })} dcsBiosActionEnabled={dcsBiosActionEnabled} />
-      </div>
-      <button type="button" className="properties__file-remove" onClick={onRemove}>
+    <>
+      <ActionFields action={step.action} onChange={(action) => onChange({ ...step, action })} dcsBiosActionEnabled={dcsBiosActionEnabled} />
+      <button type="button" className="properties__file-remove sequence-step__remove" onClick={onRemove}>
         Remove step
       </button>
-    </div>
+    </>
   )
 }
 
@@ -777,6 +1092,8 @@ function EventSequenceEditor({
   dcsBiosActionEnabled: boolean
 }): React.JSX.Element {
   const dragStepIndex = useRef<number | null>(null)
+  const [recording, setRecording] = useState(false)
+  const [bulkDelayMs, setBulkDelayMs] = useState(250)
 
   function patchStep(index: number, step: SequenceStep): void {
     onChange(steps.map((s, i) => (i === index ? step : s)))
@@ -785,10 +1102,13 @@ function EventSequenceEditor({
     onChange(steps.filter((_, i) => i !== index))
   }
   function addActionStep(): void {
-    onChange([...steps, { kind: 'action', id: nextId(), action: { kind: 'keypress', keys: [] } } satisfies ActionStep])
+    onChange([...steps, { kind: 'action', id: nextId(), action: { kind: 'none' } } satisfies ActionStep])
   }
   function addDelayStep(): void {
     onChange([...steps, { kind: 'delay', id: nextId(), delayMs: 250 } satisfies DelayStep])
+  }
+  function setAllDelays(delayMs: number): void {
+    onChange(steps.map((s) => (s.kind === 'delay' ? { ...s, delayMs } : s)))
   }
   function handleReorderStep(dropIndex: number): void {
     const dragIndex = dragStepIndex.current
@@ -820,14 +1140,40 @@ function EventSequenceEditor({
           />
         </div>
       ))}
-      <div className="properties__file-row">
-        <button type="button" className="properties__file-button" onClick={addActionStep}>
-          + Add action
-        </button>
-        <button type="button" className="properties__file-button" onClick={addDelayStep}>
-          + Add delay
-        </button>
-      </div>
+      {recording ? (
+        <SequenceRecorder
+          onRecorded={(recorded) => {
+            if (recorded.length > 0) onChange([...steps, ...recorded])
+            setRecording(false)
+          }}
+        />
+      ) : (
+        <div className="properties__file-row">
+          <button type="button" className="properties__file-button" onClick={addActionStep}>
+            + Add action
+          </button>
+          <button type="button" className="properties__file-button" onClick={addDelayStep}>
+            + Add delay
+          </button>
+          <button type="button" className="properties__file-button" onClick={() => setRecording(true)}>
+            ● Record keys
+          </button>
+        </div>
+      )}
+      {steps.some((s) => s.kind === 'delay') && (
+        <div className="properties__file-row">
+          <input
+            type="number"
+            min={0}
+            value={bulkDelayMs}
+            onChange={(e) => setBulkDelayMs(Math.max(0, Math.round(Number(e.target.value))))}
+            style={{ width: 80 }}
+          />
+          <button type="button" className="properties__file-button" onClick={() => setAllDelays(bulkDelayMs)}>
+            Set all delays
+          </button>
+        </div>
+      )}
     </PropertiesSection>
   )
 }
@@ -1361,6 +1707,127 @@ function SendDcsCommandActionEditor({
   )
 }
 
+const CALL_REST_EXPR_PLACEHOLDER = 'return variables.my_variable;'
+
+// One placeholder's value row for a CallRestAction — same fx → inline panel
+// → expand-to-modal interaction as SendDcsCommandActionEditor's own Value/
+// argumentExpr field above (and MappingRow's expr toggle in EventsModal.tsx).
+function CallRestPlaceholderRow({
+  entry,
+  onPatch
+}: {
+  entry: CallRestPlaceholderValue
+  onPatch: (fields: Partial<CallRestPlaceholderValue>) => void
+}): React.JSX.Element {
+  const isExpr = entry.expr !== undefined
+  const [expanded, setExpanded] = useState(false)
+  const draftRef = useRef(entry.expr ?? '')
+  useEffect(() => {
+    if (entry.expr) draftRef.current = entry.expr
+  }, [entry.expr])
+
+  return (
+    <label className="properties__field">
+      <span>{entry.placeholder}</span>
+      <div className="properties__file-row">
+        {isExpr ? (
+          <span className="properties__hint-inline">Using expression below</span>
+        ) : (
+          <input value={entry.value} onChange={(e) => onPatch({ value: e.target.value })} />
+        )}
+        {isExpr ? (
+          <button
+            type="button"
+            className="color-picker-button__clear"
+            title="Use a fixed value instead"
+            onClick={() => onPatch({ expr: undefined })}
+          >
+            ×
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="color-picker-button__fx"
+            title="Compute the value with an expression"
+            onClick={() => onPatch({ expr: draftRef.current })}
+          >
+            ƒx
+          </button>
+        )}
+      </div>
+
+      {isExpr && (
+        <div className="color-picker-button__expr-panel">
+          <div className="color-picker-button__expr-editor-wrap">
+            <CodeEditor value={entry.expr ?? ''} onChange={(code) => onPatch({ expr: code })} placeholder={CALL_REST_EXPR_PLACEHOLDER} minimal />
+            <button type="button" className="color-picker-button__expand" title="Expand" onClick={() => setExpanded(true)}>
+              ⤢
+            </button>
+          </div>
+        </div>
+      )}
+
+      {expanded && (
+        <ExpressionEditorModal
+          value={entry.expr ?? ''}
+          onChange={(code) => onPatch({ expr: code })}
+          placeholder={CALL_REST_EXPR_PLACEHOLDER}
+          onClose={() => setExpanded(false)}
+        />
+      )}
+    </label>
+  )
+}
+
+// CallRestAction's editor — one row per {{placeholder}} token currently
+// found in the target RestDataSource's outgoing.payloadTemplate (see
+// extractPlaceholders in shared/restPlaceholders.ts), reconciled live
+// against action.values by placeholder name. A stale values entry whose
+// token no longer exists in the template just isn't rendered (and is
+// ignored at execution — see runCallRestAction in main/index.ts); it isn't
+// deleted from the array either, in case the token comes back.
+function CallRestActionEditor({
+  action,
+  restDataSources,
+  onPatch
+}: {
+  action: CallRestAction
+  restDataSources: RestDataSourceStatus[]
+  onPatch: (fields: Partial<CallRestAction>) => void
+}): React.JSX.Element {
+  const source = restDataSources.find((s) => s.id === action.dataSourceId)
+  if (!source) {
+    return <p className="properties__hint dcsbios-settings__error">This REST data source no longer exists — pick a different action.</p>
+  }
+
+  const placeholders = extractPlaceholders(source.outgoing.payloadTemplate)
+  if (placeholders.length === 0) {
+    return (
+      <p className="properties__hint">
+        This source's outgoing payload template has no placeholders yet — add a {'{{name}}'} token to it in Settings
+        to fill in a value here.
+      </p>
+    )
+  }
+
+  function patchPlaceholder(name: string, fields: Partial<CallRestPlaceholderValue>): void {
+    const exists = action.values.some((v) => v.placeholder === name)
+    const values = exists
+      ? action.values.map((v) => (v.placeholder === name ? { ...v, ...fields } : v))
+      : [...action.values, { placeholder: name, value: '', ...fields }]
+    onPatch({ values })
+  }
+
+  return (
+    <>
+      {placeholders.map((name) => {
+        const entry = action.values.find((v) => v.placeholder === name) ?? { placeholder: name, value: '' }
+        return <CallRestPlaceholderRow key={name} entry={entry} onPatch={(fields) => patchPlaceholder(name, fields)} />
+      })}
+    </>
+  )
+}
+
 // Shared between RockerSwitchWidget's and DialSwitchWidget's branches below
 // — positions/reorder/rename/color/labels editing plus the "Active position"
 // expression (see shared/switchPosition.ts) is identical for both; only the
@@ -1690,8 +2157,6 @@ export function PropertiesPanel(): React.JSX.Element {
   const clearBackgroundImage = useDashboardStore((s) => s.clearBackgroundImage)
   const removeWidget = useDashboardStore((s) => s.removeWidget)
   const removeWidgets = useDashboardStore((s) => s.removeWidgets)
-  const bringToFront = useDashboardStore((s) => s.bringToFront)
-  const sendToBack = useDashboardStore((s) => s.sendToBack)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
   const selectedBlockId = useDashboardStore((s) => s.selectedBlockId)
   const selectBlock = useDashboardStore((s) => s.selectBlock)
@@ -1709,6 +2174,16 @@ export function PropertiesPanel(): React.JSX.Element {
     if (enabledDataSources === null) requestAppSettings()
   }, [enabledDataSources, requestAppSettings])
   const dcsBiosActionEnabled = enabledDataSources === null || enabledDataSources.includes('dcsbios')
+
+  // Populates ActionFields' own restDataSources selector (see its comment)
+  // without requiring the Settings modal to have been opened first this
+  // session — same "fetch once per PropertiesPanel mount" shape as
+  // enabledDataSources above, just with no null-vs-empty distinction to
+  // guard on (restDataSources starts at [], same as approvedDevices).
+  const requestRestDataSources = useDashboardStore((s) => s.requestRestDataSources)
+  useEffect(() => {
+    requestRestDataSources()
+  }, [requestRestDataSources])
 
   // Same "fetch once if null" shape as enabledDataSources above, for
   // ScreenCaptureWidget's monitor dropdown — plus `connected` in the deps:
@@ -1790,16 +2265,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <h2 className="properties__title">Properties</h2>
         <p className="properties__hint">
           {selectedWidgetIds.length} widgets selected — select just one to edit its properties.
-        </p>
-        <div className="properties__layer-row">
-          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
-            <span aria-hidden="true">⬆</span> Bring to front
-          </button>
-          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
-            <span aria-hidden="true">⬇</span> Send to back
-          </button>
-        </div>
-        <div className="properties__divider" />
+        </p>        <div className="properties__divider" />
         <button className="properties__delete" onClick={handleDeleteMany}>
           Delete {selectedWidgetIds.length} widgets
         </button>
@@ -1940,15 +2406,6 @@ export function PropertiesPanel(): React.JSX.Element {
         {resizeHandle}
         <h2 className="properties__title">Properties</h2>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[gauge.type]}</p>
-
-        <div className="properties__layer-row">
-          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
-            <span aria-hidden="true">⬆</span> Bring to front
-          </button>
-          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
-            <span aria-hidden="true">⬇</span> Send to back
-          </button>
-        </div>
 
         <PropertiesSection title="Style & Value">
           <label className="properties__field">
@@ -2171,15 +2628,6 @@ export function PropertiesPanel(): React.JSX.Element {
         <h2 className="properties__title">Properties</h2>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[adjuster.type]}</p>
 
-        <div className="properties__layer-row">
-          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
-            <span aria-hidden="true">⬆</span> Bring to front
-          </button>
-          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
-            <span aria-hidden="true">⬇</span> Send to back
-          </button>
-        </div>
-
         <PropertiesSection title="Style & Value">
           <label className="properties__field">
             <span>Style</span>
@@ -2391,7 +2839,6 @@ export function PropertiesPanel(): React.JSX.Element {
   if (widget.type === 'encoder') {
     const encoder = widget
     const minSize = snapToGrid ? gridSize : 1
-    const isFillExpr = encoder.fill.colorExpr !== undefined
     const isTrackExpr = encoder.track.colorExpr !== undefined
     const isBorderExpr = encoder.borderColorExpr !== undefined
 
@@ -2426,15 +2873,6 @@ export function PropertiesPanel(): React.JSX.Element {
         <h2 className="properties__title">Properties</h2>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[encoder.type]}</p>
 
-        <div className="properties__layer-row">
-          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
-            <span aria-hidden="true">⬆</span> Bring to front
-          </button>
-          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
-            <span aria-hidden="true">⬇</span> Send to back
-          </button>
-        </div>
-
         <PropertiesSection title="Step">
           <label className="properties__field">
             <span>Degrees per step</span>
@@ -2466,22 +2904,15 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Colors">
-          <div className="properties__field">
-            <span>Grip color</span>
-            <ColorPickerButton
-              value={encoder.fill.color ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchEncoder({ fill: { ...encoder.fill, color, colorExpr: undefined } })}
-              isExpr={isFillExpr}
-              exprValue={encoder.fill.colorExpr ?? ''}
-              onExprChange={(code) => patchEncoder({ fill: { ...encoder.fill, colorExpr: code } })}
-              onEnterExpr={() => patchEncoder({ fill: { ...encoder.fill, colorExpr: encoder.fill.colorExpr ?? '' } })}
-              onClearExpr={() => patchEncoder({ fill: { ...encoder.fill, colorExpr: undefined } })}
-              opacity={encoder.fill.backgroundOpacity ?? 1}
-              onOpacityChange={(v) => patchEncoder({ fill: { ...encoder.fill, backgroundOpacity: v } })}
-            />
-          </div>
+        <DialShapeFields
+          value={encoder}
+          onChange={patchEncoder}
+          fill={encoder.fill}
+          onFillChange={(fill) => patchEncoder({ fill })}
+          needleColorLabel="Needle color"
+        />
 
+        <PropertiesSection title="Colors">
           <div className="properties__field">
             <span>Dial face color</span>
             <ColorPickerButton
@@ -2625,15 +3056,6 @@ export function PropertiesPanel(): React.JSX.Element {
         {resizeHandle}
         <h2 className="properties__title">Properties</h2>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
-
-        <div className="properties__layer-row">
-          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
-            <span aria-hidden="true">⬆</span> Bring to front
-          </button>
-          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
-            <span aria-hidden="true">⬇</span> Send to back
-          </button>
-        </div>
 
         <PropertiesSection title="Style">
           <label className="properties__field">
@@ -2787,15 +3209,6 @@ export function PropertiesPanel(): React.JSX.Element {
         {resizeHandle}
         <h2 className="properties__title">Properties</h2>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
-
-        <div className="properties__layer-row">
-          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
-            <span aria-hidden="true">⬆</span> Bring to front
-          </button>
-          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
-            <span aria-hidden="true">⬇</span> Send to back
-          </button>
-        </div>
 
         <PropertiesSection title="Style">
           <label className="properties__field">
@@ -3050,7 +3463,6 @@ export function PropertiesPanel(): React.JSX.Element {
     const sw = widget
     const minSize = snapToGrid ? gridSize : 1
     const isTrackExpr = sw.track.colorExpr !== undefined
-    const isFillExpr = sw.fill.colorExpr !== undefined
     const isBorderExpr = sw.borderColorExpr !== undefined
 
     function patchSwitch(fields: Partial<DialSwitchWidget>): void {
@@ -3084,15 +3496,6 @@ export function PropertiesPanel(): React.JSX.Element {
         <h2 className="properties__title">Properties</h2>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
 
-        <div className="properties__layer-row">
-          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
-            <span aria-hidden="true">⬆</span> Bring to front
-          </button>
-          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
-            <span aria-hidden="true">⬇</span> Send to back
-          </button>
-        </div>
-
         <PropertiesSection title="Style">
           <div className="properties__grid2">
             <label className="properties__field">
@@ -3104,6 +3507,22 @@ export function PropertiesPanel(): React.JSX.Element {
               <input type="number" value={sw.endAngle ?? 120} onChange={(e) => patchSwitch({ endAngle: Number(e.target.value) })} />
             </label>
           </div>
+
+          <label className="properties__field">
+            <span>Interaction</span>
+            <select
+              value={sw.interactionMode ?? 'tap'}
+              onChange={(e) => patchSwitch({ interactionMode: e.target.value === 'tap' ? undefined : (e.target.value as DialSwitchWidget['interactionMode']) })}
+            >
+              <option value="tap">Tap a detent</option>
+              <option value="drag">Press and drag toward a position</option>
+            </select>
+          </label>
+          <p className="properties__hint">
+            {(sw.interactionMode ?? 'tap') === 'tap'
+              ? 'Tap directly on a detent (or its label) to select it.'
+              : "Press anywhere on the dial and drag in the direction you want — you can drag past the widget's own edges. The needle snaps live to whichever position is nearest, so you can see what releasing will select."}
+          </p>
 
           <PropertiesSection title="Detents">
             <DetentShapeEditor
@@ -3123,216 +3542,13 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
           </PropertiesSection>
 
-          <PropertiesSection title="Dial shape">
-            <label className="properties__field">
-              <span>Shape</span>
-              <select
-                value={sw.dialShape ?? 'needle'}
-                onChange={(e) => patchSwitch({ dialShape: e.target.value === 'needle' ? undefined : (e.target.value as DialSwitchWidget['dialShape']) })}
-              >
-                <option value="needle">Needle</option>
-                <option value="square">Square</option>
-                <option value="circle">Circle</option>
-              </select>
-            </label>
-
-            {(sw.dialShape ?? 'needle') === 'needle' && (
-              <div className="properties__field">
-                <span>Needle color</span>
-                <ColorPickerButton
-                  value={sw.fill.color ?? DEFAULT_WIDGET_COLOR}
-                  onChange={(color) => patchSwitch({ fill: { ...sw.fill, color, colorExpr: undefined } })}
-                  isExpr={isFillExpr}
-                  exprValue={sw.fill.colorExpr ?? ''}
-                  onExprChange={(code) => patchSwitch({ fill: { ...sw.fill, colorExpr: code } })}
-                  onEnterExpr={() => patchSwitch({ fill: { ...sw.fill, colorExpr: sw.fill.colorExpr ?? '' } })}
-                  onClearExpr={() => patchSwitch({ fill: { ...sw.fill, colorExpr: undefined } })}
-                  opacity={sw.fill.backgroundOpacity ?? 1}
-                  onOpacityChange={(v) => patchSwitch({ fill: { ...sw.fill, backgroundOpacity: v } })}
-                />
-              </div>
-            )}
-
-            {sw.dialShape === 'square' && (
-              <>
-                <div className="properties__grid2">
-                  <label className="properties__field">
-                    <span>Square width</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={sw.squareWidth ?? 24}
-                      onChange={(e) => patchSwitch({ squareWidth: Math.max(1, Number(e.target.value)) })}
-                    />
-                  </label>
-                  <label className="properties__field">
-                    <span>Square height</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={sw.squareHeight ?? 24}
-                      onChange={(e) => patchSwitch({ squareHeight: Math.max(1, Number(e.target.value)) })}
-                    />
-                  </label>
-                </div>
-                <div className="properties__grid2">
-                  <label className="properties__field">
-                    <span>Square border width</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={sw.squareBorderWidth ?? 0}
-                      onChange={(e) => patchSwitch({ squareBorderWidth: Math.max(0, Number(e.target.value)) })}
-                    />
-                  </label>
-                  <label className="properties__field">
-                    <span>Square border radius</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={sw.squareBorderRadius ?? 2}
-                      onChange={(e) => patchSwitch({ squareBorderRadius: Math.max(0, Number(e.target.value)) })}
-                    />
-                  </label>
-                </div>
-                <div className="properties__field">
-                  <span>Square color</span>
-                  <ColorPickerButton
-                    value={sw.squareColor ?? sw.fill.color ?? DEFAULT_WIDGET_COLOR}
-                    onChange={(color) => patchSwitch({ squareColor: color })}
-                    auto={sw.squareColor === undefined}
-                    onAuto={() => patchSwitch({ squareColor: undefined })}
-                  />
-                </div>
-                <div className="properties__field">
-                  <span>Square border color</span>
-                  <ColorPickerButton
-                    value={sw.squareBorderColor ?? DEFAULT_WIDGET_COLOR}
-                    onChange={(color) => patchSwitch({ squareBorderColor: color })}
-                  />
-                </div>
-              </>
-            )}
-
-            {sw.dialShape === 'circle' && (
-              <>
-                <div className="properties__grid2">
-                  <label className="properties__field">
-                    <span>Circle size</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={sw.circleSize ?? 20}
-                      onChange={(e) => patchSwitch({ circleSize: Math.max(1, Number(e.target.value)) })}
-                    />
-                  </label>
-                  <label className="properties__field">
-                    <span>Circle border width</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={sw.circleBorderWidth ?? 0}
-                      onChange={(e) => patchSwitch({ circleBorderWidth: Math.max(0, Number(e.target.value)) })}
-                    />
-                  </label>
-                </div>
-                <div className="properties__field">
-                  <span>Circle color</span>
-                  <ColorPickerButton
-                    value={sw.circleColor ?? sw.fill.color ?? DEFAULT_WIDGET_COLOR}
-                    onChange={(color) => patchSwitch({ circleColor: color })}
-                    auto={sw.circleColor === undefined}
-                    onAuto={() => patchSwitch({ circleColor: undefined })}
-                  />
-                </div>
-                <div className="properties__field">
-                  <span>Circle border color</span>
-                  <ColorPickerButton
-                    value={sw.circleBorderColor ?? DEFAULT_WIDGET_COLOR}
-                    onChange={(color) => patchSwitch({ circleBorderColor: color })}
-                  />
-                </div>
-                <div className="properties__grid2">
-                  <label className="properties__field">
-                    <span>Indent count</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={sw.circleIndentCount ?? 0}
-                      onChange={(e) => patchSwitch({ circleIndentCount: Math.max(0, Number(e.target.value)) })}
-                    />
-                  </label>
-                  <label className="properties__field">
-                    <span>Indent size</span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={sw.circleIndentSize ?? Math.round(((sw.circleSize ?? 20) / 6) * 10) / 10}
-                      onChange={(e) => patchSwitch({ circleIndentSize: Math.max(0, Number(e.target.value)) })}
-                    />
-                  </label>
-                </div>
-                <div className="properties__field">
-                  <span>Indent color</span>
-                  <ColorPickerButton
-                    value={sw.circleIndentColor ?? sw.track.color ?? DEFAULT_WIDGET_COLOR}
-                    onChange={(color) => patchSwitch({ circleIndentColor: color })}
-                    auto={sw.circleIndentColor === undefined}
-                    onAuto={() => patchSwitch({ circleIndentColor: undefined })}
-                  />
-                </div>
-              </>
-            )}
-          </PropertiesSection>
-
-          {(sw.dialShape === 'square' || sw.dialShape === 'circle') && (
-            <PropertiesSection title="Indicator">
-              <DetentShapeEditor
-                shape={sw.indicatorShape ?? 'circle'}
-                onShapeChange={(shape) => patchSwitch({ indicatorShape: shape === 'circle' ? undefined : shape })}
-                style={sw.indicatorStyle}
-                onStyleChange={(indicatorStyle) => patchSwitch({ indicatorStyle })}
-                triangleBorderSupported
-              />
-              <div className="properties__field">
-                <span>Indicator color</span>
-                <ColorPickerButton
-                  value={
-                    sw.indicatorColor ??
-                    ((sw.dialShape === 'square' ? sw.squareColor : sw.circleColor) ?? sw.fill.color ?? DEFAULT_WIDGET_COLOR)
-                  }
-                  onChange={(color) => patchSwitch({ indicatorColor: color })}
-                  auto={sw.indicatorColor === undefined}
-                  onAuto={() => patchSwitch({ indicatorColor: undefined })}
-                />
-              </div>
-              <label className="properties__field">
-                <span>Indicator distance</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={sw.indicatorDistance ?? (sw.dialShape === 'square' ? (sw.squareHeight ?? 24) / 2 : (sw.circleSize ?? 20) / 2)}
-                  onChange={(e) => patchSwitch({ indicatorDistance: Math.max(0, Number(e.target.value)) })}
-                />
-              </label>
-            </PropertiesSection>
-          )}
-
-          <label className="properties__field">
-            <span>Interaction</span>
-            <select
-              value={sw.interactionMode ?? 'tap'}
-              onChange={(e) => patchSwitch({ interactionMode: e.target.value === 'tap' ? undefined : (e.target.value as DialSwitchWidget['interactionMode']) })}
-            >
-              <option value="tap">Tap a detent</option>
-              <option value="drag">Press and drag toward a position</option>
-            </select>
-          </label>
-          <p className="properties__hint">
-            {(sw.interactionMode ?? 'tap') === 'tap'
-              ? 'Tap directly on a detent (or its label) to select it.'
-              : "Press anywhere on the dial and drag in the direction you want — you can drag past the widget's own edges. The needle snaps live to whichever position is nearest, so you can see what releasing will select."}
-          </p>
+          <DialShapeFields
+            value={sw}
+            onChange={patchSwitch}
+            fill={sw.fill}
+            onFillChange={(fill) => patchSwitch({ fill })}
+            needleColorLabel="Needle color"
+          />
         </PropertiesSection>
 
         <PropertiesSection title="Colors">
@@ -3458,15 +3674,6 @@ export function PropertiesPanel(): React.JSX.Element {
         {resizeHandle}
         <h2 className="properties__title">Properties</h2>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[dd.type]}</p>
-
-        <div className="properties__layer-row">
-          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
-            <span aria-hidden="true">⬆</span> Bring to front
-          </button>
-          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
-            <span aria-hidden="true">⬇</span> Send to back
-          </button>
-        </div>
 
         <PropertiesSection title="Style">
           <label className="properties__field">
@@ -3648,15 +3855,6 @@ export function PropertiesPanel(): React.JSX.Element {
         <h2 className="properties__title">Properties</h2>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sc.type]}</p>
 
-        <div className="properties__layer-row">
-          <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
-            <span aria-hidden="true">⬆</span> Bring to front
-          </button>
-          <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
-            <span aria-hidden="true">⬇</span> Send to back
-          </button>
-        </div>
-
         <PropertiesSection title="Region">
           <label className="properties__field">
             <span>Monitor</span>
@@ -3824,6 +4022,12 @@ export function PropertiesPanel(): React.JSX.Element {
   // `events` field — EventfulWidget, not StatefulWidget, since events isn't
   // part of the WidgetState/statesEnabled/activeStateExpr machinery.
   const eventfulWidget = widget as EventfulWidget
+  // "Can this shape support a slider at all," independent of whether it's
+  // currently turned on — gates the Enable-slider checkbox itself. Distinct
+  // from isMorphSliderActive (imported below), which also factors in
+  // sliderEnabled and is used everywhere that needs "is the slider actually
+  // live right now" (the Move action editor, its badge count).
+  const morphSliderUnsupported = widget.type === 'morph' && (hasMorphCycle(widget.blocks) || widget.blocks.length < 2)
 
   function patch(fields: Partial<Widget>): void {
     // fields' shape always matches widget's actual type at each call site
@@ -3950,15 +4154,6 @@ export function PropertiesPanel(): React.JSX.Element {
       {resizeHandle}
       <h2 className="properties__title">Properties</h2>
       <p className="properties__widget-type">{WIDGET_TYPE_LABELS[statefulWidget.type]}</p>
-
-      <div className="properties__layer-row">
-        <button type="button" className="properties__layer-button" onClick={() => bringToFront(selectedWidgetIds)}>
-          <span aria-hidden="true">⬆</span> Bring to front
-        </button>
-        <button type="button" className="properties__layer-button" onClick={() => sendToBack(selectedWidgetIds)}>
-          <span aria-hidden="true">⬇</span> Send to back
-        </button>
-      </div>
 
       <PropertiesSection title="States">
         <label className="properties__toggle">
@@ -4216,19 +4411,88 @@ export function PropertiesPanel(): React.JSX.Element {
         )}
       </PropertiesSection>
 
-      <PropertiesSection title="Actions" badge={2}>
+      {widget.type === 'morph' && (
+        <PropertiesSection title="Slider">
+          <label className="properties__toggle">
+            <input
+              type="checkbox"
+              checked={widget.sliderEnabled ?? false}
+              disabled={morphSliderUnsupported}
+              onChange={(e) => patch({ sliderEnabled: e.target.checked })}
+            />
+            <span className="properties__toggle-track" />
+            Enable slider
+          </label>
+          {morphSliderUnsupported ? (
+            <p className="properties__hint">
+              {hasMorphCycle(widget.blocks)
+                ? "Disabled — this shape has a loop, so there's no single path across it. Remove a block to break the loop."
+                : 'Disabled — needs at least two blocks to have a path to slide along.'}
+            </p>
+          ) : (
+            <>
+              <p className="properties__hint">
+                Adds a drag handle that follows this shape's own longest path end-to-end, reporting how far along it is
+                (0–100) — see the Move action below.
+              </p>
+              {widget.sliderEnabled && (
+                <label className="properties__field">
+                  <span>Rest value (optional)</span>
+                  <textarea
+                    className="properties__code"
+                    rows={2}
+                    placeholder="return variables.my_variable;"
+                    value={widget.valueExpr ?? ''}
+                    onChange={(e) => patch({ valueExpr: e.target.value || undefined })}
+                  />
+                  <p className="properties__hint">
+                    Where the handle sits while not being dragged, 0–100 — e.g. reflect a variable back into the visual.
+                    Falls back to 0 if unset.
+                  </p>
+                </label>
+              )}
+            </>
+          )}
+        </PropertiesSection>
+      )}
+
+      <PropertiesSection title="Actions" badge={widget.type === 'morph' && isMorphSliderActive(widget) ? 3 : 2}>
+        {/* eventfulWidget.events.move doesn't type-check here — Button's and
+            Encoder's `events` have no `move` field at all (not even
+            optional), so EventfulWidget's own union rejects that access
+            outright. widget.type === 'morph' checked fresh inside each of
+            these closures (rather than read off eventfulWidget) narrows
+            `widget` correctly within that closure's own body — same "check
+            it again inside the nested function" pattern patchBlock already
+            relies on above. */}
         <EventSequenceEditor
           title="Press"
           steps={eventfulWidget.events.press}
-          onChange={(steps) => patch({ events: { press: steps, release: eventfulWidget.events.release } })}
+          onChange={(steps) =>
+            widget.type === 'morph'
+              ? patch({ events: { ...widget.events, press: steps } })
+              : patch({ events: { press: steps, release: eventfulWidget.events.release } })
+          }
           dcsBiosActionEnabled={dcsBiosActionEnabled}
         />
         <EventSequenceEditor
           title="Release"
           steps={eventfulWidget.events.release}
-          onChange={(steps) => patch({ events: { press: eventfulWidget.events.press, release: steps } })}
+          onChange={(steps) =>
+            widget.type === 'morph'
+              ? patch({ events: { ...widget.events, release: steps } })
+              : patch({ events: { press: eventfulWidget.events.press, release: steps } })
+          }
           dcsBiosActionEnabled={dcsBiosActionEnabled}
         />
+        {widget.type === 'morph' && isMorphSliderActive(widget) && (
+          <EventSequenceEditor
+            title="Move (while dragging)"
+            steps={widget.events.move ?? []}
+            onChange={(steps) => patch({ events: { ...widget.events, move: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+        )}
       </PropertiesSection>
 
       <PropertiesSection title="Position & Size">

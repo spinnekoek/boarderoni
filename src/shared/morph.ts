@@ -149,3 +149,169 @@ export function morphFootprint(widget: MorphButtonWidget): { x: number; y: numbe
     h: (maxRow - minRow + 1) * widget.cellH
   }
 }
+
+// A connected shape (blocks are always connected — see MorphCanvasWidget.tsx's
+// isRemovable/addBlock, which never leave a gap) is a tree, i.e. loop-free,
+// iff it has exactly blocks.length - 1 edges. Counting only the right/down
+// neighbor of each block (rather than all four directions) counts each edge
+// once instead of twice, so no /2 or visited-pair tracking is needed.
+export function hasMorphCycle(blocks: MorphBlock[]): boolean {
+  const blockSet = new Set(blocks.map((b) => key(b.col, b.row)))
+  let edges = 0
+  for (const b of blocks) {
+    if (blockSet.has(key(b.col + 1, b.row))) edges++
+    if (blockSet.has(key(b.col, b.row + 1))) edges++
+  }
+  return edges > blocks.length - 1
+}
+
+// Single source of truth for "does this widget's slider actually do
+// anything" — used for gating the Properties panel toggle, which events fire
+// (see shared/widgetEvents.ts), and whether the handle renders/drags at all.
+// Deliberately derived from sliderEnabled + the current shape rather than
+// trying to keep sliderEnabled itself in sync (e.g. force it off) whenever a
+// block edit closes a loop — a shape edit alone never needs to reach into
+// the widget's own flags to stay consistent.
+export function isMorphSliderActive(widget: MorphButtonWidget): boolean {
+  return !!widget.sliderEnabled && widget.blocks.length >= 2 && !hasMorphCycle(widget.blocks)
+}
+
+function morphAdjacency(blocks: MorphBlock[]): Map<string, MorphBlock[]> {
+  const blockByCell = new Map(blocks.map((b) => [key(b.col, b.row), b]))
+  const deltas: [number, number][] = [
+    [0, -1],
+    [0, 1],
+    [-1, 0],
+    [1, 0]
+  ]
+  const adjacency = new Map<string, MorphBlock[]>()
+  for (const block of blocks) {
+    const neighbors: MorphBlock[] = []
+    for (const [dCol, dRow] of deltas) {
+      const neighbor = blockByCell.get(key(block.col + dCol, block.row + dRow))
+      if (neighbor) neighbors.push(neighbor)
+    }
+    adjacency.set(block.id, neighbors)
+  }
+  return adjacency
+}
+
+// BFS from `startId`, returning the LAST block visited (id) and each
+// visited block's parent — in an unweighted graph, BFS visits every node at
+// distance d before any node at distance d+1, so the last node it ever
+// visits is guaranteed to be at the maximum distance from the start. Used
+// twice (see findMorphSliderPath) — that's the standard "double BFS" trick
+// for finding a tree's diameter endpoints, exact for any tree (which this
+// always is here, since findMorphSliderPath is only ever called once
+// isMorphSliderActive has already confirmed the shape is loop-free).
+function bfsFarthestId(adjacency: Map<string, MorphBlock[]>, startId: string): { farthestId: string; parents: Map<string, string | null> } {
+  const parents = new Map<string, string | null>([[startId, null]])
+  const queue = [startId]
+  let farthestId = startId
+  for (let head = 0; head < queue.length; head++) {
+    farthestId = queue[head]
+    for (const neighbor of adjacency.get(farthestId) ?? []) {
+      if (parents.has(neighbor.id)) continue
+      parents.set(neighbor.id, farthestId)
+      queue.push(neighbor.id)
+    }
+  }
+  return { farthestId, parents }
+}
+
+// The shape's own two furthest-apart blocks, and the single path between
+// them — every block along the way, in order. Well-defined only for a
+// loop-free shape (see isMorphSliderActive); called elsewhere only once
+// that's already been confirmed.
+export function findMorphSliderPath(blocks: MorphBlock[]): MorphBlock[] {
+  if (blocks.length <= 1) return blocks
+  const blockById = new Map(blocks.map((b) => [b.id, b]))
+  const adjacency = morphAdjacency(blocks)
+  const first = bfsFarthestId(adjacency, blocks[0].id)
+  const second = bfsFarthestId(adjacency, first.farthestId)
+  const path: MorphBlock[] = []
+  for (let id: string | null = second.farthestId; id !== null; id = second.parents.get(id) ?? null) {
+    const block = blockById.get(id)
+    if (block) path.push(block)
+  }
+  return path.reverse()
+}
+
+// The slider path's blocks, as pixel centers in the widget's own local
+// (footprint-relative) coordinate space — same (col - minCol) * cellW
+// anchoring MorphButtonWidget.tsx's own block slotStyle uses, so these line
+// up with the rendered blocks exactly.
+export function morphSliderPoints(widget: MorphButtonWidget): { x: number; y: number }[] {
+  const cols = widget.blocks.map((b) => b.col)
+  const rows = widget.blocks.map((b) => b.row)
+  const minCol = Math.min(...cols)
+  const minRow = Math.min(...rows)
+  return findMorphSliderPath(widget.blocks).map((b) => ({
+    x: (b.col - minCol) * widget.cellW + widget.cellW / 2,
+    y: (b.row - minRow) * widget.cellH + widget.cellH / 2
+  }))
+}
+
+function morphSliderSegmentLengths(points: { x: number; y: number }[]): number[] {
+  const lengths: number[] = []
+  for (let i = 1; i < points.length; i++) {
+    lengths.push(Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y))
+  }
+  return lengths
+}
+
+// The point at `fraction` (0-1) of the way along the path's total arc
+// length — where the handle is drawn.
+export function morphSliderPointAtFraction(points: { x: number; y: number }[], fraction: number): { x: number; y: number } {
+  if (points.length === 0) return { x: 0, y: 0 }
+  if (points.length === 1) return points[0]
+  const lengths = morphSliderSegmentLengths(points)
+  const total = lengths.reduce((a, b) => a + b, 0)
+  if (total === 0) return points[0]
+  let remaining = Math.min(1, Math.max(0, fraction)) * total
+  for (let i = 0; i < lengths.length; i++) {
+    const segLen = lengths[i]
+    if (remaining <= segLen || i === lengths.length - 1) {
+      const t = segLen === 0 ? 0 : Math.min(1, remaining / segLen)
+      return {
+        x: points[i].x + (points[i + 1].x - points[i].x) * t,
+        y: points[i].y + (points[i + 1].y - points[i].y) * t
+      }
+    }
+    remaining -= segLen
+  }
+  return points[points.length - 1]
+}
+
+// The arc-length fraction (0-1) of whichever point on the path is closest
+// to (localX, localY) — the path equivalent of useAdjusterDrag.ts's
+// fractionFromEvent (which projects onto a straight track or an arc
+// instead). Standard nearest-point-on-polyline: project onto each segment
+// (clamped to that segment's own extent), keep the closest.
+export function projectOntoMorphSliderPath(points: { x: number; y: number }[], localX: number, localY: number): number {
+  if (points.length < 2) return 0
+  const lengths = morphSliderSegmentLengths(points)
+  const total = lengths.reduce((a, b) => a + b, 0)
+  if (total === 0) return 0
+
+  let bestDistSq = Infinity
+  let bestLengthAlong = 0
+  let cumulative = 0
+  for (let i = 0; i < lengths.length; i++) {
+    const a = points[i]
+    const b = points[i + 1]
+    const segLen = lengths[i]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const t = segLen === 0 ? 0 : Math.min(1, Math.max(0, ((localX - a.x) * dx + (localY - a.y) * dy) / (segLen * segLen)))
+    const projX = a.x + dx * t
+    const projY = a.y + dy * t
+    const distSq = (localX - projX) ** 2 + (localY - projY) ** 2
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq
+      bestLengthAlong = cumulative + t * segLen
+    }
+    cumulative += segLen
+  }
+  return Math.min(1, Math.max(0, bestLengthAlong / total))
+}

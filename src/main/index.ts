@@ -23,6 +23,7 @@ import {
   DEFAULT_DASHBOARD,
   type ActionStep,
   type ButtonWidget,
+  type CallRestAction,
   type ClientToServer,
   type Dashboard,
   type DeckSummary,
@@ -46,9 +47,12 @@ import {
 import { getEventSteps } from '../shared/widgetEvents'
 import { findSubDeck, findWidgetAnywhere } from '../shared/subDecks'
 import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression } from '../shared/expr'
+import { extractPlaceholders } from '../shared/restPlaceholders'
 import { EVENT_SOURCE_PRODUCERS } from './eventSourceProducers'
 import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuality, addMjpegViewer } from './screenCapture'
 import { getAppSettings, updateAppSettings } from './appSettings'
+import { getRestDataSources, updateRestDataSources, createRestDataSource, regenerateRestDataSourceToken } from './restDataSources'
+import { syncRestIncomingServers, getRestListenStatus } from './restIncoming'
 import { isDeviceApproved, approveDevice, revokeDevice, renameApprovedDevice, listApprovedDevices } from './deviceApproval'
 import { displayDeviceName } from '../shared/deviceName'
 import {
@@ -984,6 +988,93 @@ async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction, v
   await sendDcsBiosCommand(action.identifier, argument)
 }
 
+// Posts a CallRestAction's target RestDataSource's outgoing payload — same
+// variables-in-scope/$value-while-dragging convention as runSendDcsCommand
+// above, just resolving N named placeholders instead of one argument. Uses
+// the runtime's global fetch — this app's first outbound HTTP request
+// anywhere; everything else here only ever serves requests.
+async function runCallRestAction(room: DeckRoom, action: CallRestAction, value?: number): Promise<void> {
+  const source = getRestDataSources().find((s) => s.id === action.dataSourceId)
+  if (!source || !source.enabled) {
+    throw new Error('This REST data source is disabled or no longer exists')
+  }
+
+  const variableMap = toVariableMap(room.dashboard.variables ?? [])
+  let payloadText = source.outgoing.payloadTemplate
+  for (const name of extractPlaceholders(payloadText)) {
+    const entry = action.values.find((v) => v.placeholder === name)
+    let resolved: unknown = null
+    if (entry?.expr && entry.expr.trim()) {
+      const result = value !== undefined ? evaluateMappingExpression(entry.expr, value, variableMap) : tryEvaluateExpression(entry.expr, variableMap)
+      if (!result.ok) throw new Error(result.error)
+      resolved = result.value
+    } else if (entry?.value !== undefined) {
+      resolved = entry.value
+    }
+    payloadText = payloadText.replaceAll(`{{${name}}}`, JSON.stringify(resolved))
+  }
+
+  let payload: unknown
+  try {
+    payload = JSON.parse(payloadText)
+  } catch {
+    throw new Error('Outgoing payload template is not valid JSON once placeholders are filled in')
+  }
+
+  const res = await fetch(source.outgoing.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  if (!res.ok) throw new Error(`REST call failed: ${res.status} ${res.statusText}`)
+}
+
+// The `emit` callback passed to syncRestIncomingServers (see
+// main/restIncoming.ts) — turns one incoming REST request's already-
+// flattened body into variable updates on its source's configured target
+// deck. Mirrors syncEventSources' own per-tick mapping loop almost exactly,
+// just triggered by a request instead of a producer tick, and against a
+// single source instead of every currently-loaded room's instances.
+function applyRestIncoming(sourceId: string, flattened: Record<string, unknown>): void {
+  const source = getRestDataSources().find((s) => s.id === sourceId)
+  if (!source) return
+  const room = getOrLoadRoom(source.incoming.targetDeckId)
+  if (!room) return
+
+  const variableMap = toVariableMap(room.dashboard.variables ?? [])
+  const updates: Record<string, unknown> = {}
+  for (const mapping of source.incoming.mappings) {
+    if (!mapping.variableName.trim() || !(mapping.field in flattened)) continue
+    const rawValue = flattened[mapping.field]
+    if (mapping.expr && mapping.expr.trim()) {
+      const result = evaluateMappingExpression(mapping.expr, coerceVariableValue(rawValue), variableMap)
+      if (!result.ok) {
+        console.error(`[boarderoni] REST incoming mapping expression failed (${source.name} -> ${mapping.variableName})`, result.error)
+        continue
+      }
+      updates[mapping.variableName] = result.value
+    } else {
+      updates[mapping.variableName] = rawValue
+    }
+  }
+  if (Object.keys(updates).length > 0) applyVariableUpdates(room, updates, { immediate: false })
+}
+
+// Reply to rest-sources:get, and the payload broadcast to every edit-role
+// socket after a rest-sources:create/update/regenerate-token/delete — same
+// "full current list either way" reasoning as device:approved-list.
+function restSourcesPayload(): ServerToClient {
+  const sources = getRestDataSources().map((s) => ({ ...s, ...getRestListenStatus(s.id) }))
+  return { type: 'rest-sources:list', sources, lanAddress: getLanAddress() }
+}
+
+function broadcastRestSources(): void {
+  const payload = JSON.stringify(restSourcesPayload())
+  for (const [sock, sctx] of socketContext) {
+    if (sctx.role === 'edit' && sock.readyState === WebSocket.OPEN) sock.send(payload)
+  }
+}
+
 function eventSourceSignature(source: EventSource): string {
   return JSON.stringify({ kind: source.kind, config: source.config ?? null })
 }
@@ -1117,6 +1208,10 @@ async function runActionStep(room: DeckRoom, action: WidgetAction, value: number
     await runSendDcsCommand(room, action, value)
     return
   }
+  if (action.kind === 'call-rest') {
+    await runCallRestAction(room, action, value)
+    return
+  }
   if (action.kind === 'navigate-subdeck') {
     if (action.target.type === 'sub-deck') requireSubDeck(room, action.target.subDeckId)
     ws.send(JSON.stringify({ type: 'subdeck:navigate', target: action.target } satisfies ServerToClient))
@@ -1139,6 +1234,7 @@ async function runActionStep(room: DeckRoom, action: WidgetAction, value: number
     ws.send(JSON.stringify({ type: 'subdeck:close-overlay' } satisfies ServerToClient))
     return
   }
+  if (action.kind === 'none') return
   await runKeypressAction(action)
 }
 
@@ -1579,6 +1675,48 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         resyncAllRoomsEventSources()
         break
       }
+      case 'rest-sources:get': {
+        // Settings modal / action editor only, edit-role only (enforced
+        // server-side) — same admin-action reasoning as
+        // device:list-approved.
+        if (ctx.role !== 'edit') break
+        ws.send(JSON.stringify(restSourcesPayload()))
+        break
+      }
+      case 'rest-sources:create': {
+        if (ctx.role !== 'edit') break
+        createRestDataSource(message.name)
+        syncRestIncomingServers(applyRestIncoming)
+        broadcastRestSources()
+        break
+      }
+      case 'rest-sources:update': {
+        if (ctx.role !== 'edit') break
+        // The renderer's own copy is RestDataSourceStatus (RestDataSource
+        // plus derived listening/listenError, see restSourcesPayload) — it
+        // round-trips the whole object on every edit rather than stripping
+        // those fields itself, so this is where they're dropped before
+        // anything gets persisted to disk.
+        const sanitized = message.sources.map(({ id, name, enabled, incoming, outgoing }) => ({ id, name, enabled, incoming, outgoing }))
+        updateRestDataSources(sanitized)
+        syncRestIncomingServers(applyRestIncoming)
+        broadcastRestSources()
+        break
+      }
+      case 'rest-sources:regenerate-token': {
+        if (ctx.role !== 'edit') break
+        regenerateRestDataSourceToken(message.sourceId)
+        syncRestIncomingServers(applyRestIncoming)
+        broadcastRestSources()
+        break
+      }
+      case 'rest-sources:delete': {
+        if (ctx.role !== 'edit') break
+        updateRestDataSources(getRestDataSources().filter((s) => s.id !== message.sourceId))
+        syncRestIncomingServers(applyRestIncoming)
+        broadcastRestSources()
+        break
+      }
       case 'screen-capture:list-displays': {
         ws.send(JSON.stringify({ type: 'screen-capture:displays', displays: listDisplays() } satisfies ServerToClient))
         break
@@ -1649,6 +1787,12 @@ onDcsBiosStatsChange((stats) => {
 httpServer.listen(SERVER_PORT, () => {
   console.log(`[boarderoni] server listening on :${SERVER_PORT}`)
 })
+
+// One http.createServer per enabled RestDataSource, each on its own
+// user-configured port — see restIncoming.ts. Re-run after every
+// rest-sources:* mutation (see the ws switch above) to start/stop/restart
+// listeners as sources are added/edited/removed.
+syncRestIncomingServers(applyRestIncoming)
 
 // Backs MobileAppModal's clickable appUrl/APK links (see preload/index.ts) —
 // restricted to http(s) so a compromised/malicious renderer content can't
