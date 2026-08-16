@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useDashboardStore } from '../store'
-import { nextId } from '../id'
+import { getVariablesFilter, nextId, setVariablesFilter } from '../id'
 import { useEscapeToClose } from '../useEscapeToClose'
 import { uniqueVariableName } from '../variableNaming'
 import type { Variable, VariableValue } from '@shared/types'
@@ -24,10 +24,18 @@ const CUSTOM_TAB = 'custom'
 // everything else stays a string. Lets you type a boolean or number without
 // a separate type selector, while still round-tripping existing values
 // (e.g. a number stays editable as digits, not quoted).
+//
+// Only converts when `raw` has NO leading/trailing whitespace — `Number()`
+// itself silently trims before parsing (`Number('5 ') === 5`), which would
+// otherwise strip a deliberately space-padded value (some DCS-BIOS string
+// fields are fixed-width and padded with spaces on purpose) down to a bare
+// number the instant you so much as blurred the field, even without editing
+// it. A padded numeric-looking string like "5 " now stays the exact string
+// it was.
 function parseVariableValue(raw: string): VariableValue {
   if (raw === 'true') return true
   if (raw === 'false') return false
-  if (raw.trim() !== '' && !Number.isNaN(Number(raw))) return Number(raw)
+  if (raw !== '' && raw === raw.trim() && !Number.isNaN(Number(raw))) return Number(raw)
   return raw
 }
 
@@ -81,7 +89,10 @@ const VariableRow = memo(function VariableRow({
     <div className="variables-modal__row">
       <input
         value={variable.name}
-        disabled={!!mappedFrom}
+        // readOnly, not disabled — a disabled input can't be focused at all,
+        // so its text can't be selected/copied either. readOnly blocks
+        // edits the same way but leaves it copyable.
+        readOnly={!!mappedFrom}
         title={mappedFrom ? `Mapped from event source "${mappedFrom}" — rename it there instead` : undefined}
         onChange={(e) => onPatch(variable.id, { name: e.target.value })}
       />
@@ -165,8 +176,15 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
   const updateDashboardMeta = useDashboardStore((s) => s.updateDashboardMeta)
   useEscapeToClose(onClose)
 
-  const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<string>(CUSTOM_TAB)
+  const [search, setSearch] = useState(() => getVariablesFilter().search)
+  const [activeTab, setActiveTab] = useState<string>(() => getVariablesFilter().tab || CUSTOM_TAB)
+
+  // Persisted as one blob so reopening the modal lands back where you left
+  // it — see getVariablesFilter's own comment in id.ts for why (the modal is
+  // unmounted on close, so component state alone doesn't survive that).
+  useEffect(() => {
+    setVariablesFilter({ search, tab: activeTab })
+  }, [search, activeTab])
 
   // Renaming/removing a variable here wouldn't affect the event source
   // mapping that targets it by name — the mapping would just keep
@@ -208,8 +226,11 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
   }, [activeTab, sourceTabs])
 
   const tabVariables = useMemo(() => {
-    if (activeTab === CUSTOM_TAB) return variables.filter((v) => !mappedFromSource.has(v.name))
-    return variables.filter((v) => mappedFromSource.get(v.name)?.sourceId === activeTab)
+    const inTab =
+      activeTab === CUSTOM_TAB
+        ? variables.filter((v) => !mappedFromSource.has(v.name))
+        : variables.filter((v) => mappedFromSource.get(v.name)?.sourceId === activeTab)
+    return [...inTab].sort((a, b) => a.name.localeCompare(b.name))
   }, [variables, mappedFromSource, activeTab])
 
   const filtered = useMemo(() => {

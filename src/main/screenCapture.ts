@@ -49,8 +49,28 @@ function ensureHostAcquired(): void {
   screenCaptureHost.acquire()
 }
 
+// Electron's Display.id isn't guaranteed stable across a monitor unplug/
+// replug, a driver update, or even just a different boot — none of which
+// move the monitor itself. If the saved id is gone but the region's own
+// absolute coordinates still land entirely within exactly one currently
+// connected display, that's almost certainly the same physical monitor
+// under a new id, so fall back to it instead of failing until someone
+// manually re-picks the region. Ambiguous (region spans/matches more than
+// one display) or no match at all still fails, same as before.
+function findDisplayContaining(displays: Display[], region: ScreenRegion): Display | undefined {
+  const candidates = displays.filter(
+    (d) =>
+      region.x >= d.bounds.x &&
+      region.y >= d.bounds.y &&
+      region.x + region.width <= d.bounds.x + d.bounds.width &&
+      region.y + region.height <= d.bounds.y + d.bounds.height
+  )
+  return candidates.length === 1 ? candidates[0] : undefined
+}
+
 export async function captureRegionJpeg(region: ScreenRegion, displayId: number, quality: number, sharpen: boolean): Promise<Buffer> {
-  const display = screen.getAllDisplays().find((d) => d.id === displayId)
+  const displays = screen.getAllDisplays()
+  const display = displays.find((d) => d.id === displayId) ?? findDisplayContaining(displays, region)
   if (!display) throw new Error(`Display ${displayId} not found`)
   ensureHostAcquired()
   const { jpeg } = await screenCaptureHost.request({
@@ -340,6 +360,10 @@ export function addMjpegViewer(widgetId: string, res: ServerResponse, getConfig:
   if (!state) {
     const viewers = new Set<ServerResponse>()
     const newState: StreamState = { timeout: setTimeout(tick, 0), viewers }
+    // Same failure<->success edge-triggered logging as the OCR event
+    // source's own tick (see eventSourceProducers.ts) — a missing display
+    // fails identically on every frame at up to 60fps otherwise.
+    let lastFrameFailed = false
 
     async function tick(): Promise<void> {
       const config = getConfig()
@@ -352,8 +376,15 @@ export function addMjpegViewer(widgetId: string, res: ServerResponse, getConfig:
             viewer.write(frame)
             viewer.write('\r\n')
           }
+          if (lastFrameFailed) {
+            lastFrameFailed = false
+            console.log(`[boarderoni] screen capture recovered (widget ${widgetId})`)
+          }
         } catch (err) {
-          console.error(`[boarderoni] screen capture frame failed (widget ${widgetId})`, err)
+          if (!lastFrameFailed) {
+            lastFrameFailed = true
+            console.error(`[boarderoni] screen capture frame failed (widget ${widgetId})`, err)
+          }
         }
       }
       newState.timeout = setTimeout(tick, 1000 / clampFps(config?.fps))

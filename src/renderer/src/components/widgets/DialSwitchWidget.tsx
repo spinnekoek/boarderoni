@@ -188,7 +188,7 @@ export function DialSwitchWidgetContent({
         // position gets its own wrapper (not one shared one) since each now
         // has its own independent labelAnchor.
         <div key={position.id}>
-          {detentShape !== 'triangle' && (
+          {detentShape !== 'triangle' && detentShape !== 'none' && (
             <div
               className={`deck-dial-switch__detent deck-dial-switch__detent--${detentShape}`}
               style={{

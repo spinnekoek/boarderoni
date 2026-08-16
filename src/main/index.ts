@@ -33,6 +33,7 @@ import {
   type ToggleSwitchWidget,
   type EventSource,
   type KeypressAction,
+  type RockerSwitchWidget,
   type ScreenCaptureWidget,
   type ScreenRegion,
   type SendDcsCommandAction,
@@ -175,43 +176,63 @@ function migrateDialSwitchLabelAnchor(widget: DialSwitchWidget & LegacyDialSwitc
   return { ...rest, positions }
 }
 
-// DialSwitchWidget/ToggleSwitchWidget gained their own flat, whole-widget
-// `labels[]` (same convention as Gauge/Adjuster/Encoder) after already
-// shipping with only per-position labels — a dashboard saved before that
-// needs the field backfilled, same as `variables`/`eventSources` get
-// defaulted in loadDeckDashboard, just per-widget instead of per-dashboard.
-function migrateSwitchWidgetTopLevelLabels<T extends DialSwitchWidget | ToggleSwitchWidget>(widget: T): T {
+// DialSwitchWidget/ToggleSwitchWidget/RockerSwitchWidget gained their own
+// flat, whole-widget `labels[]` (same convention as Gauge/Adjuster/Encoder)
+// after already shipping with only per-position labels — a dashboard saved
+// before that needs the field backfilled, same as `variables`/`eventSources`
+// get defaulted in loadDeckDashboard, just per-widget instead of per-dashboard.
+function migrateSwitchWidgetTopLevelLabels<T extends DialSwitchWidget | ToggleSwitchWidget | RockerSwitchWidget>(widget: T): T {
   return Array.isArray(widget.labels) ? widget : { ...widget, labels: [] }
+}
+
+// RockerSwitchWidget/ToggleSwitchWidget/DialSwitchWidget gained root-level
+// press/release/positionChange (alongside, not instead of, each position's
+// own onSelect — see RockerSwitchWidget.events' own comment) after already
+// shipping with no `events` at all; DropdownWidget already had press/
+// release from the start but gained positionChange alongside them the same
+// way. A dashboard saved before either needs whichever keys are missing
+// backfilled to empty sequences.
+function migrateSwitchWidgetPositionChangeEvents<T extends RockerSwitchWidget | ToggleSwitchWidget | DialSwitchWidget | DropdownWidget>(
+  widget: T
+): T {
+  const events = widget.events as { press?: SequenceStep[]; release?: SequenceStep[]; positionChange?: SequenceStep[] } | undefined
+  return { ...widget, events: { ...widget.events, press: events?.press ?? [], release: events?.release ?? [], positionChange: events?.positionChange ?? [] } }
+}
+
+// DialSwitchWidget-only — its own increment/decrement ('Turn CW'/'Turn CCW',
+// same vocabulary EncoderWidget uses — see DialSwitchWidget.events' own
+// comment), backfilled the same way.
+function migrateDialSwitchIncrementDecrement(widget: DialSwitchWidget): DialSwitchWidget {
+  const events = widget.events as { increment?: SequenceStep[]; decrement?: SequenceStep[] } | undefined
+  return { ...widget, events: { ...widget.events, increment: events?.increment ?? [], decrement: events?.decrement ?? [] } }
 }
 
 function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget): Widget {
   widget = migrateWidgetEvents(widget) as Widget & LegacyButtonWidget & LegacyActionWidget
   widget = migrateSwitchWidget(widget) as Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget
 
-  // Dropdown has its own narrower migration (orientation's value set only,
-  // see migrateDropdownOrientation) rather than skipping migration outright
-  // like the others below.
-  if (widget.type === 'dropdown') return migrateDropdownOrientation(widget)
+  // Dropdown has its own narrower orientation migration too (see
+  // migrateDropdownOrientation) alongside the events backfill every switch
+  // type below also gets.
+  if (widget.type === 'dropdown') return migrateSwitchWidgetPositionChangeEvents(migrateDropdownOrientation(widget))
 
   if (widget.type === 'switch-dial') {
-    return migrateSwitchWidgetTopLevelLabels(migrateDialSwitchLabelAnchor(widget as DialSwitchWidget & LegacyDialSwitchWidget))
+    return migrateDialSwitchIncrementDecrement(
+      migrateSwitchWidgetPositionChangeEvents(
+        migrateSwitchWidgetTopLevelLabels(migrateDialSwitchLabelAnchor(widget as DialSwitchWidget & LegacyDialSwitchWidget))
+      )
+    )
   }
 
-  if (widget.type === 'switch-toggle') return migrateSwitchWidgetTopLevelLabels(widget)
+  if (widget.type === 'switch-toggle') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(widget))
 
-  // Morph/gauge/adjuster/encoder/rocker/screen-capture widgets never
-  // existed in any of the legacy shapes below — they're always created
-  // with their current shape from the start (morph with states[]/blocks[],
-  // the rest with no states[] at all, rocker with positions[] instead of a
-  // flat labels[], screen-capture with no labels concept at all).
-  if (
-    widget.type === 'morph' ||
-    widget.type === 'gauge' ||
-    widget.type === 'adjuster' ||
-    widget.type === 'encoder' ||
-    widget.type === 'switch-rocker' ||
-    widget.type === 'screen-capture'
-  ) {
+  if (widget.type === 'switch-rocker') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(widget))
+
+  // Morph/gauge/adjuster/encoder/screen-capture widgets never existed in any
+  // of the legacy shapes below — they're always created with their current
+  // shape from the start (morph with states[]/blocks[], the rest with no
+  // states[] at all, screen-capture with no labels concept at all).
+  if (widget.type === 'morph' || widget.type === 'gauge' || widget.type === 'adjuster' || widget.type === 'encoder' || widget.type === 'screen-capture') {
     return widget
   }
 
@@ -938,17 +959,41 @@ function applyVariableUpdates(room: DeckRoom, updates: Record<string, unknown>, 
   }
 }
 
+// What an action step's expressions (update-state code, send-dcs-command's
+// argumentExpr, call-rest's placeholder exprs) see exposed as variables.
+// $value/variables.$index — see evaluateMappingExpression in shared/expr.ts.
+// Two distinct origins feed this: an in-flight AdjusterWidget drag/Encoder
+// turn passes its own numeric value with no index (see numericTrigger
+// below); a SwitchPosition/DropdownWidget position select passes that
+// position's own name as $value alongside its index as $index, so one
+// onSelect sequence shared/copy-pasted across positions can still tell
+// which one actually fired it (see triggerAction below).
+interface TriggerValue {
+  value: VariableValue
+  index?: number
+}
+
+// Wraps a plain numeric trigger value (an Adjuster drag tick, an Encoder
+// turn) into TriggerValue — undefined stays undefined (a plain button/morph
+// click has no value at all), everything else becomes $value with no
+// $index, same as before TriggerValue existed.
+function numericTrigger(value: number | undefined): TriggerValue | undefined {
+  return value !== undefined ? { value } : undefined
+}
+
 // Evaluates an update-state action's code and merges whatever it returns
 // into the room's dashboard.variables. Runs server-side (not per-client) so
 // every client's next dashboard:sync already reflects the result, same as
 // any other mutation.
-function runUpdateState(room: DeckRoom, code: string, value: number | undefined, final: boolean): void {
+function runUpdateState(room: DeckRoom, code: string, trigger: TriggerValue | undefined, final: boolean): void {
   const variableMap = toVariableMap(room.dashboard.variables ?? [])
-  // value is only set while an AdjusterWidget is being dragged — exposed as
-  // variables.$value, same convention an EventSourceMapping's own `expr`
-  // already uses (see evaluateMappingExpression). A plain button/morph click
+  // trigger is only set while an AdjusterWidget is being dragged, or for a
+  // switch/dropdown position select — exposed as variables.$value (plus
+  // variables.$index for a position select), same convention an
+  // EventSourceMapping's own `expr` already uses (see
+  // evaluateMappingExpression). A plain button/morph click
   // has no value, so it evaluates exactly as before.
-  const result = value !== undefined ? evaluateMappingExpression(code, value, variableMap) : tryEvaluateExpression(code, variableMap)
+  const result = trigger ? evaluateMappingExpression(code, trigger.value, variableMap, trigger.index) : tryEvaluateExpression(code, variableMap)
   // A genuine failure (syntax error, thrown exception, ...) surfaces to the
   // caller — triggerAction's catch turns it into an action:error the client
   // shows on the widget. Code that just doesn't return anything (empty body,
@@ -970,7 +1015,7 @@ function runUpdateState(room: DeckRoom, code: string, value: number | undefined,
 // (unlike reading): DCS-BIOS just applies whatever identifier/argument pair
 // arrives to the currently active aircraft, silently ignoring it if that
 // identifier doesn't exist for that aircraft.
-async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction, value?: number): Promise<void> {
+async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction, trigger?: TriggerValue): Promise<void> {
   // Same enabledDataSources gate syncEventSources already applies to the
   // read side (see its own comment) — disabling DCS-BIOS in Settings should
   // stop a button from firing commands too, not just stop reading fields.
@@ -981,7 +1026,9 @@ async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction, v
   let argument = action.argument
   if (action.argumentExpr && action.argumentExpr.trim()) {
     const variableMap = toVariableMap(room.dashboard.variables ?? [])
-    const result = value !== undefined ? evaluateMappingExpression(action.argumentExpr, value, variableMap) : tryEvaluateExpression(action.argumentExpr, variableMap)
+    const result = trigger
+      ? evaluateMappingExpression(action.argumentExpr, trigger.value, variableMap, trigger.index)
+      : tryEvaluateExpression(action.argumentExpr, variableMap)
     if (!result.ok) throw new Error(result.error)
     argument = String(result.value)
   }
@@ -993,7 +1040,7 @@ async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction, v
 // above, just resolving N named placeholders instead of one argument. Uses
 // the runtime's global fetch — this app's first outbound HTTP request
 // anywhere; everything else here only ever serves requests.
-async function runCallRestAction(room: DeckRoom, action: CallRestAction, value?: number): Promise<void> {
+async function runCallRestAction(room: DeckRoom, action: CallRestAction, trigger?: TriggerValue): Promise<void> {
   const source = getRestDataSources().find((s) => s.id === action.dataSourceId)
   if (!source || !source.enabled) {
     throw new Error('This REST data source is disabled or no longer exists')
@@ -1005,7 +1052,9 @@ async function runCallRestAction(room: DeckRoom, action: CallRestAction, value?:
     const entry = action.values.find((v) => v.placeholder === name)
     let resolved: unknown = null
     if (entry?.expr && entry.expr.trim()) {
-      const result = value !== undefined ? evaluateMappingExpression(entry.expr, value, variableMap) : tryEvaluateExpression(entry.expr, variableMap)
+      const result = trigger
+        ? evaluateMappingExpression(entry.expr, trigger.value, variableMap, trigger.index)
+        : tryEvaluateExpression(entry.expr, variableMap)
       if (!result.ok) throw new Error(result.error)
       resolved = result.value
     } else if (entry?.value !== undefined) {
@@ -1199,17 +1248,17 @@ function requireSubDeck(room: DeckRoom, subDeckId: string): void {
 // effect is a targeted (not room-broadcast) reply to the ONE socket that
 // triggered them — see each's own comment in shared/types.ts for why this
 // is client-local state rather than shared dashboard state.
-async function runActionStep(room: DeckRoom, action: WidgetAction, value: number | undefined, final: boolean, ws: WebSocket): Promise<void> {
+async function runActionStep(room: DeckRoom, action: WidgetAction, trigger: TriggerValue | undefined, final: boolean, ws: WebSocket): Promise<void> {
   if (action.kind === 'update-state') {
-    runUpdateState(room, action.code, value, final) // throws synchronously on failure
+    runUpdateState(room, action.code, trigger, final) // throws synchronously on failure
     return
   }
   if (action.kind === 'send-dcs-command') {
-    await runSendDcsCommand(room, action, value)
+    await runSendDcsCommand(room, action, trigger)
     return
   }
   if (action.kind === 'call-rest') {
-    await runCallRestAction(room, action, value)
+    await runCallRestAction(room, action, trigger)
     return
   }
   if (action.kind === 'navigate-subdeck') {
@@ -1248,7 +1297,7 @@ async function runActionStep(room: DeckRoom, action: WidgetAction, value: number
 async function runSequence(
   room: DeckRoom,
   steps: SequenceStep[],
-  value: number | undefined,
+  trigger: TriggerValue | undefined,
   final: boolean,
   ws: WebSocket,
   widgetId: string,
@@ -1260,7 +1309,7 @@ async function runSequence(
       if (step.kind === 'delay') {
         await sleep(step.delayMs)
       } else {
-        await runActionStep(room, step.action, value, final, ws)
+        await runActionStep(room, step.action, trigger, final, ws)
       }
     } catch (err) {
       sendError(ws, widgetId, err instanceof Error ? err.message : String(err), { event, stepIndex: i, stepKind: step.kind })
@@ -1291,24 +1340,55 @@ async function triggerAction(
     return
   }
 
-  // The switch widgets (RockerSwitchWidget/DialSwitchWidget) aren't
-  // EventfulWidget (see their own comment in shared/types.ts) — which
-  // sequence runs depends on which position was picked, not a static
-  // per-type event kind, so they can't go through getEventSteps below.
-  // `value` carries the target position's index (see ClientToServer's
-  // 'action:trigger'). Unlike the pre-split MultiSwitchWidget, this no longer
-  // mutates/broadcasts room.dashboard at all — which position "looks active"
-  // is deliberately client-local (or driven by activePositionExpr reading a
-  // Variable), never server-authoritative dashboard state; see
-  // SwitchWidgetBase's own comment in shared/types.ts.
+  // The switch widgets (RockerSwitchWidget/DialSwitchWidget/
+  // ToggleSwitchWidget) aren't EventfulWidget (see their own comment in
+  // shared/types.ts) — which SELECT sequence runs depends on which position
+  // was picked, not a static per-type event kind, so 'select' can't go
+  // through getEventSteps below. `value` carries the target position's
+  // index (see ClientToServer's 'action:trigger'). Unlike the pre-split
+  // MultiSwitchWidget, this no longer mutates/broadcasts room.dashboard at
+  // all — which position "looks active" is deliberately client-local (or
+  // driven by activePositionExpr reading a Variable), never
+  // server-authoritative dashboard state; see SwitchWidgetBase's own
+  // comment in shared/types.ts. press/release/increment/decrement (the
+  // last two DialSwitchWidget-only) DO now live on widget.events same as an
+  // EventfulWidget, but stay handled here rather than folded into
+  // getEventSteps — that function's signature assumes EventfulWidget, and
+  // these three types are deliberately not that (see SwitchWidgetBase's own
+  // comment) for reasons unrelated to just this one field existing.
   if (widget.type === 'switch-rocker' || widget.type === 'switch-dial' || widget.type === 'switch-toggle') {
+    if (event === 'press' || event === 'release') {
+      await runSequence(room, widget.events[event], numericTrigger(value), final, ws, widgetId, event)
+      return
+    }
+
+    if (widget.type === 'switch-dial' && (event === 'increment' || event === 'decrement')) {
+      const index = value !== undefined ? Math.trunc(value) : NaN
+      const position = widget.positions[index]
+      if (!position) {
+        sendError(ws, widgetId, 'This widget cannot fire this event')
+        return
+      }
+      // Same $value/$index convention as 'select' below — which position
+      // was landed ON by this turn, not a step count, since that's almost
+      // always the more useful thing for the expression to know.
+      await runSequence(room, widget.events[event], { value: position.name, index }, true, ws, widgetId, event)
+      return
+    }
+
     const index = value !== undefined ? Math.trunc(value) : NaN
     const position = widget.positions[index]
     if (event !== 'select' || !position) {
       sendError(ws, widgetId, 'This widget cannot fire this event')
       return
     }
-    await runSequence(room, position.onSelect, undefined, true, ws, widgetId, event)
+    // The position's own name as $value, its index as $index — see
+    // TriggerValue's own doc comment. Runs both this position's own
+    // onSelect AND the widget-level positionChange — see
+    // RockerSwitchWidget.events' own comment for why both exist.
+    const trigger: TriggerValue = { value: position.name, index }
+    await runSequence(room, position.onSelect, trigger, true, ws, widgetId, event)
+    await runSequence(room, widget.events.positionChange, trigger, true, ws, widgetId, event)
     return
   }
 
@@ -1319,7 +1399,7 @@ async function triggerAction(
   // comment in shared/types.ts for why it isn't an EventfulWidget/SwitchWidget.
   if (widget.type === 'dropdown') {
     if (event === 'press' || event === 'release') {
-      await runSequence(room, widget.events[event], value, final, ws, widgetId, event)
+      await runSequence(room, widget.events[event], numericTrigger(value), final, ws, widgetId, event)
       return
     }
     const index = value !== undefined ? Math.trunc(value) : NaN
@@ -1328,7 +1408,9 @@ async function triggerAction(
       sendError(ws, widgetId, 'This widget cannot fire this event')
       return
     }
-    await runSequence(room, position.onSelect, undefined, true, ws, widgetId, event)
+    const trigger: TriggerValue = { value: position.name, index }
+    await runSequence(room, position.onSelect, trigger, true, ws, widgetId, event)
+    await runSequence(room, widget.events.positionChange, trigger, true, ws, widgetId, event)
     return
   }
 
@@ -1337,7 +1419,7 @@ async function triggerAction(
     sendError(ws, widgetId, `This widget cannot fire a "${event}" event`)
     return
   }
-  await runSequence(room, steps, value, final, ws, widgetId, event)
+  await runSequence(room, steps, numericTrigger(value), final, ws, widgetId, event)
 }
 
 function sendError(

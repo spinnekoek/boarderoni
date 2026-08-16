@@ -82,3 +82,43 @@ export function setSectionOpen(key: string, open: boolean): void {
   else sections.delete(key)
   localStorage.setItem(OPEN_SECTIONS_KEY, JSON.stringify([...sections]))
 }
+
+const VARIABLES_FILTER_KEY = 'boarderoni-variables-filter'
+
+// Which tab/search the Variables modal was left on — purely a local UI
+// preference (not synced through the server). The modal itself is unmounted
+// on close (see Toolbar.tsx's `{variablesOpen && <VariablesModal .../>}`),
+// so without this its search/tab would silently reset every time it's
+// reopened. `tab` empty means "unset" — VariablesModal.tsx falls back to its
+// own CUSTOM_TAB default (and separately resets it if it names a source
+// that's since been removed), same as a first-time user with nothing stored.
+export function getVariablesFilter(): { search: string; tab: string } {
+  const raw = localStorage.getItem(VARIABLES_FILTER_KEY)
+  if (!raw) return { search: '', tab: '' }
+  try {
+    const parsed = JSON.parse(raw) as { search?: string; tab?: string }
+    return { search: parsed.search ?? '', tab: parsed.tab ?? '' }
+  } catch {
+    return { search: '', tab: '' }
+  }
+}
+
+export function setVariablesFilter(filter: { search: string; tab: string }): void {
+  localStorage.setItem(VARIABLES_FILTER_KEY, JSON.stringify(filter))
+}
+
+const LAST_DCS_AIRCRAFT_KEY = 'boarderoni-last-dcs-aircraft'
+
+// Which DCS-BIOS aircraft was last picked in ANY SendDcsCommandActionEditor,
+// across every widget/event — purely a local UI convenience so a freshly
+// added "Send DCS command" action starts pre-pointed at whichever aircraft
+// you're actually working on, instead of always starting blank at "Pick an
+// aircraft…" regardless of how many you've already wired up elsewhere in
+// the same dashboard.
+export function getLastDcsAircraft(): string {
+  return localStorage.getItem(LAST_DCS_AIRCRAFT_KEY) ?? ''
+}
+
+export function setLastDcsAircraft(aircraft: string): void {
+  localStorage.setItem(LAST_DCS_AIRCRAFT_KEY, aircraft)
+}

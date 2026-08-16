@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useDashboardStore } from '../store'
 import { useConfirmStore } from '../confirmStore'
 import { useClipboardStore } from '../clipboardStore'
+import { useStyleClipboardStore } from '../styleClipboardStore'
 import { getSubDeckWidgets } from '@shared/subDecks'
 
 // widgetIds is null for a right-click on empty canvas (paste-only); set for
@@ -26,8 +27,25 @@ export function ContextMenu({
   const copy = useClipboardStore((s) => s.copy)
   const paste = useClipboardStore((s) => s.paste)
   const canPaste = useClipboardStore((s) => s.widgets.length > 0)
+  const copyStyle = useStyleClipboardStore((s) => s.copyStyle)
+  const pasteStyle = useStyleClipboardStore((s) => s.pasteStyle)
+  const styleClipboardType = useStyleClipboardStore((s) => s.entry?.widgetType)
   const confirm = useConfirmStore((s) => s.confirm)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // Only meaningful once widgetIds is set (a right-click on a widget, not
+  // empty canvas) — see canCopyStyle/canPasteStyle below.
+  const selectedWidgets = widgetIds
+    ? getSubDeckWidgets(dashboard, editingSubDeckId).filter((w) => widgetIds.includes(w.id))
+    : []
+  // Copying "the style" only makes sense from a single, unambiguous source
+  // widget — same reasoning ContextMenu's own comment gives for widgetIds
+  // being "whatever's selected at open time."
+  const canCopyStyle = selectedWidgets.length === 1
+  // Same-type-only, per the feature's own requirement: a rotary's style can
+  // only paste onto another rotary, never a button, etc.
+  const canPasteStyle =
+    styleClipboardType !== undefined && selectedWidgets.length > 0 && selectedWidgets.every((w) => w.type === styleClipboardType)
 
   // Mounted fresh on every open (Canvas keys it by position), so this only
   // ever sees pointerdowns/keydowns that happen after the opening click —
@@ -80,6 +98,18 @@ export function ContextMenu({
     onClose()
   }
 
+  function handleCopyStyle(): void {
+    if (selectedWidgets.length !== 1) return
+    copyStyle(selectedWidgets[0])
+    onClose()
+  }
+
+  function handlePasteStyle(): void {
+    if (!widgetIds) return
+    pasteStyle(widgetIds)
+    onClose()
+  }
+
   function handleBringToFront(): void {
     if (!widgetIds) return
     bringToFront(widgetIds)
@@ -104,6 +134,15 @@ export function ContextMenu({
       </button>
       {widgetIds && (
         <>
+          <div className="context-menu__divider" />
+          {canCopyStyle && (
+            <button type="button" className="context-menu__item" onClick={handleCopyStyle}>
+              Copy style
+            </button>
+          )}
+          <button type="button" className="context-menu__item" disabled={!canPasteStyle} onClick={handlePasteStyle}>
+            Paste style
+          </button>
           <div className="context-menu__divider" />
           <button type="button" className="context-menu__item" onClick={handleBringToFront}>
             Bring to front

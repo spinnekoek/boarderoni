@@ -254,7 +254,12 @@ export function MorphCanvasWidget({
             key={spot.key}
             type="button"
             className="canvas-widget__morph-extend"
-            style={{ left: `${spot.leftPct}%`, top: `${spot.topPct}%` }}
+            // The translate centers the button on its target spot (its
+            // CSS counterpart moved here since inline style replaces the
+            // whole `transform` property rather than merging with it); the
+            // scale counteracts canvas zoom so it stays a constant screen
+            // size, same trick as the resize handle below.
+            style={{ left: `${spot.leftPct}%`, top: `${spot.topPct}%`, transform: `translate(-50%, -50%) scale(${1 / zoom})` }}
             title="Extend shape"
             onPointerDown={(e) => e.stopPropagation()}
             onPointerUp={(e) => e.stopPropagation()}
@@ -274,7 +279,7 @@ export function MorphCanvasWidget({
               key={spot.key}
               type="button"
               className="canvas-widget__morph-extend canvas-widget__morph-extend--remove"
-              style={{ left: `${spot.leftPct}%`, top: `${spot.topPct}%` }}
+              style={{ left: `${spot.leftPct}%`, top: `${spot.topPct}%`, transform: `translate(-50%, -50%) scale(${1 / zoom})` }}
               title="Remove block"
               onPointerDown={(e) => e.stopPropagation()}
               onPointerUp={(e) => e.stopPropagation()}
@@ -290,6 +295,7 @@ export function MorphCanvasWidget({
         <div
           className="canvas-widget__resize-handle"
           title="Drag to resize every block"
+          style={{ transform: `scale(${1 / zoom})` }}
           onPointerDown={handleResizePointerDown}
           onPointerMove={handleResizePointerMove}
           onPointerUp={handleResizePointerUp}

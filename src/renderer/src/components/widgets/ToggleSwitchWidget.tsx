@@ -145,6 +145,7 @@ export function ToggleSwitchWidgetContent({
   const leverColor = withOpacity(resolvedFill.color ?? DEFAULT_WIDGET_COLOR, resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1)
   const resolvedBorder = resolveBorderColor(widget, variables)
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
+  const borderWidth = widget.borderWidth ?? 2
   const bezelRadius = widget.bezelRadius ?? BEZEL_RADIUS
   const leverLength = widget.leverLength ?? LEVER_LENGTH
   const leverBorderWidth = widget.leverBorderWidth ?? 0
@@ -173,7 +174,7 @@ export function ToggleSwitchWidgetContent({
       onPointerCancel={onPointerUp}
     >
       <svg className="deck-toggle-switch__bezel" viewBox="0 0 100 100">
-        <circle cx={50} cy={50} r={bezelRadius} fill={trackColor} stroke={borderColor} strokeWidth={2} />
+        <circle cx={50} cy={50} r={bezelRadius} fill={trackColor} stroke={borderColor} strokeWidth={borderWidth} />
         {showCircle ? (
           <circle
             cx={50}

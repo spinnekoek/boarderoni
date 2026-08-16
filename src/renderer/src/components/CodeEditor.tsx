@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { EditorView, keymap, placeholder as placeholderExt, lineNumbers } from '@codemirror/view'
 import { EditorState, type Extension } from '@codemirror/state'
 import { defaultKeymap, historyKeymap, history } from '@codemirror/commands'
@@ -49,26 +49,55 @@ const theme = EditorView.theme(
   { dark: true }
 )
 
+export interface CodeEditorHandle {
+  // Commits whatever's currently typed, even if the editor never blurred —
+  // ExpressionEditorModal calls this on every one of its own close paths
+  // (×, Done, Escape, backdrop click) rather than trusting that closing the
+  // modal always fires a natural blur first. A no-op if there's nothing
+  // uncommitted (see the `doc === lastCommitted` guard in `commit` below).
+  flush: () => void
+}
+
 // A CodeMirror-backed JS editor, styled to match the app's dark theme —
 // used for colorExpr/borderColorExpr (and, later, the other expression
 // fields: label textExpr, morph block colorExpr, the update-state action
 // code). `minimal` drops the line-number gutter for small inline fields;
 // the expanded modal view uses the fuller (non-minimal) form.
-export function CodeEditor({
-  value,
-  onChange,
-  placeholder,
-  minimal = false
-}: {
-  value: string
-  onChange: (value: string) => void
-  placeholder?: string
-  minimal?: boolean
-}): React.JSX.Element {
+//
+// `onChange` fires on BLUR, not per keystroke — every expression field here
+// ultimately patches widget state, which round-trips through the dashboard
+// store to the main process (persisted to disk, then broadcast back out;
+// see updateWidgets in store.ts) on every call, so committing per keystroke
+// made typing in an expression field visibly laggy. CodeMirror's own doc
+// stays the source of truth for what's on screen while typing either way —
+// this only changes when the OUTSIDE world (widget state, and everything
+// downstream of it: the live canvas preview, the WS broadcast) hears about
+// it.
+export const CodeEditor = forwardRef<
+  CodeEditorHandle,
+  {
+    value: string
+    onChange: (value: string) => void
+    placeholder?: string
+    minimal?: boolean
+  }
+>(function CodeEditor({ value, onChange, placeholder, minimal = false }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const lastCommittedRef = useRef(value)
+
+  function commit(): void {
+    const view = viewRef.current
+    if (!view) return
+    const doc = view.state.doc.toString()
+    if (doc === lastCommittedRef.current) return
+    lastCommittedRef.current = doc
+    onChangeRef.current(doc)
+  }
+
+  useImperativeHandle(ref, () => ({ flush: commit }), [])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -81,9 +110,7 @@ export function CodeEditor({
       bracketMatching(),
       EditorView.lineWrapping,
       theme,
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) onChangeRef.current(update.state.doc.toString())
-      })
+      EditorView.domEventHandlers({ blur: () => commit() })
     ]
     if (!minimal) extensions.push(lineNumbers())
     if (placeholder) extensions.push(placeholderExt(placeholder))
@@ -95,16 +122,16 @@ export function CodeEditor({
     viewRef.current = view
 
     return () => view.destroy()
-    // Mount-only — `value` changes on every keystroke, so re-running this
-    // per keystroke would tear down and rebuild the editor (losing cursor
-    // position/undo history) instead of just typing. External value changes
-    // are pushed via the effect below instead.
+    // Mount-only — `value` changes on every commit, so re-running this then
+    // would tear down and rebuild the editor (losing cursor position/undo
+    // history) instead of just typing. External value changes are pushed
+    // via the effect below instead.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Sync external value changes (e.g. clearing the expression, or switching
   // to a different widget/state) into the editor — but not when the change
-  // came from the editor's own typing, in which case `value` already
+  // came from this editor's own commit, in which case `value` already
   // matches the doc and re-dispatching would just disturb the cursor.
   useEffect(() => {
     const view = viewRef.current
@@ -112,7 +139,8 @@ export function CodeEditor({
     const current = view.state.doc.toString()
     if (current === value) return
     view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
+    lastCommittedRef.current = value
   }, [value])
 
   return <div className={`code-editor${minimal ? ' code-editor--minimal' : ' code-editor--expanded'}`} ref={containerRef} />
-}
+})

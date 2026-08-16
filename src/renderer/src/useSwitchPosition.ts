@@ -13,18 +13,36 @@ import type { DropdownWidget, SwitchWidget } from '@shared/types'
 // locally on this device, defaulting to positions[0] — deliberately not
 // synced with any other client, see SwitchWidgetBase's own comment in
 // shared/types.ts.
+//
+// RockerSwitchWidget.settleToInactive (see its own comment in shared/
+// types.ts) is the one exception to that positions[0] default — with it on,
+// `localIndex` starts at, and always reverts to, null instead: nothing's
+// active on load, and a tap's own highlight doesn't stick. `activeIndex`
+// being `null` is only ever actually reachable that way — every other
+// widget type (and a rocker with the setting off) always resolves to a real
+// index, but the return type stays nullable across the board since this one
+// hook serves all of them.
 export function useSwitchPosition(
   widget: SwitchWidget | DropdownWidget,
   variables: VariableMap
-): { activeIndex: number; select: (index: number) => void } {
+): { activeIndex: number | null; select: (index: number) => void } {
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
-  const [localIndex, setLocalIndex] = useState(0)
+  const settleToInactive = widget.type === 'switch-rocker' && (widget.settleToInactive ?? false)
+  const [localIndex, setLocalIndex] = useState<number | null>(() => (settleToInactive ? null : 0))
   const exprIndex = resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables)
-  const activeIndex = exprIndex ?? Math.min(localIndex, widget.positions.length - 1)
+  const activeIndex = exprIndex ?? (localIndex === null ? null : Math.min(localIndex, widget.positions.length - 1))
 
   function select(index: number): void {
-    setLocalIndex(index)
+    const previousIndex = activeIndex
+    setLocalIndex(settleToInactive ? null : index)
     triggerWidget(widget.id, 'select', index)
+    // DialSwitchWidget only — see its own events.increment/decrement doc
+    // comment in shared/types.ts. Landing on a higher/lower index than
+    // whichever was active before fires the matching 'Turn CW'/'Turn CCW'
+    // trigger too, alongside (not instead of) 'select' above.
+    if (widget.type === 'switch-dial' && previousIndex !== null && index !== previousIndex) {
+      triggerWidget(widget.id, index > previousIndex ? 'increment' : 'decrement', index)
+    }
   }
 
   return { activeIndex, select }

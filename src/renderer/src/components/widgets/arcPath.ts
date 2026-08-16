@@ -52,6 +52,26 @@ export function describeArc(cx: number, cy: number, r: number, startDeg: number,
   return `M ${start.x} ${start.y} A ${r} ${r} 0 ${largeArcFlag} ${sweepFlag} ${end.x} ${end.y}`
 }
 
+// General form of viewBoxToPixel below, for a caller whose SVG viewBox isn't
+// the fixed "0 0 100 100" every other ring/dial widget uses — GaugeWidget's
+// arc style computes its own viewBox per-render (see arcBoundsUnit) to fit a
+// partial sweep to the widget's box, so its tick labels need the actual
+// rect that render used, not a hardcoded one. Replicates the same
+// preserveAspectRatio="xMidYMid meet" scale-to-fit-and-center math the SVG
+// itself already does.
+export function viewBoxRectToPixel(
+  vx: number,
+  vy: number,
+  viewBox: { x: number; y: number; width: number; height: number },
+  w: number,
+  h: number
+): { x: number; y: number } {
+  const scale = Math.min(w / viewBox.width, h / viewBox.height)
+  const offsetX = (w - viewBox.width * scale) / 2
+  const offsetY = (h - viewBox.height * scale) / 2
+  return { x: offsetX + (vx - viewBox.x) * scale, y: offsetY + (vy - viewBox.y) * scale }
+}
+
 // A ring/dial-style widget's own SVG is always `viewBox="0 0 100 100"` — by
 // default it scales uniformly (preserveAspectRatio: xMidYMid meet) to stay
 // undistorted regardless of the widget's own w/h, letterboxing the shorter
@@ -60,10 +80,37 @@ export function describeArc(cx: number, cy: number, r: number, startDeg: number,
 // — raw 0-100 percentages for left/top apply w and h independently and
 // drift off the SVG's own shape on any non-square widget. Shared by
 // DialSwitchWidget (ring detents) and ToggleSwitchWidget (per-position
-// labels).
+// labels). Just viewBoxRectToPixel with that fixed rect baked in.
 export function viewBoxToPixel(vx: number, vy: number, w: number, h: number): { x: number; y: number } {
-  const scale = Math.min(w, h) / 100
-  return { x: w / 2 + (vx - 50) * scale, y: h / 2 + (vy - 50) * scale }
+  return viewBoxRectToPixel(vx, vy, { x: 0, y: 0, width: 100, height: 100 }, w, h)
+}
+
+// The tightest axis-aligned bounding box — in UNIT-circle terms, center
+// (0,0) radius 1 — containing every point on the arc swept from startDeg to
+// endDeg. An arc's x/y extremes occur only at its own two endpoints or at
+// whichever cardinal angles (multiples of 90°) the sweep happens to pass
+// through, so those are the only candidates that matter. Used by
+// GaugeWidget's arc style to fit a partial sweep (e.g. a single quarter) to
+// the widget's actual box, instead of sitting inside a viewBox sized for the
+// full circle it's a slice of — see GaugeArc in GaugeWidget.tsx. Direction-
+// agnostic (works whether endDeg is greater or less than startDeg) and
+// tolerant of sweeps past 360° (e.g. 135..405), since it only cares about
+// interior multiples of 90 between the two, however far apart they are.
+export function arcBoundsUnit(startDeg: number, endDeg: number): { minX: number; maxX: number; minY: number; maxY: number } {
+  const lo = Math.min(startDeg, endDeg)
+  const hi = Math.max(startDeg, endDeg)
+  const candidates = [startDeg, endDeg]
+  for (let k = Math.floor(lo / 90); k * 90 <= hi; k++) {
+    const a = k * 90
+    if (a > lo && a < hi) candidates.push(a)
+  }
+  const points = candidates.map((deg) => polarToCartesian(0, 0, 1, deg))
+  return {
+    minX: Math.min(...points.map((p) => p.x)),
+    maxX: Math.max(...points.map((p) => p.x)),
+    minY: Math.min(...points.map((p) => p.y)),
+    maxY: Math.max(...points.map((p) => p.y))
+  }
 }
 
 // SVG path `d` for a closed polygon (any N >= 3 points, in order) with each

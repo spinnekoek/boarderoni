@@ -181,19 +181,24 @@ export interface ActionStep {
 export type SequenceStep = DelayStep | ActionStep
 
 // Which interaction moments a widget can attach a sequence to. Only
-// AdjusterWidget uses 'move' (continuous, while dragging); only EncoderWidget
-// uses 'increment'/'decrement' (one per completed step of rotation, see
-// EncoderWidget below). 'select' is a switch widget's (RockerSwitchWidget/
-// DialSwitchWidget) own trigger moment, but deliberately NOT resolved through
-// eventKindsFor/getEventSteps below — unlike every other kind here, which
-// position's sequence runs depends on which position was picked, so it's
-// carried as the 'action:trigger' message's own `value` (the target
-// position's index) and dispatched specially in triggerAction (main/index.ts)
-// instead. It's still a member of this union so that message's `event` field
-// can legally carry it. See eventKindsFor/getEventSteps in
-// shared/widgetEvents.ts, the single source of truth for which of the rest
-// apply to which widget type.
-export type WidgetEventKind = 'press' | 'release' | 'move' | 'increment' | 'decrement' | 'select'
+// AdjusterWidget uses 'move' (continuous, while dragging); 'increment'/
+// 'decrement' are EncoderWidget's own (one per completed step of rotation)
+// and, separately, DialSwitchWidget's own (one per selection that lands on a
+// higher/lower position index — see DialSwitchWidget.events' own comment).
+// 'select' is a switch widget's (RockerSwitchWidget/DialSwitchWidget/
+// ToggleSwitchWidget/DropdownWidget) own per-POSITION trigger moment, but
+// deliberately NOT resolved through eventKindsFor/getEventSteps below —
+// unlike every other kind here, which position's sequence runs depends on
+// which position was picked, so it's carried as the 'action:trigger'
+// message's own `value` (the target position's index) and dispatched
+// specially in triggerAction (main/index.ts) instead. It's still a member of
+// this union so that message's `event` field can legally carry it.
+// 'positionChange' is the root-level counterpart that runs alongside it
+// regardless of which position fired it — see RockerSwitchWidget.events'
+// own comment. See eventKindsFor/getEventSteps in shared/widgetEvents.ts,
+// the single source of truth for which of the rest apply to which widget
+// type.
+export type WidgetEventKind = 'press' | 'release' | 'move' | 'increment' | 'decrement' | 'select' | 'positionChange'
 
 // x/y/w/h are absolute CSS pixels on the dashboard canvas — not grid units.
 // A widget is always rendered at exactly this pixel size on every client, no
@@ -221,6 +226,14 @@ export interface WidgetLabel {
   // displayed text content, not its color.
   textColorExpr?: string
   textOpacity?: number
+  // The label's own background fill, independent of whatever widget it sits
+  // on top of. Unset (the default) is fully transparent — see
+  // renderWidgetLabel in labels.tsx, which skips withOpacity entirely rather
+  // than resolving a literal 'transparent' through it. No colorExpr/auto
+  // mode, matching ColorPickerButton's own "plain background color field"
+  // precedent (no derived value to fall back to here).
+  backgroundColor?: string
+  backgroundOpacity?: number
   // Where this label's box sits within the widget it belongs to (or, for a
   // detent-anchored label, within its own small wrapper — see labelAnchor
   // below).
@@ -423,6 +436,44 @@ export interface MorphButtonWidget {
 // Passive value display — a filled bar or arc showing valueExpr's result
 // against min/max. No action: nothing to trigger, so it's never clickable
 // on the view client.
+// One ring of evenly-spaced tick marks around an arc-style GaugeWidget's
+// sweep, each optionally labeled with its own auto-computed value — e.g. a
+// speedometer's major (numbered) and minor (unnumbered) ticks, each its own
+// independent GaugeTickSet so they can be sized/colored/spaced completely
+// differently. Multiple sets are addable/removable in the properties panel
+// (see GaugeWidget.tickSets), same list convention as SwitchPosition arrays
+// elsewhere. Rendered the same way DialSwitchWidget's own 'tick' detent
+// shape is (a small rect, rotated to point radially — see DETENT_SIZE in
+// DialShapeGraphic.tsx), so a tick set's color/border/size read the same as
+// everywhere else a "tick" appears in this app.
+export interface GaugeTickSet {
+  id: string
+  // How many ticks span min..max inclusive — 2 draws exactly one at each
+  // end; anything higher adds evenly-spaced ticks between them. Default 5.
+  count?: number
+  color?: string
+  opacity?: number
+  borderColor?: string
+  borderWidth?: number
+  // Each tick's radial length, in the same 0-100 viewBox units as
+  // GaugeWidget's own arc radius. Default 6.
+  size?: number
+  // Each tick's thickness along the arc (not radially). Default 2.
+  thickness?: number
+  // Distance from the gauge's true center to a tick's INNER edge. Unset
+  // defaults to just outside the arc's own stroke.
+  distance?: number
+  showLabels?: boolean
+  labelColor?: string
+  labelFontSize?: number
+  // Decimal places shown on each tick's auto-generated value label. Default 0.
+  labelDecimals?: number
+  // Extra distance from a tick's own outer edge to its label — same
+  // "distance past the anchor point" convention as WidgetLabel.labelDistance
+  // elsewhere.
+  labelDistance?: number
+}
+
 export interface GaugeWidget {
   id: string
   type: 'gauge'
@@ -443,6 +494,52 @@ export interface GaugeWidget {
   fill: ColorAppearance
   track: ColorAppearance
   labels: WidgetLabel[]
+  // The whole widget's own backing fill, behind track/fill/ticks/indicator
+  // alike — Bar and Arc both. Unset (the default) is fully transparent, same
+  // "skip withOpacity entirely rather than resolve a literal 'transparent'"
+  // convention as WidgetLabel.backgroundColor in labels.tsx.
+  backgroundColor?: string
+  backgroundOpacity?: number
+  // Arc style only. When the sweep is less than a full circle, the arc's
+  // own bounding box (not the full circle it's a slice of) is fit to the
+  // widget's box — see arcBoundsUnit in arcPath.ts — so e.g. a single
+  // quarter-circle sweep fills the whole widget instead of sitting tiny in
+  // one corner of a viewBox sized for the full circle, with the true center
+  // landing wherever that bounding box puts it (the opposite corner from
+  // the missing sweep). Tick marks/labels are deliberately excluded from
+  // that fit — they're allowed to extend past the widget's own edges rather
+  // than shrinking the arc further to make room for them.
+  tickSets?: GaugeTickSet[]
+  // Arc style only — a needle pointing at the current value, drawn with the
+  // same needlePoints math DialSwitchWidget's own needle uses. Off by
+  // default (the arc fill already shows the value), so an existing
+  // dashboard's gauge renders unchanged until this is deliberately turned
+  // on.
+  showIndicator?: boolean
+  // 'needle' (default) is the same tapered pointer DialSwitchWidget uses;
+  // 'square' is a plain radial bar instead.
+  indicatorShape?: 'needle' | 'square'
+  indicatorColor?: string
+  // Where the needle/square's own drawn shape starts/ends, as distances
+  // from the gauge's true center — NOT necessarily starting at center, so
+  // e.g. a needle can float as a short segment out near the arc instead of
+  // always running from the pivot. Defaults: start 0, end ~70% of the arc
+  // radius (today's old fixed indicatorLength, unchanged in effect).
+  indicatorStartDistance?: number
+  indicatorEndDistance?: number
+  // Half-width — the needle/square's own thickness, perpendicular to its
+  // radial direction.
+  indicatorWidth?: number
+  // The hub the needle/square appears to pivot from — always drawn at the
+  // true center (distance 0) regardless of indicatorStartDistance, and
+  // independent of the needle/square's own color/border. Size 0 draws none.
+  indicatorCenterSize?: number
+  // Defaults to indicatorColor (so an untouched hub reads as part of the
+  // needle rather than a separately-colored overlay) — deliberately never
+  // fill/track, same reasoning as indicatorColor itself.
+  indicatorCenterColor?: string
+  indicatorCenterBorderColor?: string
+  indicatorCenterBorderWidth?: number
   // Bar style only — an arc has no rectangular box to round/border, so these
   // are hidden from the properties panel (and not applied to the outer
   // container) whenever style is 'arc'. Per-corner/per-side, same as
@@ -625,6 +722,42 @@ export interface RockerSwitchWidget extends SwitchWidgetBase {
   h: number
   orientation?: 'horizontal' | 'vertical' // default 'vertical'
   track: ColorAppearance // base container behind the segments
+  // Root-level, alongside (not instead of) each position's own onSelect —
+  // see SwitchPosition.onSelect's own comment. `press`/`release` fire on
+  // every physical press/release of the widget regardless of which segment
+  // (if any) it lands on, same press/release convention EventfulWidget
+  // types use. `positionChange` fires whenever ANY position is selected,
+  // in addition to that position's own onSelect running — with
+  // variables.$value/$index (that position's name/index — see TriggerValue
+  // in main/index.ts) in scope, so one shared sequence can still tell which
+  // position actually fired it, e.g. for a DCS command whose argument
+  // depends on which position was picked, without copy-pasting that
+  // sequence into every position.
+  events: { press: SequenceStep[]; release: SequenceStep[]; positionChange: SequenceStep[] }
+  // Labels anchored to the widget as a whole (e.g. a switch name/legend),
+  // independent of each position's own labels (SwitchPosition.labels) — same
+  // flat-list convention as Gauge/Adjuster/Encoder/Toggle/Dial's own
+  // `labels`. Deliberately NOT rotated by rotateAngle below — see its own
+  // comment — while a position's own labels (rendered inside the rotated
+  // body) do rotate with it.
+  labels: WidgetLabel[]
+  // Spins the rocker's own body — shape, segments, AND each position's own
+  // labels — in place around the widget's center; degrees, clockwise, 0 is
+  // unrotated. This widget-level `labels` array above is rendered OUTSIDE
+  // that rotated body on purpose, so a legend/title stays upright regardless
+  // of how the switch itself is tilted.
+  rotateAngle?: number
+  // Off (default): matches every other switch widget — the deployed view
+  // client defaults to position 0 active until something's actually tapped,
+  // then keeps whichever position was last tapped highlighted (see
+  // useSwitchPosition.ts). On: there's no default-active position at all
+  // (nothing highlighted until a tap, or activePositionExpr resolves one),
+  // AND a tap's own highlight doesn't stick — it reverts to nothing active
+  // right after, like a self-centering/momentary rocker with no resting
+  // "on" look. Either way, tapping a position always fires its onSelect —
+  // this only ever affects which segment (if any) LOOKS active, never
+  // whether a tap triggers.
+  settleToInactive?: boolean
   radiusTopLeft?: number
   radiusTopRight?: number
   radiusBottomLeft?: number
@@ -672,6 +805,10 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   // same flat-list convention as Gauge/Adjuster/Encoder's own `labels`,
   // rendered as absolutely-positioned overlays via renderWidgetLabels.
   labels: WidgetLabel[]
+  // Root-level, alongside (not instead of) each position's own onSelect —
+  // see RockerSwitchWidget.events' own comment for the full reasoning
+  // (same convention here).
+  events: { press: SequenceStep[]; release: SequenceStep[]; positionChange: SequenceStep[] }
   orientation?: 'horizontal' | 'vertical' // default 'vertical'
   // 'tap' (default): tap a zone (or its label) to select that position
   // directly. 'drag': press anywhere on the widget and drag toward the
@@ -686,6 +823,10 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   borderColor?: string
   borderColorExpr?: string
   borderOpacity?: number
+  // The bezel's own stroke width, in the same 0-100 viewBox units as
+  // bezelRadius below. Defaults to 2 (the width it was hardcoded to before
+  // this became configurable) in ToggleSwitchWidget.tsx.
+  borderWidth?: number
   // The base/bezel circle's own radius, in the same 0-100 viewBox units as
   // BEZEL_RADIUS (its default) in ToggleSwitchWidget.tsx. The label ring
   // scales off whichever value is effective, so shrinking/growing the bezel
@@ -815,7 +956,10 @@ export interface DialShapeStyle {
   // lives in indicatorStyle.borderColor (DetentStyle), same as a ring
   // detent's — deliberately no separate indicatorBorderColor field, so
   // there's exactly one place that sets what the render actually reads.
-  indicatorShape?: 'circle' | 'square' | 'tick' | 'triangle'
+  // 'none' draws no indicator marker at all — just the bare square/circle
+  // knob, e.g. when a dial's own rotation already reads clearly enough
+  // without one.
+  indicatorShape?: 'circle' | 'square' | 'tick' | 'triangle' | 'none'
   indicatorStyle?: DetentStyle
   indicatorColor?: string
   // Distance from the dial's center to the indicator marker, in the same
@@ -847,6 +991,21 @@ export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle {
   // same flat-list convention as Gauge/Adjuster/Encoder's own `labels`,
   // rendered as absolutely-positioned overlays via renderWidgetLabels.
   labels: WidgetLabel[]
+  // Root-level, alongside (not instead of) each position's own onSelect —
+  // see RockerSwitchWidget.events' own comment for press/release/
+  // positionChange. increment/decrement are DialSwitchWidget-only (the one
+  // switch type that's actually rotary) — same 'Turn CW'/'Turn CCW'
+  // vocabulary EncoderWidget already uses, fired when a selection lands on
+  // a higher/lower position index than whichever was active before it, in
+  // ADDITION to that selection's own onSelect/positionChange — see
+  // useSwitchPosition.ts.
+  events: {
+    press: SequenceStep[]
+    release: SequenceStep[]
+    positionChange: SequenceStep[]
+    increment: SequenceStep[]
+    decrement: SequenceStep[]
+  }
   startAngle?: number // degrees, default 135
   endAngle?: number // degrees, default 405
   // 'tap' (default): tap a detent directly to select it. 'drag': press
@@ -866,8 +1025,12 @@ export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle {
   // How each detent dot is drawn. Unset (the default) is a plain circle;
   // 'tick' and 'triangle' are rotated to point radially outward along that
   // detent's own angle (same convention angleForPosition/labelAnchorPoint
-  // use), reading like a real rotary switch's click-stops.
-  detentShape?: 'circle' | 'square' | 'tick' | 'triangle'
+  // use), reading like a real rotary switch's click-stops. 'none' draws no
+  // detent marker at all — a position's own label (if it has one) is still
+  // tappable in 'tap' interactionMode, same as every other shape; a
+  // position with no labels becomes untappable that way and needs drag
+  // mode instead.
+  detentShape?: 'circle' | 'square' | 'tick' | 'triangle' | 'none'
   // Distance from center to each detent dot, in the same 0-100 viewBox units
   // as everything else here (see DialSwitchWidgetContent). Unset (the
   // default) uses DETENT_RADIUS.
@@ -917,6 +1080,9 @@ export interface DropdownWidget extends SwitchWidgetBase {
   events: {
     press: SequenceStep[]
     release: SequenceStep[]
+    // Fires alongside (not instead of) whichever position's own onSelect —
+    // see RockerSwitchWidget.events' own comment for the full reasoning.
+    positionChange: SequenceStep[]
   }
   track: ColorAppearance // cell background behind every position, held or not
   radiusTopLeft?: number

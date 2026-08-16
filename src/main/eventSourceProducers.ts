@@ -140,14 +140,26 @@ export const EVENT_SOURCE_PRODUCERS: Record<string, EventSourceProducer> = {
 
       let cancelled = false
       let timeoutId: NodeJS.Timeout
+      // Logged only on failure<->success transitions, not every tick — a
+      // missing display fails identically on every poll until someone fixes
+      // it (or captureRegionJpeg's own id-migration heals it), and re-logging
+      // that as often as every 200ms drowns out everything else.
+      let lastTickFailed = false
 
       async function tick(): Promise<void> {
         try {
           const text = (await recognizeRegionText(region, displayId)).trim()
           const value = extractOcrNumber(text)
           if (!cancelled) emit(value === undefined ? { text } : { text, value })
+          if (lastTickFailed) {
+            lastTickFailed = false
+            console.log(`[boarderoni] OCR event source recovered (${instance.name})`)
+          }
         } catch (err) {
-          console.error(`[boarderoni] OCR event source tick failed (${instance.name})`, err)
+          if (!lastTickFailed) {
+            lastTickFailed = true
+            console.error(`[boarderoni] OCR event source tick failed (${instance.name})`, err)
+          }
         }
         if (!cancelled) timeoutId = setTimeout(tick, intervalMs)
       }

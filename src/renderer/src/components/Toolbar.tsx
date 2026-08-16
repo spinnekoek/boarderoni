@@ -75,22 +75,22 @@ export function Toolbar(): React.JSX.Element {
         />
         <span className="toolbar__unit">px</span>
       </label>
-      <button type="button" className="toolbar__button" onClick={() => setVariablesOpen(true)}>
-        Variables
-      </button>
-      <button type="button" className="toolbar__button" onClick={() => setEventsOpen(true)}>
-        Events
+      <button type="button" className="toolbar__button" onClick={() => setMobileAppOpen(true)}>
+        Mobile app
       </button>
       <button type="button" className="toolbar__button" onClick={() => openSettings()}>
         Settings
       </button>
-      <button type="button" className="toolbar__button" onClick={() => setMobileAppOpen(true)}>
-        Mobile app
+      <button type="button" className="toolbar__button" onClick={() => setEventsOpen(true)}>
+        Events
       </button>
-      {variablesOpen && <VariablesModal onClose={() => setVariablesOpen(false)} />}
-      {eventsOpen && <EventsModal onClose={() => setEventsOpen(false)} />}
-      {settingsOpen && <SettingsModal onClose={closeSettings} />}
+      <button type="button" className="toolbar__button" onClick={() => setVariablesOpen(true)}>
+        Variables
+      </button>
       {mobileAppOpen && <MobileAppModal onClose={() => setMobileAppOpen(false)} />}
+      {settingsOpen && <SettingsModal onClose={closeSettings} />}
+      {eventsOpen && <EventsModal onClose={() => setEventsOpen(false)} />}
+      {variablesOpen && <VariablesModal onClose={() => setVariablesOpen(false)} />}
     </div>
   )
 }

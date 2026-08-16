@@ -151,7 +151,9 @@ export function Palette(): React.JSX.Element {
       h: 160,
       orientation: 'vertical',
       positions: defaultPositions(),
-      track: { color: DEFAULT_WIDGET_COLOR }
+      track: { color: DEFAULT_WIDGET_COLOR },
+      labels: [],
+      events: { press: [], release: [], positionChange: [] }
     }
     addWidget(widget)
     selectWidget(widget.id)
@@ -168,7 +170,8 @@ export function Palette(): React.JSX.Element {
       positions: defaultPositions(),
       labels: [],
       track: { color: DEFAULT_WIDGET_COLOR },
-      fill: { color: '#5b8def' }
+      fill: { color: '#5b8def' },
+      events: { press: [], release: [], positionChange: [], increment: [], decrement: [] }
     }
     addWidget(widget)
     selectWidget(widget.id)
@@ -198,7 +201,8 @@ export function Palette(): React.JSX.Element {
       positions: defaultTogglePositions(),
       labels: [],
       track: { color: DEFAULT_WIDGET_COLOR },
-      fill: { color: '#5b8def' }
+      fill: { color: '#5b8def' },
+      events: { press: [], release: [], positionChange: [] }
     }
     addWidget(widget)
     selectWidget(widget.id)
@@ -214,7 +218,7 @@ export function Palette(): React.JSX.Element {
       h: 36,
       orientation: 'top-to-bottom',
       positions: defaultPositions(),
-      events: { press: [], release: [] },
+      events: { press: [], release: [], positionChange: [] },
       track: { color: DEFAULT_WIDGET_COLOR }
     }
     addWidget(widget)

@@ -19,7 +19,7 @@ interface Camera {
 }
 
 const MIN_ZOOM = 0.1
-const MAX_ZOOM = 3
+const MAX_ZOOM = 5
 const INITIAL_CAMERA: Camera = { x: 80, y: 80, zoom: 1 }
 const PAN_THRESHOLD = 3
 

@@ -128,7 +128,7 @@ export function CanvasWidget({
           widget={widget}
           variables={variables}
           interactive={false}
-          activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? 0}
+          activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? (widget.settleToInactive ? null : 0)}
           selectedPositionId={isSoleSelection ? selectedBlockId : null}
           onPositionSelect={(position) => {
             // First click on the widget selects the whole thing (same as
@@ -183,6 +183,11 @@ export function CanvasWidget({
       {selected && selectedWidgetIds.length === 1 && (
         <div
           className="canvas-widget__resize-handle"
+          // Counter-scales against the canvas's own zoom (see
+          // .canvas-widget__size-label's identical trick above) so the
+          // handle stays a constant screen size instead of ballooning when
+          // zoomed into a small widget.
+          style={{ transform: `scale(${1 / zoom})` }}
           onPointerDown={handleResizePointerDown}
           onPointerMove={handleResizePointerMove}
           onPointerUp={handleResizePointerUp}

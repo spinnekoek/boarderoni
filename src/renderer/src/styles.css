@@ -429,10 +429,39 @@ body {
 
 .canvas-marquee {
 	position: absolute;
-	border: 1px solid #5b8def;
-	background: rgba(91, 141, 239, 0.15);
+	background: rgba(77, 250, 255, 0.08);
 	pointer-events: none;
 	z-index: 20;
+}
+
+/* Same masked-conic-gradient glint ring as .canvas-widget--selected::before
+   above, just thinner (this box is a short-lived drag rectangle, not a
+   persistent selection) — see that rule's own comment for how/why it works. */
+.canvas-marquee::before {
+	content: '';
+	position: absolute;
+	inset: -2px;
+	padding: 1px;
+	background: conic-gradient(
+		from var(--glint-angle),
+		rgba(77, 250, 255, 0.25) 0deg,
+		rgba(77, 250, 255, 0.25) 270deg,
+		rgba(77, 250, 255, 0.9) 316deg,
+		#ff3cdc 335deg,
+		rgba(255, 60, 220, 0.85) 350deg,
+		rgba(77, 250, 255, 0.25) 360deg
+	);
+	-webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	animation: glint-spin 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.canvas-marquee::before {
+		animation: none;
+		background: rgba(77, 250, 255, 0.6);
+	}
 }
 
 .canvas-device-bounds__label {
@@ -459,10 +488,70 @@ body {
 	pointer-events: none;
 }
 
+/* A registered custom property (not a plain CSS variable) so its <angle>
+   value can be smoothly interpolated frame-by-frame by glint-spin below —
+   an unregistered custom property is just an opaque string to the animator,
+   which would jump straight from 0deg to 360deg instead of sweeping through
+   every angle in between. Shared by both the widget selection ring and the
+   marquee ring (see .canvas-marquee below) — each animated element gets its
+   own independent value despite reusing the same property name/keyframes. */
+@property --glint-angle {
+	syntax: '<angle>';
+	inherits: false;
+	initial-value: 0deg;
+}
+
+@keyframes glint-spin {
+	from {
+		--glint-angle: 0deg;
+	}
+	to {
+		--glint-angle: 360deg;
+	}
+}
+
 .canvas-widget--selected {
-	outline: 2px solid #5b8def;
-	outline-offset: 2px;
+	outline: none;
 	z-index: 10;
+}
+
+/* The animated selection ring — a comet-like glint that sweeps around the
+   widget's fixed rectangular outline, shifting cyan -> magenta -> cyan as it
+   travels, over a dim always-on cyan base so the box still reads as
+   outlined between passes. Built as a masked conic-gradient ring (padding
+   reserves the ring's thickness, the two mask layers punch out everything
+   but that ring — see the mask-composite trick below) rather than a
+   rotating element: rotating the element itself would visibly tilt/skew a
+   non-square widget's corners as it spun, where animating just the
+   gradient's own angle keeps the rectangle itself perfectly static. */
+.canvas-widget--selected::before {
+	content: '';
+	position: absolute;
+	inset: -4px;
+	border-radius: inherit;
+	padding: 2px;
+	background: conic-gradient(
+		from var(--glint-angle),
+		rgba(77, 250, 255, 0.18) 0deg,
+		rgba(77, 250, 255, 0.18) 270deg,
+		rgba(77, 250, 255, 0.9) 316deg,
+		#ff3cdc 335deg,
+		rgba(255, 60, 220, 0.85) 350deg,
+		rgba(77, 250, 255, 0.18) 360deg
+	);
+	-webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	pointer-events: none;
+	z-index: 1;
+	animation: glint-spin 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.canvas-widget--selected::before {
+		animation: none;
+		background: rgba(77, 250, 255, 0.6);
+	}
 }
 
 .canvas-widget__size-label {
@@ -494,7 +583,9 @@ body {
 
 .canvas-widget__morph-extend {
 	position: absolute;
-	transform: translate(-50%, -50%);
+	/* transform (translate + zoom-compensating scale) is set inline per
+	   button instance — see MorphCanvasWidget.tsx — since it needs the
+	   current zoom level, which isn't available here. */
 	width: 18px;
 	height: 18px;
 	display: flex;
@@ -599,7 +690,16 @@ button.deck-button:focus-visible {
 	inset: 0;
 	display: flex;
 	pointer-events: none;
-	white-space: nowrap;
+	/* `pre`, not `nowrap` — both stop wrapping, but `nowrap` still collapses
+	   runs of spaces and trims leading/trailing ones per HTML's normal
+	   whitespace model. A label's text can come straight from a Variable's
+	   value (via textExpr — see resolveLabelText in shared/expr.ts), and some
+	   of those (fixed-width DCS-BIOS string fields in particular) are
+	   deliberately space-padded — `pre` renders exactly the characters given,
+	   same as the underlying value actually holds. The ␤-driven <br> line
+	   breaks (see renderLabelContent in labels.tsx) are real <br> elements,
+	   not literal newlines, so they're unaffected either way. */
+	white-space: pre;
 	overflow: visible;
 	line-height: 0.9;
 }
@@ -621,6 +721,15 @@ button.deck-button:focus-visible {
 	overflow: hidden;
 }
 
+/* The arc style's own viewBox is fit to the swept arc itself (see GaugeArc
+   in GaugeWidget.tsx), not the widget's box — tick marks/labels are
+   deliberately excluded from that fit so they can extend past it, which
+   needs the clipping .deck-gauge otherwise applies (for the bar style's
+   rounded-rect border) turned back off. */
+.deck-gauge--arc {
+	overflow: visible;
+}
+
 .deck-gauge__track {
 	position: absolute;
 	inset: 0;
@@ -632,6 +741,25 @@ button.deck-button:focus-visible {
 	inset: 0;
 	width: 100%;
 	height: 100%;
+	overflow: visible;
+}
+
+/* One arc-style tick's auto-generated value label — same absolutely-
+   positioned-dot overlay convention as .deck-dial-switch__detent-label,
+   placed via viewBoxRectToPixel against the arc's own dynamic viewBox (see
+   gaugeTicks in GaugeWidget.tsx). Purely decorative, so no cursor override. */
+.deck-gauge__tick-label {
+	position: absolute;
+	transform: translate(-50%, -50%);
+	width: 60px;
+	height: 22px;
+}
+
+.deck-gauge__tick-label .deck-button__label {
+	position: static;
+	width: 100%;
+	height: 100%;
+	box-sizing: border-box;
 }
 
 .deck-screen-capture {
@@ -1150,7 +1278,14 @@ button.deck-morph-cell:focus-visible {
 }
 
 .properties__field input,
-.properties__field select {
+.properties__field select,
+/* Set-all-delays' own bulk input (EventSequenceEditor) sits directly in a
+   bare .properties__file-row, with no .properties__field ancestor wrapping
+   it (there's no label span text for a plain input+button row) — without
+   this it fell back to the browser's unstyled native look, next to the
+   dark-themed "Set all delays" button beside it. */
+.properties__file-row input,
+.properties-section__header-extra input {
 	background: #14161b;
 	border: 1px solid #3a3f4a;
 	border-radius: 4px;
@@ -1562,13 +1697,20 @@ button.deck-morph-cell:focus-visible {
 	background: #5b8def;
 }
 
+/* Wraps KeyCapture + its embedded clear button (see .key-capture__clear
+   below) — a sibling "Unbind" button next to the box read as two disjoint
+   controls; embedding the clear affordance inside the same box (like
+   ColorPickerButton's own trigger + clear pairing) reads as one. */
+.key-capture-row {
+	position: relative;
+}
+
 .key-capture {
-	flex: 1;
 	background: #14161b;
 	border: 1px solid #3a3f4a;
 	border-radius: 4px;
 	color: #e8e8ea;
-	padding: 6px 8px;
+	padding: 6px 28px 6px 8px;
 	font-size: 13px;
 	cursor: pointer;
 	min-height: 1.4em;
@@ -1577,6 +1719,30 @@ button.deck-morph-cell:focus-visible {
 .key-capture--active {
 	border-color: #5b8def;
 	box-shadow: 0 0 0 1px #5b8def;
+}
+
+.key-capture__clear {
+	position: absolute;
+	top: 50%;
+	right: 6px;
+	transform: translateY(-50%);
+	width: 20px;
+	height: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: none;
+	border: none;
+	border-radius: 4px;
+	color: #9098a8;
+	font-size: 15px;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.key-capture__clear:hover {
+	color: #e27e7e;
+	background: rgba(226, 126, 126, 0.12);
 }
 
 .sequence-recorder {
@@ -2009,6 +2175,10 @@ button.deck-morph-cell:focus-visible {
 	color: #cfd3db;
 	list-style: none;
 	user-select: none;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
 }
 
 .properties-section summary::-webkit-details-marker {
@@ -2017,6 +2187,33 @@ button.deck-morph-cell:focus-visible {
 
 .properties-section summary:hover {
 	color: #e8e8ea;
+}
+
+/* Extra controls in the header itself (see PropertiesSection's headerExtra
+   prop) — e.g. EventSequenceEditor's "Set all delays" bulk input, usable
+   without opening the section. Not part of the toggle affordance (see the
+   stopPropagation at the call site), so it gets its own cursor rather than
+   inheriting summary's pointer-everywhere cursor. */
+.properties-section__header-extra {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	cursor: default;
+	font-weight: 400;
+}
+
+/* Smaller than the panel-body default (see .properties__field input and
+   .properties__file-button) — this sits inline in a header next to the
+   section title, not in the body's own roomier column. */
+.properties-section__header-extra input {
+	width: 44px;
+	padding: 3px 5px;
+	font-size: 11px;
+}
+
+.properties-section__header-extra .properties__file-button {
+	padding: 3px 8px;
+	font-size: 11px;
 }
 
 .properties-section__body {
@@ -2046,6 +2243,18 @@ button.deck-morph-cell:focus-visible {
 	display: flex;
 	align-items: flex-end;
 	gap: 8px;
+}
+
+/* The label's own 8px margin-bottom (see the rule above) is dead space here
+   — nothing follows it inside a delay step, .sequence-step already spaces
+   itself from the next step via its own margin/padding — but flex alignment
+   counts it as part of the label's box while the Remove button next to it
+   has none, which threw off align-items: flex-end above (the button's own
+   bottom edge landing 8px below the input's instead of level with it).
+   Zeroing it here, rather than picking an alignment that merely hides the
+   mismatch, is what actually makes the two edges coincide. */
+.sequence-step__row .properties__field {
+	margin-bottom: 0;
 }
 
 
@@ -2742,6 +2951,11 @@ button.deck-morph-cell:focus-visible {
 .variables-modal__row input:disabled {
 	color: #6b7280;
 	cursor: not-allowed;
+}
+
+.variables-modal__row input:read-only {
+	color: #6b7280;
+	cursor: text;
 }
 
 .variables-modal__remove {

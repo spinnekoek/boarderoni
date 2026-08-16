@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, type VariableMap } from '@shared/expr'
 import type { RockerSwitchWidget, SwitchPosition } from '@shared/types'
@@ -21,7 +22,10 @@ export function RockerSwitchWidgetContent({
   widget: RockerSwitchWidget
   variables: VariableMap
   interactive: boolean
-  activeIndex: number
+  // null (only reachable via RockerSwitchWidget.settleToInactive — see
+  // useSwitchPosition.ts) means no position is currently active; every
+  // segment renders unselected/unhighlighted.
+  activeIndex: number | null
   onSelect?: (index: number) => void
   // Editor-only (interactive=false), same click-through-to-drill-down idea
   // MorphButtonWidgetContent's selectedBlockId/onBlockSelect use — see
@@ -37,6 +41,18 @@ export function RockerSwitchWidgetContent({
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
   const orientation = widget.orientation ?? 'vertical'
   const flexDirection = orientation === 'vertical' ? 'column' : 'row'
+  // Purely a live "currently being pressed" preview, independent of
+  // activeIndex itself — onClick (below) still fires the actual select on
+  // release, same timing as always. Without this, a RockerSwitchWidget with
+  // settleToInactive on (see its own comment in shared/types.ts) never
+  // visibly highlights at all: onClick only fires (and activeIndex only
+  // settles back to null) after the press/release gesture has already fully
+  // completed, so there'd be nothing to see mid-press. With this, holding a
+  // segment down shows it active immediately, then it clears on release —
+  // matching a momentary rocker's physical feel. Harmless for the normal
+  // (non-settling) case too: the segment previewed here is the same one
+  // activeIndex settles onto right after anyway.
+  const [pressedIndex, setPressedIndex] = useState<number | null>(null)
 
   return (
     <div
@@ -54,13 +70,16 @@ export function RockerSwitchWidgetContent({
           borderRightWidth: widget.borderWidthRight ?? 1,
           borderBottomWidth: widget.borderWidthBottom ?? 1,
           borderLeftWidth: widget.borderWidthLeft ?? 1,
-          borderColor
+          borderColor,
+          // Spins the shape/segments/position-labels together, in place —
+          // widget.labels (rendered below, outside this div) stay upright.
+          transform: widget.rotateAngle ? `rotate(${widget.rotateAngle}deg)` : undefined
         }}
       >
         {widget.positions.map((position, index) => {
           const resolvedColor = resolveColor(position, variables)
           const unselectedColor = resolvedColor.color ?? DEFAULT_WIDGET_COLOR
-          const active = index === activeIndex
+          const active = index === (pressedIndex ?? activeIndex)
           // Only resolved for the active position — no reason to evaluate
           // activeColor/activeOpacity's expression for every other one on
           // each render.
@@ -86,13 +105,17 @@ export function RockerSwitchWidgetContent({
               // order: this fires first, then the ancestor) for a click that
               // both selects the widget AND lands on a position to correctly
               // not also drill into it in the same click.
-              onPointerDown={!interactive ? () => onPositionSelect?.(position) : undefined}
+              onPointerDown={interactive ? () => setPressedIndex(index) : () => onPositionSelect?.(position)}
+              onPointerUp={interactive ? () => setPressedIndex(null) : undefined}
+              onPointerCancel={interactive ? () => setPressedIndex(null) : undefined}
+              onPointerLeave={interactive ? () => setPressedIndex(null) : undefined}
             >
               {renderWidgetLabels(position.labels, segmentColor, variables)}
             </div>
           )
         })}
       </div>
+      {renderWidgetLabels(widget.labels, trackColor, variables)}
     </div>
   )
 }

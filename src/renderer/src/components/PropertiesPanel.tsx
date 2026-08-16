@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useConfirmStore } from '../confirmStore'
-import { nextId, isSectionOpen, setSectionOpen } from '../id'
+import { nextId, isSectionOpen, setSectionOpen, getLastDcsAircraft, setLastDcsAircraft } from '../id'
 import { FONT_OPTIONS, resolveFont } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, pickAutoBorderColor, pickLegibleTextColor } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
@@ -32,6 +32,7 @@ import type {
   DropdownWidget,
   EncoderWidget,
   EventfulWidget,
+  GaugeTickSet,
   GaugeWidget,
   HorizontalAlign,
   KeypressAction,
@@ -129,6 +130,7 @@ function PropertiesSection({
   title,
   badge,
   sectionKey,
+  headerExtra,
   children
 }: {
   title: string
@@ -138,6 +140,13 @@ function PropertiesSection({
   // sections pass the label's own id instead: several labels can share the
   // same title ("Untitled label") but shouldn't share open state.
   sectionKey?: string
+  // Extra controls shown in the clickable header itself, beside the title —
+  // e.g. EventSequenceEditor's "Set all delays" bulk input, usable without
+  // opening the section at all. Stops click/pointerdown from bubbling up to
+  // <summary> so interacting with these doesn't also toggle the section —
+  // a <summary>'s expand/collapse is the browser's own default action on
+  // any click that reaches it, descendant-originated or not.
+  headerExtra?: React.ReactNode
   children: React.ReactNode
 }): React.JSX.Element {
   const key = sectionKey ?? title
@@ -153,8 +162,15 @@ function PropertiesSection({
       }}
     >
       <summary>
-        {title}
-        {badge ? ` (${badge})` : ''}
+        <span>
+          {title}
+          {badge ? ` (${badge})` : ''}
+        </span>
+        {headerExtra && (
+          <span className="properties-section__header-extra" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+            {headerExtra}
+          </span>
+        )}
       </summary>
       <div className="properties-section__body">{children}</div>
     </details>
@@ -413,6 +429,17 @@ function LabelFields({
         />
       </div>
 
+      <div className="properties__field">
+        <span>Background color</span>
+        <ColorPickerButton
+          key={`${label.id}-backgroundColor`}
+          value={label.backgroundColor ?? DEFAULT_WIDGET_COLOR}
+          onChange={(color) => onChange({ backgroundColor: color })}
+          opacity={label.backgroundOpacity ?? (label.backgroundColor === undefined ? 0 : 1)}
+          onOpacityChange={(v) => onChange({ backgroundOpacity: v })}
+        />
+      </div>
+
       <label className="properties__field">
         <span>Align</span>
         <div className="text-align-grid">
@@ -508,10 +535,11 @@ function DetentShapeEditor({
   style,
   onStyleChange,
   squareBorder,
-  onSquareBorderChange
+  onSquareBorderChange,
+  allowNone
 }: {
-  shape: NonNullable<DialSwitchWidget['detentShape']>
-  onShapeChange: (shape: NonNullable<DialSwitchWidget['detentShape']>) => void
+  shape: NonNullable<DialShapeStyle['indicatorShape']>
+  onShapeChange: (shape: NonNullable<DialShapeStyle['indicatorShape']>) => void
   style: DetentStyle | undefined
   onStyleChange: (style: DetentStyle) => void
   // Only the dial-center indicator's 'square' shape wires these — a ring
@@ -522,7 +550,31 @@ function DetentShapeEditor({
   // UI" convention ColorPickerButton's onEnterExpr/onExprChange already use.
   squareBorder?: SquareBorderStyle
   onSquareBorderChange?: (value: SquareBorderStyle) => void
+  // Whether "None" (draw nothing) is offered at all — the dial-center
+  // indicator and the "Detents" section's own ring-detent call (below) both
+  // pass this now; omitted (e.g. a circle indent's own shape picker) means
+  // there's always supposed to be SOME visible marker, so the option is
+  // hidden entirely instead of just being one more choice nobody should pick.
+  allowNone?: boolean
 }): React.JSX.Element {
+  if (shape === 'none') {
+    return (
+      <div className="properties__grid2">
+        <label className="properties__field">
+          <span>Shape</span>
+          <select value={shape} onChange={(e) => onShapeChange(e.target.value as NonNullable<DialShapeStyle['indicatorShape']>)}>
+            <option value="none">None</option>
+            <option value="circle">Circle</option>
+            <option value="square">Square</option>
+            <option value="tick">Tick</option>
+            <option value="triangle">Triangle</option>
+          </select>
+        </label>
+        <div />
+      </div>
+    )
+  }
+
   const defaultSize = DETENT_SIZE[shape]
   const defaultBorderRadius = shape === 'square' ? 2 : 1
   // Every shape but circle can show a meaningful border now — a triangle
@@ -538,7 +590,8 @@ function DetentShapeEditor({
       <div className="properties__grid2">
         <label className="properties__field">
           <span>Shape</span>
-          <select value={shape} onChange={(e) => onShapeChange(e.target.value as NonNullable<DialSwitchWidget['detentShape']>)}>
+          <select value={shape} onChange={(e) => onShapeChange(e.target.value as NonNullable<DialShapeStyle['indicatorShape']>)}>
+            {allowNone && <option value="none">None</option>}
             <option value="circle">Circle</option>
             <option value="square">Square</option>
             <option value="tick">Tick</option>
@@ -850,6 +903,7 @@ function DialShapeFields({
             onShapeChange={(shape) => onChange({ indicatorShape: shape === 'circle' ? undefined : shape })}
             style={value.indicatorStyle}
             onStyleChange={(indicatorStyle) => onChange({ indicatorStyle })}
+            allowNone
             squareBorder={value.indicatorSquareBorder}
             onSquareBorderChange={(indicatorSquareBorder) => onChange({ indicatorSquareBorder })}
           />
@@ -885,11 +939,20 @@ function DialShapeFields({
 function ActionFields({
   action,
   onChange,
-  dcsBiosActionEnabled
+  dcsBiosActionEnabled,
+  variableHint
 }: {
   action: WidgetAction
   onChange: (action: WidgetAction) => void
   dcsBiosActionEnabled: boolean
+  // A short "variables.$whatever" reference, threaded down from whichever
+  // EventSequenceEditor this action lives under (see its own doc comment) —
+  // only set for events that actually put something extra in scope (Press/
+  // Release/Position Change/Turn CW/Turn CCW — see TriggerValue in
+  // main/index.ts), spliced into this action kind's own expression
+  // placeholder(s) below so it's discoverable right where you'd type it,
+  // not just in the hint text above the step list.
+  variableHint?: string
 }): React.JSX.Element {
   // Own selector rather than a threaded prop — ActionFields is nested
   // several components deep (SequenceStepFields/EventSequenceEditor/every
@@ -920,7 +983,8 @@ function ActionFields({
             if (kind === 'none') onChange({ kind: 'none' })
             else if (kind === 'keypress') onChange({ kind: 'keypress', keys: [] })
             else if (kind === 'update-state') onChange({ kind: 'update-state', code: '' })
-            else if (kind === 'send-dcs-command') onChange({ kind: 'send-dcs-command', aircraft: '', identifier: '', interface: 'action', argument: '' })
+            else if (kind === 'send-dcs-command')
+              onChange({ kind: 'send-dcs-command', aircraft: getLastDcsAircraft(), identifier: '', interface: 'action', argument: '' })
             else if (kind === 'navigate-subdeck') onChange({ kind: 'navigate-subdeck', target: { type: 'main-deck' } })
             else if (kind === 'open-overlay')
               onChange({ kind: 'open-overlay', subDeckId: subDecks[0]?.id ?? '', edge: 'right', size: 320, sizeUnit: 'px' })
@@ -954,16 +1018,13 @@ function ActionFields({
         <>
           <label className="properties__field">
             <span>Keys</span>
-            <div className="properties__file-row">
+            <div className="key-capture-row">
               <KeyCapture keys={action.keys} onChange={(keys) => onChange({ ...action, keys })} />
-              <button
-                type="button"
-                className="properties__file-remove"
-                disabled={action.keys.length === 0}
-                onClick={() => onChange({ ...action, keys: [] })}
-              >
-                Unbind
-              </button>
+              {action.keys.length > 0 && (
+                <button type="button" className="key-capture__clear" title="Unbind" onClick={() => onChange({ ...action, keys: [] })}>
+                  ×
+                </button>
+              )}
             </div>
           </label>
           <p className="properties__hint">Click the box, then press the key combo to bind. Click away to finish.</p>
@@ -993,7 +1054,11 @@ function ActionFields({
             <textarea
               className="properties__code"
               rows={6}
-              placeholder={'return { my_variable: (variables.my_variable ?? 0) + 1 };'}
+              placeholder={
+                variableHint
+                  ? `return { my_variable: ${variableHint} };`
+                  : 'return { my_variable: (variables.my_variable ?? 0) + 1 };'
+              }
               value={action.code}
               onChange={(e) => onChange({ kind: 'update-state', code: e.target.value })}
             />
@@ -1016,7 +1081,7 @@ function ActionFields({
           Closes whichever slide-over panel is currently open on the device that triggers this. No effect if none is open.
         </p>
       ) : action.kind === 'send-dcs-command' ? (
-        <SendDcsCommandActionEditor action={action} onPatch={(fields) => onChange({ ...action, ...fields })} />
+        <SendDcsCommandActionEditor action={action} onPatch={(fields) => onChange({ ...action, ...fields })} variableHint={variableHint} />
       ) : (
         // Narrowed by every kind check above, but TS doesn't retain that
         // narrowing inside the onChange closure below (a callback could in
@@ -1026,6 +1091,7 @@ function ActionFields({
           action={action as CallRestAction}
           restDataSources={restDataSources}
           onPatch={(fields) => onChange({ ...(action as CallRestAction), ...fields })}
+          variableHint={variableHint}
         />
       )}
     </>
@@ -1040,12 +1106,15 @@ function SequenceStepFields({
   step,
   onChange,
   onRemove,
-  dcsBiosActionEnabled
+  dcsBiosActionEnabled,
+  variableHint
 }: {
   step: SequenceStep
   onChange: (step: SequenceStep) => void
   onRemove: () => void
   dcsBiosActionEnabled: boolean
+  // See ActionFields' own doc comment.
+  variableHint?: string
 }): React.JSX.Element {
   if (step.kind === 'delay') {
     return (
@@ -1067,7 +1136,12 @@ function SequenceStepFields({
   }
   return (
     <>
-      <ActionFields action={step.action} onChange={(action) => onChange({ ...step, action })} dcsBiosActionEnabled={dcsBiosActionEnabled} />
+      <ActionFields
+        action={step.action}
+        onChange={(action) => onChange({ ...step, action })}
+        dcsBiosActionEnabled={dcsBiosActionEnabled}
+        variableHint={variableHint}
+      />
       <button type="button" className="properties__file-remove sequence-step__remove" onClick={onRemove}>
         Remove step
       </button>
@@ -1084,16 +1158,26 @@ function EventSequenceEditor({
   title,
   steps,
   onChange,
-  dcsBiosActionEnabled
+  dcsBiosActionEnabled,
+  hint,
+  variableHint
 }: {
   title: string
   steps: SequenceStep[]
   onChange: (steps: SequenceStep[]) => void
   dcsBiosActionEnabled: boolean
+  // Shown once, above the step list — e.g. Position Change/increment/
+  // decrement's own note about variables.$value/$index (see TriggerValue in
+  // main/index.ts) being in scope for this particular event's expressions.
+  hint?: string
+  // See ActionFields' own doc comment — threaded all the way down to each
+  // step's own expression placeholder(s), not just this section's hint text
+  // above.
+  variableHint?: string
 }): React.JSX.Element {
   const dragStepIndex = useRef<number | null>(null)
   const [recording, setRecording] = useState(false)
-  const [bulkDelayMs, setBulkDelayMs] = useState(250)
+  const [bulkDelayMs, setBulkDelayMs] = useState(30)
 
   function patchStep(index: number, step: SequenceStep): void {
     onChange(steps.map((s, i) => (i === index ? step : s)))
@@ -1121,13 +1205,57 @@ function EventSequenceEditor({
   }
 
   return (
-    <PropertiesSection title={title} badge={steps.length}>
+    <PropertiesSection
+      title={title}
+      badge={steps.length}
+      headerExtra={
+        steps.some((s) => s.kind === 'delay') ? (
+          <>
+            <input
+              type="number"
+              min={0}
+              value={bulkDelayMs}
+              onChange={(e) => setBulkDelayMs(Math.max(0, Math.round(Number(e.target.value))))}
+            />
+            <button type="button" className="properties__file-button" onClick={() => setAllDelays(bulkDelayMs)}>
+              Set all delays
+            </button>
+          </>
+        ) : undefined
+      }
+    >
+      {hint && <p className="properties__hint">{hint}</p>}
       {steps.length === 0 && <p className="properties__hint">No actions on this event.</p>}
       {steps.map((step, index) => (
         <div
           key={step.id}
           className="sequence-step"
           draggable
+          // `draggable` on this whole row (so you can grab it anywhere, not
+          // just a dedicated handle) means a click-drag that starts inside
+          // one of SequenceStepFields' own text/number inputs — meant as a
+          // text-selection drag — would otherwise get swept up as a native
+          // HTML5 row-reorder drag instead. Checking the target inside
+          // onDragStart doesn't work: for a draggable ANCESTOR with a
+          // non-draggable descendant, the browser fires dragstart with
+          // target = the draggable element itself (this row), never the
+          // input the mousedown actually landed on — there's no "which
+          // descendant started it" info left by the time dragstart fires.
+          // So this has to happen earlier: flip the row's own `draggable`
+          // off, on the actual pointerdown, whenever THAT target is a form
+          // control — before the browser ever decides to start a drag at
+          // all — then flip it back on release so the row can still be
+          // grabbed normally anywhere else.
+          onPointerDown={(e) => {
+            e.currentTarget.draggable = !(
+              e.target instanceof HTMLInputElement ||
+              e.target instanceof HTMLTextAreaElement ||
+              e.target instanceof HTMLSelectElement
+            )
+          }}
+          onPointerUp={(e) => {
+            e.currentTarget.draggable = true
+          }}
           onDragStart={() => (dragStepIndex.current = index)}
           onDragOver={(e) => e.preventDefault()}
           onDrop={() => handleReorderStep(index)}
@@ -1137,6 +1265,7 @@ function EventSequenceEditor({
             onChange={(s) => patchStep(index, s)}
             onRemove={() => removeStep(index)}
             dcsBiosActionEnabled={dcsBiosActionEnabled}
+            variableHint={variableHint}
           />
         </div>
       ))}
@@ -1157,20 +1286,6 @@ function EventSequenceEditor({
           </button>
           <button type="button" className="properties__file-button" onClick={() => setRecording(true)}>
             ● Record keys
-          </button>
-        </div>
-      )}
-      {steps.some((s) => s.kind === 'delay') && (
-        <div className="properties__file-row">
-          <input
-            type="number"
-            min={0}
-            value={bulkDelayMs}
-            onChange={(e) => setBulkDelayMs(Math.max(0, Math.round(Number(e.target.value))))}
-            style={{ width: 80 }}
-          />
-          <button type="button" className="properties__file-button" onClick={() => setAllDelays(bulkDelayMs)}>
-            Set all delays
           </button>
         </div>
       )}
@@ -1504,10 +1619,13 @@ function OpenOverlayActionEditor({
 
 function SendDcsCommandActionEditor({
   action,
-  onPatch
+  onPatch,
+  variableHint
 }: {
   action: SendDcsCommandAction
   onPatch: (fields: Partial<SendDcsCommandAction>) => void
+  // See ActionFields' own doc comment.
+  variableHint?: string
 }): React.JSX.Element {
   const dcsBiosAircraft = useDashboardStore((s) => s.dcsBiosAircraft)
   const requestDcsBiosAircraftList = useDashboardStore((s) => s.requestDcsBiosAircraftList)
@@ -1519,6 +1637,20 @@ function SendDcsCommandActionEditor({
 
   const [browserOpen, setBrowserOpen] = useState(false)
   const [search, setSearch] = useState('')
+
+  // dcsBiosSendCommandResult is one global store field, shared by every open
+  // SendDcsCommandActionEditor (Press, Release, every other event, on every
+  // widget) — reading it straight would make clicking Test on ANY of them
+  // flash a result on ALL of them. This captures it into local state instead,
+  // only when THIS instance is the one that just fired a test (awaitingResult
+  // below) — see handleTest.
+  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
+  const awaitingResult = useRef(false)
+  useEffect(() => {
+    if (!awaitingResult.current) return
+    awaitingResult.current = false
+    setTestResult(dcsBiosSendCommandResult)
+  }, [dcsBiosSendCommandResult])
 
   useEffect(() => {
     if (dcsBiosAircraft === null) requestDcsBiosAircraftList()
@@ -1550,21 +1682,40 @@ function SendDcsCommandActionEditor({
 
   function pickAircraft(aircraft: string): void {
     onPatch({ aircraft, identifier: '', interface: 'action', argument: '' })
+    setLastDcsAircraft(aircraft)
     setBrowserOpen(false)
   }
 
   function pickCommand(entry: DcsBiosCommandCatalogEntry): void {
-    onPatch({ identifier: entry.identifier, interface: entry.interface, argument: defaultArgumentFor(entry), argumentExpr: undefined })
+    onPatch({
+      identifier: entry.identifier,
+      interface: entry.interface,
+      // Only fills in a starting value when there wasn't one already —
+      // switching to a different command shouldn't wipe out a value you'd
+      // already set, but a genuinely blank field still gets a sensible
+      // default instead of staying empty.
+      argument: action.argument === '' ? defaultArgumentFor(entry) : action.argument,
+      argumentExpr: undefined
+    })
     setBrowserOpen(false)
   }
 
   function handleTest(): void {
+    let arg: string
     if (isExpr && action.argumentExpr) {
       const result = tryEvaluateExpression(action.argumentExpr, toVariableMap(variables))
-      if (result.ok) sendDcsBiosCommand(action.identifier, String(result.value))
-      return
+      if (!result.ok) return
+      arg = String(result.value)
+    } else {
+      arg = action.argument
     }
-    sendDcsBiosCommand(action.identifier, action.argument)
+    // Only marked AFTER the possible early return above — an expression that
+    // fails to evaluate never actually sends anything, so there's no
+    // response coming to claim; leaving awaitingResult set in that case
+    // would incorrectly grab the next unrelated instance's result instead.
+    awaitingResult.current = true
+    setTestResult(null)
+    sendDcsBiosCommand(action.identifier, arg)
   }
 
   return (
@@ -1590,7 +1741,18 @@ function SendDcsCommandActionEditor({
       {action.aircraft && (
         <label className="properties__field">
           <span>Command</span>
-          <button type="button" className="properties__file-button" onClick={() => setBrowserOpen((o) => !o)}>
+          <button
+            type="button"
+            className="properties__file-button"
+            onClick={() => {
+              // Opening with a command already selected seeds the search
+              // with its own identifier, so the browser starts already
+              // filtered to it (and its neighbors) instead of the full,
+              // unfiltered catalog every time.
+              if (!browserOpen && selected) setSearch(selected.identifier)
+              setBrowserOpen((o) => !o)
+            }}
+          >
             {selected ? `${selected.label} — ${interfaceLabel(selected.interface)}` : 'Pick a command…'}
           </button>
         </label>
@@ -1674,6 +1836,14 @@ function SendDcsCommandActionEditor({
                   ƒx
                 </button>
               )}
+              <button type="button" className="properties__file-button" onClick={handleTest}>
+                Test
+              </button>
+              {testResult && (
+                <span className={testResult.ok ? 'properties__hint-inline' : 'dcsbios-settings__error'}>
+                  {testResult.ok ? 'Sent' : `Failed: ${testResult.error}`}
+                </span>
+              )}
             </div>
           </label>
           {selected && <p className="properties__hint">{commandValueHint(selected)}</p>}
@@ -1684,23 +1854,12 @@ function SendDcsCommandActionEditor({
               <textarea
                 className="properties__code"
                 rows={3}
-                placeholder={"return variables.my_variable > 0 ? 'ON' : 'OFF';"}
+                placeholder={variableHint ? `return ${variableHint} === 'Top' ? '1' : '0';` : "return variables.my_variable > 0 ? 'ON' : 'OFF';"}
                 value={action.argumentExpr ?? ''}
                 onChange={(e) => onPatch({ argumentExpr: e.target.value })}
               />
             </label>
           )}
-
-          <div className="properties__file-row">
-            <button type="button" className="properties__file-button" onClick={handleTest}>
-              Test
-            </button>
-            {dcsBiosSendCommandResult && (
-              <span className={dcsBiosSendCommandResult.ok ? 'properties__hint-inline' : 'dcsbios-settings__error'}>
-                {dcsBiosSendCommandResult.ok ? 'Sent' : `Failed: ${dcsBiosSendCommandResult.error}`}
-              </span>
-            )}
-          </div>
         </>
       )}
     </>
@@ -1714,14 +1873,18 @@ const CALL_REST_EXPR_PLACEHOLDER = 'return variables.my_variable;'
 // argumentExpr field above (and MappingRow's expr toggle in EventsModal.tsx).
 function CallRestPlaceholderRow({
   entry,
-  onPatch
+  onPatch,
+  variableHint
 }: {
   entry: CallRestPlaceholderValue
   onPatch: (fields: Partial<CallRestPlaceholderValue>) => void
+  // See ActionFields' own doc comment.
+  variableHint?: string
 }): React.JSX.Element {
   const isExpr = entry.expr !== undefined
   const [expanded, setExpanded] = useState(false)
   const draftRef = useRef(entry.expr ?? '')
+  const placeholder = variableHint ? `return ${variableHint};` : CALL_REST_EXPR_PLACEHOLDER
   useEffect(() => {
     if (entry.expr) draftRef.current = entry.expr
   }, [entry.expr])
@@ -1759,7 +1922,7 @@ function CallRestPlaceholderRow({
       {isExpr && (
         <div className="color-picker-button__expr-panel">
           <div className="color-picker-button__expr-editor-wrap">
-            <CodeEditor value={entry.expr ?? ''} onChange={(code) => onPatch({ expr: code })} placeholder={CALL_REST_EXPR_PLACEHOLDER} minimal />
+            <CodeEditor value={entry.expr ?? ''} onChange={(code) => onPatch({ expr: code })} placeholder={placeholder} minimal />
             <button type="button" className="color-picker-button__expand" title="Expand" onClick={() => setExpanded(true)}>
               ⤢
             </button>
@@ -1768,12 +1931,7 @@ function CallRestPlaceholderRow({
       )}
 
       {expanded && (
-        <ExpressionEditorModal
-          value={entry.expr ?? ''}
-          onChange={(code) => onPatch({ expr: code })}
-          placeholder={CALL_REST_EXPR_PLACEHOLDER}
-          onClose={() => setExpanded(false)}
-        />
+        <ExpressionEditorModal value={entry.expr ?? ''} onChange={(code) => onPatch({ expr: code })} placeholder={placeholder} onClose={() => setExpanded(false)} />
       )}
     </label>
   )
@@ -1789,11 +1947,14 @@ function CallRestPlaceholderRow({
 function CallRestActionEditor({
   action,
   restDataSources,
-  onPatch
+  onPatch,
+  variableHint
 }: {
   action: CallRestAction
   restDataSources: RestDataSourceStatus[]
   onPatch: (fields: Partial<CallRestAction>) => void
+  // See ActionFields' own doc comment.
+  variableHint?: string
 }): React.JSX.Element {
   const source = restDataSources.find((s) => s.id === action.dataSourceId)
   if (!source) {
@@ -1822,7 +1983,9 @@ function CallRestActionEditor({
     <>
       {placeholders.map((name) => {
         const entry = action.values.find((v) => v.placeholder === name) ?? { placeholder: name, value: '' }
-        return <CallRestPlaceholderRow key={name} entry={entry} onPatch={(fields) => patchPlaceholder(name, fields)} />
+        return (
+          <CallRestPlaceholderRow key={name} entry={entry} onPatch={(fields) => patchPlaceholder(name, fields)} variableHint={variableHint} />
+        )
       })}
     </>
   )
@@ -1852,7 +2015,8 @@ function SwitchPositionsEditor({
   confirm,
   showLabelAnchor = false,
   showPositionName = true,
-  maxPositions
+  maxPositions,
+  rootEvents
 }: {
   positions: SwitchPosition[]
   activePositionExpr?: string
@@ -1890,6 +2054,15 @@ function SwitchPositionsEditor({
   // unconditionally further down (see confirmDeletePosition/the "×" button's
   // own `positions.length > 2` guard) — this only adds a ceiling.
   maxPositions?: number
+  // The widget's own root-level events (Press/Release/Position Change, plus
+  // Turn CW/CCW for DialSwitchWidget only — see RockerSwitchWidget.events'
+  // own doc comment in shared/types.ts) — shown in the SAME "Actions"
+  // section as each position's own onSelect below, rather than a second,
+  // separately-titled "Actions" section right next to this one. Each
+  // caller builds its own list from its own widget.events shape, since
+  // that shape differs per widget type (only DialSwitchWidget has
+  // increment/decrement).
+  rootEvents?: { title: string; steps: SequenceStep[]; onChange: (steps: SequenceStep[]) => void; hint?: string; variableHint?: string }[]
 }): React.JSX.Element {
   const positionIndex = Math.min(activePositionIndex, positions.length - 1)
   const activePosition = positions[positionIndex] ?? positions[0]
@@ -2127,7 +2300,18 @@ function SwitchPositionsEditor({
         </button>
       </PropertiesSection>
 
-      <PropertiesSection title="Actions" badge={positions.length}>
+      <PropertiesSection title="Actions" badge={(rootEvents?.length ?? 0) + positions.length}>
+        {rootEvents?.map((e) => (
+          <EventSequenceEditor
+            key={e.title}
+            title={e.title}
+            steps={e.steps}
+            onChange={e.onChange}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+            hint={e.hint}
+            variableHint={e.variableHint}
+          />
+        ))}
         <p className="properties__hint">
           Every position's own sequence — each runs once, server-side, whenever that position is tapped. Editing here is independent
           of which position tab is selected above for color/label editing.
@@ -2139,6 +2323,7 @@ function SwitchPositionsEditor({
             steps={position.onSelect}
             onChange={(steps) => onPatchPositions(positions.map((p, i) => (i === index ? { ...p, onSelect: steps } : p)))}
             dcsBiosActionEnabled={dcsBiosActionEnabled}
+            variableHint="variables.$value"
           />
         ))}
       </PropertiesSection>
@@ -2393,6 +2578,21 @@ export function PropertiesPanel(): React.JSX.Element {
       if (ok) patchGauge({ labels: gauge.labels.filter((l) => l.id !== labelId) })
     }
 
+    const tickSets = gauge.tickSets ?? []
+
+    function patchTickSet(tickSetId: string, fields: Partial<GaugeTickSet>): void {
+      patchGauge({ tickSets: tickSets.map((t) => (t.id === tickSetId ? { ...t, ...fields } : t)) })
+    }
+
+    function addTickSet(): void {
+      patchGauge({ tickSets: [...tickSets, { id: nextId(), count: 5, showLabels: true }] })
+    }
+
+    async function confirmRemoveTickSet(tickSetId: string): Promise<void> {
+      const ok = await confirm('Remove this tick set? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchGauge({ tickSets: tickSets.filter((t) => t.id !== tickSetId) })
+    }
+
     async function handleDeleteGauge(): Promise<void> {
       const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
       if (ok) {
@@ -2466,6 +2666,16 @@ export function PropertiesPanel(): React.JSX.Element {
 
         <PropertiesSection title="Colors">
           <div className="properties__field">
+            <span>Background color</span>
+            <ColorPickerButton
+              value={gauge.backgroundColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchGauge({ backgroundColor: color })}
+              opacity={gauge.backgroundOpacity ?? (gauge.backgroundColor === undefined ? 0 : 1)}
+              onOpacityChange={(v) => patchGauge({ backgroundOpacity: v })}
+            />
+          </div>
+
+          <div className="properties__field">
             <span>Fill color</span>
             <ColorPickerButton
               value={gauge.fill.color ?? DEFAULT_WIDGET_COLOR}
@@ -2538,6 +2748,233 @@ export function PropertiesPanel(): React.JSX.Element {
             <p className="properties__hint">Border radius/thickness/color only apply to the Bar style.</p>
           )}
         </PropertiesSection>
+
+        {gauge.style === 'arc' && (
+          <>
+            <PropertiesSection title="Ticks" badge={tickSets.length}>
+              {tickSets.map((tickSet, i) => (
+                <PropertiesSection key={tickSet.id} title={`Tick set ${i + 1}`} sectionKey={tickSet.id}>
+                  <div className="properties__grid2">
+                    <label className="properties__field">
+                      <span>Count</span>
+                      <input
+                        type="number"
+                        min={2}
+                        value={tickSet.count ?? 5}
+                        onChange={(e) => patchTickSet(tickSet.id, { count: Math.max(2, Math.round(Number(e.target.value))) })}
+                      />
+                    </label>
+                    <label className="properties__field">
+                      <span>Distance from center</span>
+                      <input
+                        type="number"
+                        value={tickSet.distance ?? 46}
+                        onChange={(e) => patchTickSet(tickSet.id, { distance: Number(e.target.value) })}
+                      />
+                    </label>
+                    <label className="properties__field">
+                      <span>Size</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={tickSet.size ?? 6}
+                        onChange={(e) => patchTickSet(tickSet.id, { size: Math.max(0, Number(e.target.value)) })}
+                      />
+                    </label>
+                    <label className="properties__field">
+                      <span>Thickness</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={tickSet.thickness ?? 2}
+                        onChange={(e) => patchTickSet(tickSet.id, { thickness: Math.max(0, Number(e.target.value)) })}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="properties__field">
+                    <span>Color</span>
+                    <ColorPickerButton
+                      value={tickSet.color ?? DEFAULT_WIDGET_COLOR}
+                      onChange={(color) => patchTickSet(tickSet.id, { color })}
+                      opacity={tickSet.opacity ?? 1}
+                      onOpacityChange={(v) => patchTickSet(tickSet.id, { opacity: v })}
+                    />
+                  </div>
+
+                  <div className="properties__grid2">
+                    <div className="properties__field">
+                      <span>Border color</span>
+                      <ColorPickerButton value={tickSet.borderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => patchTickSet(tickSet.id, { borderColor: color })} />
+                    </div>
+                    <label className="properties__field">
+                      <span>Border width</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={tickSet.borderWidth ?? 0}
+                        onChange={(e) => patchTickSet(tickSet.id, { borderWidth: Math.max(0, Number(e.target.value)) })}
+                      />
+                    </label>
+                  </div>
+
+                  <label className="properties__checkbox">
+                    <input
+                      type="checkbox"
+                      checked={tickSet.showLabels ?? false}
+                      onChange={(e) => patchTickSet(tickSet.id, { showLabels: e.target.checked })}
+                    />
+                    Show value labels
+                  </label>
+
+                  {tickSet.showLabels && (
+                    <>
+                      <div className="properties__grid2">
+                        <label className="properties__field">
+                          <span>Label font size</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={tickSet.labelFontSize ?? DEFAULT_WIDGET_FONT_SIZE}
+                            onChange={(e) => patchTickSet(tickSet.id, { labelFontSize: Math.max(1, Number(e.target.value)) })}
+                          />
+                        </label>
+                        <label className="properties__field">
+                          <span>Label decimals</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={tickSet.labelDecimals ?? 0}
+                            onChange={(e) => patchTickSet(tickSet.id, { labelDecimals: Math.max(0, Math.round(Number(e.target.value))) })}
+                          />
+                        </label>
+                      </div>
+                      <div className="properties__field">
+                        <span>Label color</span>
+                        <ColorPickerButton
+                          value={tickSet.labelColor ?? pickLegibleTextColor(gauge.track.color ?? DEFAULT_WIDGET_COLOR)}
+                          onChange={(color) => patchTickSet(tickSet.id, { labelColor: color })}
+                        />
+                      </div>
+                      <label className="properties__field">
+                        <span>Label distance</span>
+                        <input
+                          type="number"
+                          value={tickSet.labelDistance ?? 6}
+                          onChange={(e) => patchTickSet(tickSet.id, { labelDistance: Number(e.target.value) })}
+                        />
+                      </label>
+                    </>
+                  )}
+
+                  <button type="button" className="properties__file-remove" onClick={() => confirmRemoveTickSet(tickSet.id)}>
+                    Remove tick set
+                  </button>
+                </PropertiesSection>
+              ))}
+              <button type="button" className="properties__file-button" onClick={addTickSet}>
+                + Add tick set
+              </button>
+            </PropertiesSection>
+
+            <PropertiesSection title="Indicator">
+              <label className="properties__checkbox">
+                <input type="checkbox" checked={gauge.showIndicator ?? false} onChange={(e) => patchGauge({ showIndicator: e.target.checked })} />
+                Show needle indicator
+              </label>
+              {gauge.showIndicator && (
+                <>
+                  <label className="properties__field">
+                    <span>Shape</span>
+                    <select
+                      value={gauge.indicatorShape ?? 'needle'}
+                      onChange={(e) => patchGauge({ indicatorShape: e.target.value as GaugeWidget['indicatorShape'] })}
+                    >
+                      <option value="needle">Needle</option>
+                      <option value="square">Square</option>
+                    </select>
+                  </label>
+                  <div className="properties__field">
+                    <span>Indicator color</span>
+                    <ColorPickerButton value={gauge.indicatorColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => patchGauge({ indicatorColor: color })} />
+                  </div>
+                  <div className="properties__grid2">
+                    <label className="properties__field">
+                      <span>Starts at</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={gauge.indicatorStartDistance ?? 0}
+                        onChange={(e) => patchGauge({ indicatorStartDistance: Math.max(0, Number(e.target.value)) })}
+                      />
+                    </label>
+                    <label className="properties__field">
+                      <span>Ends at</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={gauge.indicatorEndDistance ?? 29}
+                        onChange={(e) => patchGauge({ indicatorEndDistance: Math.max(0, Number(e.target.value)) })}
+                      />
+                    </label>
+                  </div>
+                  <p className="properties__hint">Distance from the widget&rsquo;s true center, in the same units as tick distance above.</p>
+                  <label className="properties__field">
+                    <span>Width</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={gauge.indicatorWidth ?? 2}
+                      onChange={(e) => patchGauge({ indicatorWidth: Math.max(0, Number(e.target.value)) })}
+                    />
+                  </label>
+
+                  <div className="properties__divider" />
+
+                  <span className="properties__section-label">Center circle</span>
+                  <div className="properties__grid2">
+                    <label className="properties__field">
+                      <span>Size</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={gauge.indicatorCenterSize ?? 4}
+                        onChange={(e) => patchGauge({ indicatorCenterSize: Math.max(0, Number(e.target.value)) })}
+                      />
+                    </label>
+                    <label className="properties__field">
+                      <span>Border width</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={gauge.indicatorCenterBorderWidth ?? 0}
+                        onChange={(e) => patchGauge({ indicatorCenterBorderWidth: Math.max(0, Number(e.target.value)) })}
+                      />
+                    </label>
+                  </div>
+                  <div className="properties__grid2">
+                    <div className="properties__field">
+                      <span>Color</span>
+                      <ColorPickerButton
+                        value={gauge.indicatorCenterColor ?? gauge.indicatorColor ?? DEFAULT_WIDGET_COLOR}
+                        onChange={(color) => patchGauge({ indicatorCenterColor: color })}
+                        auto={gauge.indicatorCenterColor === undefined}
+                        onAuto={() => patchGauge({ indicatorCenterColor: undefined })}
+                      />
+                    </div>
+                    <div className="properties__field">
+                      <span>Border color</span>
+                      <ColorPickerButton
+                        value={gauge.indicatorCenterBorderColor ?? DEFAULT_WIDGET_COLOR}
+                        onChange={(color) => patchGauge({ indicatorCenterBorderColor: color })}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+            </PropertiesSection>
+          </>
+        )}
 
         <PropertiesSection title="Labels" badge={gauge.labels.length}>
           {gauge.labels.map((label) => (
@@ -3043,6 +3480,19 @@ export function PropertiesPanel(): React.JSX.Element {
       updateWidgets(widgets.map((w) => (w.id === sw.id ? ({ ...w, ...fields } as Widget) : w)))
     }
 
+    function patchSwitchLabel(labelId: string, fields: Partial<WidgetLabel>): void {
+      patchSwitch({ labels: sw.labels.map((l) => (l.id === labelId ? { ...l, ...fields } : l)) })
+    }
+
+    function addSwitchLabel(): void {
+      patchSwitch({ labels: [...sw.labels, { id: nextId(), text: 'New Label', align: 'center', verticalAlign: 'center' }] })
+    }
+
+    async function confirmRemoveSwitchLabel(labelId: string): Promise<void> {
+      const ok = await confirm('Remove this label? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchSwitch({ labels: sw.labels.filter((l) => l.id !== labelId) })
+    }
+
     async function handleDeleteSwitch(): Promise<void> {
       const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
       if (ok) {
@@ -3065,6 +3515,29 @@ export function PropertiesPanel(): React.JSX.Element {
               <option value="horizontal">Horizontal</option>
             </select>
           </label>
+
+          <label className="properties__field">
+            <span>Rotate angle</span>
+            <input type="number" value={sw.rotateAngle ?? 0} onChange={(e) => patchSwitch({ rotateAngle: Number(e.target.value) })} />
+          </label>
+          <p className="properties__hint">
+            Spins the shape/segments and each position&rsquo;s own labels together. The widget&rsquo;s own Labels below (a legend/title)
+            stay upright.
+          </p>
+
+          <label className="properties__checkbox">
+            <input
+              type="checkbox"
+              checked={sw.settleToInactive ?? false}
+              onChange={(e) => patchSwitch({ settleToInactive: e.target.checked })}
+            />
+            Settle to inactive
+          </label>
+          <p className="properties__hint">
+            Off: defaults to the first position active, and stays on whichever was last tapped — like today. On: nothing&rsquo;s active by
+            default, and a tap doesn&rsquo;t stick highlighted either — it always settles back to nothing active. Either way, tapping a
+            position always fires its action.
+          </p>
         </PropertiesSection>
 
         <PropertiesSection title="Colors">
@@ -3132,7 +3605,35 @@ export function PropertiesPanel(): React.JSX.Element {
           activePositionExprExpanded={activePositionExprExpanded}
           setActivePositionExprExpanded={setActivePositionExprExpanded}
           confirm={confirm}
+          rootEvents={[
+            { title: 'Press', steps: sw.events.press, onChange: (steps) => patchSwitch({ events: { ...sw.events, press: steps } }) },
+            { title: 'Release', steps: sw.events.release, onChange: (steps) => patchSwitch({ events: { ...sw.events, release: steps } }) },
+            {
+              title: 'Position Change',
+              steps: sw.events.positionChange,
+              onChange: (steps) => patchSwitch({ events: { ...sw.events, positionChange: steps } }),
+              hint: "Runs on every selection, alongside that position's own action below — variables.$value is the position's name, variables.$index its position, so one shared sequence can still tell which fired it.",
+              variableHint: 'variables.$value'
+            }
+          ]}
         />
+
+        <PropertiesSection title="Labels" badge={sw.labels.length}>
+          <p className="properties__hint">Anchored to the widget as a whole, independent of each position's own labels above.</p>
+          {sw.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+              <LabelFields
+                label={label}
+                backgroundColor={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchSwitchLabel(label.id, fields)}
+                onRemove={() => confirmRemoveSwitchLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addSwitchLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
 
         <PropertiesSection title="Advanced">
           <span className="properties__section-label">Position & Size</span>
@@ -3315,6 +3816,16 @@ export function PropertiesPanel(): React.JSX.Element {
               onOpacityChange={(v) => patchSwitch({ borderOpacity: v })}
             />
           </div>
+
+          <label className="properties__field">
+            <span>Border width</span>
+            <input
+              type="number"
+              min={0}
+              value={sw.borderWidth ?? 2}
+              onChange={(e) => patchSwitch({ borderWidth: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
         </PropertiesSection>
 
         <PropertiesSection title="Lever">
@@ -3404,6 +3915,17 @@ export function PropertiesPanel(): React.JSX.Element {
           showLabelAnchor
           showPositionName={false}
           maxPositions={3}
+          rootEvents={[
+            { title: 'Press', steps: sw.events.press, onChange: (steps) => patchSwitch({ events: { ...sw.events, press: steps } }) },
+            { title: 'Release', steps: sw.events.release, onChange: (steps) => patchSwitch({ events: { ...sw.events, release: steps } }) },
+            {
+              title: 'Position Change',
+              steps: sw.events.positionChange,
+              onChange: (steps) => patchSwitch({ events: { ...sw.events, positionChange: steps } }),
+              hint: "Runs on every selection, alongside that position's own action below — variables.$value is the position's name, variables.$index its position, so one shared sequence can still tell which fired it.",
+              variableHint: 'variables.$value'
+            }
+          ]}
         />
 
         <PropertiesSection title="Labels" badge={sw.labels.length}>
@@ -3530,6 +4052,7 @@ export function PropertiesPanel(): React.JSX.Element {
               onShapeChange={(shape) => patchSwitch({ detentShape: shape === 'circle' ? undefined : shape })}
               style={sw.detentStyle}
               onStyleChange={(detentStyle) => patchSwitch({ detentStyle })}
+              allowNone
             />
             <label className="properties__field">
               <span>Detent distance</span>
@@ -3596,6 +4119,31 @@ export function PropertiesPanel(): React.JSX.Element {
           setActivePositionExprExpanded={setActivePositionExprExpanded}
           confirm={confirm}
           showLabelAnchor
+          rootEvents={[
+            { title: 'Press', steps: sw.events.press, onChange: (steps) => patchSwitch({ events: { ...sw.events, press: steps } }) },
+            { title: 'Release', steps: sw.events.release, onChange: (steps) => patchSwitch({ events: { ...sw.events, release: steps } }) },
+            {
+              title: 'Position Change',
+              steps: sw.events.positionChange,
+              onChange: (steps) => patchSwitch({ events: { ...sw.events, positionChange: steps } }),
+              hint: "Runs on every selection, alongside that position's own action below — variables.$value is the position's name, variables.$index its position, so one shared sequence can still tell which fired it.",
+              variableHint: 'variables.$value'
+            },
+            {
+              title: 'Turn CW (increment)',
+              steps: sw.events.increment,
+              onChange: (steps) => patchSwitch({ events: { ...sw.events, increment: steps } }),
+              hint: 'Fires when turning the dial lands on a higher position index than whichever was active before — variables.$value/$index are the landed-on position’s name/index, same as Position Change.',
+              variableHint: 'variables.$value'
+            },
+            {
+              title: 'Turn CCW (decrement)',
+              steps: sw.events.decrement,
+              onChange: (steps) => patchSwitch({ events: { ...sw.events, decrement: steps } }),
+              hint: 'Fires when turning the dial lands on a lower position index than whichever was active before — variables.$value/$index are the landed-on position’s name/index, same as Position Change.',
+              variableHint: 'variables.$value'
+            }
+          ]}
         />
 
         <PropertiesSection title="Labels" badge={sw.labels.length}>
@@ -3755,26 +4303,6 @@ export function PropertiesPanel(): React.JSX.Element {
           />
         </PropertiesSection>
 
-        <PropertiesSection title="Actions" badge={2}>
-          <EventSequenceEditor
-            title="Press"
-            steps={dd.events.press}
-            onChange={(steps) => patchDropdown({ events: { ...dd.events, press: steps } })}
-            dcsBiosActionEnabled={dcsBiosActionEnabled}
-          />
-          <EventSequenceEditor
-            title="Release"
-            steps={dd.events.release}
-            onChange={(steps) => patchDropdown({ events: { ...dd.events, release: steps } })}
-            dcsBiosActionEnabled={dcsBiosActionEnabled}
-          />
-          <p className="properties__hint">
-            Press/Release fire on every hold, wherever it ends. Each position below has its own separate action (see "Positions" →
-            "Actions") that only fires if you release on it — dragging off the end instead fires Release but not that position&rsquo;s
-            action.
-          </p>
-        </PropertiesSection>
-
         <SwitchPositionsEditor
           positions={dd.positions}
           activePositionExpr={dd.activePositionExpr}
@@ -3787,6 +4315,28 @@ export function PropertiesPanel(): React.JSX.Element {
           activePositionExprExpanded={activePositionExprExpanded}
           setActivePositionExprExpanded={setActivePositionExprExpanded}
           confirm={confirm}
+          rootEvents={[
+            {
+              title: 'Press',
+              steps: dd.events.press,
+              onChange: (steps) => patchDropdown({ events: { ...dd.events, press: steps } })
+            },
+            {
+              title: 'Release',
+              steps: dd.events.release,
+              onChange: (steps) => patchDropdown({ events: { ...dd.events, release: steps } }),
+              hint:
+                'Press/Release fire on every hold, wherever it ends — dragging off the end still fires Release, just not the ' +
+                'position below it would otherwise land on.'
+            },
+            {
+              title: 'Position Change',
+              steps: dd.events.positionChange,
+              onChange: (steps) => patchDropdown({ events: { ...dd.events, positionChange: steps } }),
+              hint: "Runs on every selection, alongside that position's own action below — variables.$value is the position's name, variables.$index its position, so one shared sequence can still tell which fired it.",
+              variableHint: 'variables.$value'
+            }
+          ]}
         />
 
         <PropertiesSection title="Advanced">

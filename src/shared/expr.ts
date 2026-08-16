@@ -32,9 +32,13 @@ export function tryEvaluateExpression(code: string, variables: VariableMap): Exp
 // Variable. `$value` is a reserved key deliberately unlikely to collide with
 // a real variable name — a bare `value` key would silently shadow an actual
 // Variable named "value" inside this one expression (unreachable, no error,
-// just wrong data).
-export function evaluateMappingExpression(expr: string, rawValue: VariableValue, variables: VariableMap): ExpressionResult {
-  return tryEvaluateExpression(expr, { ...variables, $value: rawValue })
+// just wrong data). `index`, when given, is exposed the same way as
+// `variables.$index` — a SwitchPosition/DropdownWidget position's own
+// onSelect actions pass its index alongside $value (that position's own
+// name — see runActionStep in main/index.ts), so an expression shared
+// across every position can still tell which one fired it.
+export function evaluateMappingExpression(expr: string, rawValue: VariableValue, variables: VariableMap, index?: number): ExpressionResult {
+  return tryEvaluateExpression(expr, { ...variables, $value: rawValue, ...(index !== undefined ? { $index: index } : {}) })
 }
 
 export interface ResolvedColor {

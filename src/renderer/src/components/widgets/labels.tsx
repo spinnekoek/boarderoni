@@ -42,6 +42,7 @@ const ALIGN_ITEMS: Record<NonNullable<WidgetLabel['verticalAlign']>, string> = {
 // positions, one detent-anchored wrapper per label — see DialSwitchWidget.tsx).
 export function renderWidgetLabel(label: WidgetLabel, backgroundColor: string, variables: VariableMap): React.JSX.Element {
   const resolvedTextColor = resolveTextColor(label, backgroundColor, variables)
+  const labelBackgroundColor = label.backgroundColor ? withOpacity(label.backgroundColor, label.backgroundOpacity ?? 1) : 'transparent'
   const padding = label.padding ?? DEFAULT_WIDGET_PADDING
   const align = label.align ?? 'center'
   const verticalAlign = label.verticalAlign ?? 'center'
@@ -67,7 +68,9 @@ export function renderWidgetLabel(label: WidgetLabel, backgroundColor: string, v
   }
   return (
     <span key={label.id} className="deck-button__label" style={labelStyle}>
-      <span className="deck-button__label-content">{renderLabelContent(resolveLabelText(label, variables))}</span>
+      <span className="deck-button__label-content" style={{ backgroundColor: labelBackgroundColor }}>
+        {renderLabelContent(resolveLabelText(label, variables))}
+      </span>
     </span>
   )
 }

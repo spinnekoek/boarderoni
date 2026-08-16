@@ -87,7 +87,24 @@ function EncoderView({ widget, variables }: { widget: EncoderWidget; variables: 
 // instead — see DialSwitchView below.
 function RockerSwitchView({ widget, variables }: { widget: RockerSwitchWidget; variables: VariableMap }): React.JSX.Element {
   const { activeIndex, select } = useSwitchPosition(widget, variables)
-  return <RockerSwitchWidgetContent widget={widget} variables={variables} interactive activeIndex={activeIndex} onSelect={select} />
+  const triggerWidget = useDashboardStore((s) => s.triggerWidget)
+  // Root-level press/release (see RockerSwitchWidget.events' own doc
+  // comment) — fires on every physical press/release of the widget
+  // regardless of which segment (if any) it lands on, layered on top of
+  // (not replacing) the per-segment onClick that fires 'select' inside
+  // RockerSwitchWidgetContent itself. A plain overlay wrapper rather than
+  // threading new props through the Content component, which already has
+  // its own pointer handling to not disturb.
+  return (
+    <div
+      style={{ position: 'absolute', inset: 0 }}
+      onPointerDown={() => triggerWidget(widget.id, 'press')}
+      onPointerUp={() => triggerWidget(widget.id, 'release')}
+      onPointerCancel={() => triggerWidget(widget.id, 'release')}
+    >
+      <RockerSwitchWidgetContent widget={widget} variables={variables} interactive activeIndex={activeIndex} onSelect={select} />
+    </div>
+  )
 }
 
 // Same two-interaction-mode split as DialSwitchView below, plus momentary
@@ -98,13 +115,18 @@ function RockerSwitchView({ widget, variables }: { widget: RockerSwitchWidget; v
 // drag mode's own spring-back lives inside useToggleSwitchDrag.ts, since it
 // also has to fire mid-drag, not just on release.
 function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; variables: VariableMap }): React.JSX.Element {
-  const { activeIndex, select } = useSwitchPosition(widget, variables)
+  // ToggleSwitchWidget has no settleToInactive of its own (RockerSwitchWidget
+  // only — see useSwitchPosition.ts) so this is never actually null; the `?? 0`
+  // just satisfies the hook's shared, nullable-for-Rocker return type.
+  const { activeIndex: rawActiveIndex, select } = useSwitchPosition(widget, variables)
+  const activeIndex = rawActiveIndex ?? 0
   const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useToggleSwitchDrag(widget, select)
+  const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   const count = widget.positions.length
   const middleIndex = count % 2 === 1 ? (count - 1) / 2 : -1
 
-  if (widget.interactionMode === 'drag') {
-    return (
+  const content =
+    widget.interactionMode === 'drag' ? (
       <ToggleSwitchWidgetContent
         widget={widget}
         variables={variables}
@@ -115,23 +137,32 @@ function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; v
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       />
+    ) : (
+      <ToggleSwitchWidgetContent
+        widget={widget}
+        variables={variables}
+        interactive
+        activeIndex={activeIndex}
+        onZonePointerDown={select}
+        onZonePointerUp={(index) => {
+          const isMomentary = !isMiddleTogglePosition(index, count) && (widget.positions[index]?.momentary ?? false)
+          if (isMomentary && middleIndex >= 0) select(middleIndex)
+        }}
+      />
     )
-  }
 
-  function handleZonePointerUp(index: number): void {
-    const isMomentary = !isMiddleTogglePosition(index, count) && (widget.positions[index]?.momentary ?? false)
-    if (isMomentary && middleIndex >= 0) select(middleIndex)
-  }
-
+  // Root-level press/release (see ToggleSwitchWidget.events' own doc
+  // comment) — layered on top of, not replacing, the tap/drag handling
+  // above (same overlay-wrapper approach as RockerSwitchView).
   return (
-    <ToggleSwitchWidgetContent
-      widget={widget}
-      variables={variables}
-      interactive
-      activeIndex={activeIndex}
-      onZonePointerDown={select}
-      onZonePointerUp={handleZonePointerUp}
-    />
+    <div
+      style={{ position: 'absolute', inset: 0 }}
+      onPointerDown={() => triggerWidget(widget.id, 'press')}
+      onPointerUp={() => triggerWidget(widget.id, 'release')}
+      onPointerCancel={() => triggerWidget(widget.id, 'release')}
+    >
+      {content}
+    </div>
   )
 }
 
@@ -142,11 +173,16 @@ function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; v
 // drag has resolved to a position — see useDialSwitchDrag.ts. Both hooks are
 // always called (rules of hooks); only one drives what's actually rendered.
 function DialSwitchView({ widget, variables }: { widget: DialSwitchWidget; variables: VariableMap }): React.JSX.Element {
-  const { activeIndex, select } = useSwitchPosition(widget, variables)
+  // DialSwitchWidget has no settleToInactive of its own (RockerSwitchWidget
+  // only — see useSwitchPosition.ts) so this is never actually null; the `?? 0`
+  // just satisfies the hook's shared, nullable-for-Rocker return type.
+  const { activeIndex: rawActiveIndex, select } = useSwitchPosition(widget, variables)
+  const activeIndex = rawActiveIndex ?? 0
   const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useDialSwitchDrag(widget, select)
+  const triggerWidget = useDashboardStore((s) => s.triggerWidget)
 
-  if (widget.interactionMode === 'drag') {
-    return (
+  const content =
+    widget.interactionMode === 'drag' ? (
       <DialSwitchWidgetContent
         widget={widget}
         variables={variables}
@@ -157,9 +193,23 @@ function DialSwitchView({ widget, variables }: { widget: DialSwitchWidget; varia
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
       />
+    ) : (
+      <DialSwitchWidgetContent widget={widget} variables={variables} interactive activeIndex={activeIndex} onSelect={select} />
     )
-  }
-  return <DialSwitchWidgetContent widget={widget} variables={variables} interactive activeIndex={activeIndex} onSelect={select} />
+
+  // Root-level press/release (see DialSwitchWidget.events' own doc comment)
+  // — layered on top of, not replacing, the tap/drag handling above (same
+  // overlay-wrapper approach as RockerSwitchView).
+  return (
+    <div
+      style={{ position: 'absolute', inset: 0 }}
+      onPointerDown={() => triggerWidget(widget.id, 'press')}
+      onPointerUp={() => triggerWidget(widget.id, 'release')}
+      onPointerCancel={() => triggerWidget(widget.id, 'release')}
+    >
+      {content}
+    </div>
+  )
 }
 
 // press/release fire on every hold regardless of where it ends; select
@@ -169,7 +219,11 @@ function DialSwitchView({ widget, variables }: { widget: DialSwitchWidget; varia
 // position, not a drag-off-the-end miss — see its own comment.
 function DropdownView({ widget, variables }: { widget: DropdownWidget; variables: VariableMap }): React.JSX.Element {
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
-  const { activeIndex, select } = useSwitchPosition(widget, variables)
+  // DropdownWidget has no settleToInactive of its own (RockerSwitchWidget
+  // only — see useSwitchPosition.ts) so this is never actually null; the `?? 0`
+  // just satisfies the hook's shared, nullable-for-Rocker return type.
+  const { activeIndex: rawActiveIndex, select } = useSwitchPosition(widget, variables)
+  const activeIndex = rawActiveIndex ?? 0
   const { held, dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useDropdownDrag(
     widget,
     activeIndex,

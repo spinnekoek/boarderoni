@@ -18,7 +18,12 @@ export const DETENT_SIZE: Record<NonNullable<DialShapeStyle['indicatorShape']>, 
   circle: { width: DETENT_DOT_RADIUS * 2, height: DETENT_DOT_RADIUS * 2 },
   square: { width: DETENT_DOT_RADIUS * 2, height: DETENT_DOT_RADIUS * 2 },
   triangle: { width: DETENT_DOT_RADIUS * 2.4, height: DETENT_DOT_RADIUS * 2.4 },
-  tick: { width: DETENT_DOT_RADIUS * 1.6, height: DETENT_DOT_RADIUS * 3.2 }
+  tick: { width: DETENT_DOT_RADIUS * 1.6, height: DETENT_DOT_RADIUS * 3.2 },
+  // Never actually rendered at this size (see showIndicatorHere/
+  // SquareIndicatorOverlay, both of which skip drawing entirely for
+  // 'none') — present only so this Record stays total over every
+  // indicatorShape value.
+  none: { width: 0, height: 0 }
 }
 
 // Default corner radius per shape when a DetentStyle's borderRadius is
@@ -213,7 +218,7 @@ export function DialShapeGraphic({
   // border width/radius) — the caller renders it as an HTML div instead
   // (using `indicator`'s own position/size, computed above), so this
   // component skips it entirely to avoid drawing it twice.
-  const showIndicatorHere = (dialShape === 'square' || dialShape === 'circle') && indicator.shape !== 'square'
+  const showIndicatorHere = (dialShape === 'square' || dialShape === 'circle') && indicator.shape !== 'square' && indicator.shape !== 'none'
 
   return (
     <>
