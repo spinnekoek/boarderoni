@@ -70,7 +70,7 @@ export function DropdownWidgetContent({
       onPointerUp={interactive ? onPointerUp : undefined}
       onPointerCancel={interactive ? onPointerUp : undefined}
     >
-      {widget.positions.map((position, index) => {
+      {(widget.positions ?? []).map((position, index) => {
         if (!isOpen && index !== activeIndex) return null
         const listSlot = anchored ? index - activeIndex : index
         const offset = !isOpen ? 0 : listSlot * sign * itemSize

@@ -8,6 +8,15 @@ const DEFAULT_START_ANGLE = 135
 const DEFAULT_END_ANGLE = 405
 const ARC_RADIUS = 42
 const ARC_STROKE_WIDTH = 10
+// Arc style's own defaults, distinct from DEFAULT_WIDGET_COLOR — a plain
+// medium gray track (vs. the app's dark widget default) and the same blue
+// already used everywhere else as the default fill/accent color (see
+// handleAddGauge in Palette.tsx), so a fresh arc gauge's needle reads
+// clearly against its gray track without the user having to pick a color
+// first.
+export const ARC_DEFAULT_TRACK_COLOR = '#5c5c5c'
+export const ARC_DEFAULT_INDICATOR_COLOR = '#5b8def'
+export const ARC_DEFAULT_TICK_COLOR = '#ffffff'
 
 function GaugeBar({
   fraction,
@@ -68,7 +77,7 @@ function gaugeTicks({
   variables: VariableMap
 }): { marks: React.ReactNode[]; labels: React.ReactNode[] } {
   const count = Math.max(2, tickSet.count ?? 5)
-  const color = withOpacity(tickSet.color ?? DEFAULT_WIDGET_COLOR, tickSet.opacity ?? 1)
+  const color = withOpacity(tickSet.color ?? ARC_DEFAULT_TICK_COLOR, tickSet.opacity ?? 1)
   const size = tickSet.size ?? 6
   const thickness = tickSet.thickness ?? 2
   const distance = tickSet.distance ?? arcRadius + 4
@@ -176,14 +185,14 @@ function GaugeArc({
   // Deliberately not falling back to fillColor/trackColor — the needle is
   // its own independent color so restyling the arc's fill/track doesn't
   // also silently repaint it.
-  const indicatorColor = withOpacity(widget.indicatorColor ?? DEFAULT_WIDGET_COLOR, 1)
+  const indicatorColor = withOpacity(widget.indicatorColor ?? ARC_DEFAULT_INDICATOR_COLOR, 1)
   const indicatorShape = widget.indicatorShape ?? 'needle'
   const indicatorStart = widget.indicatorStartDistance ?? 0
   const indicatorEnd = widget.indicatorEndDistance ?? ARC_RADIUS * 0.7
   const indicatorSpan = Math.max(0, indicatorEnd - indicatorStart)
   const indicatorHalfWidth = widget.indicatorWidth ?? 2
   const indicatorCenterSize = widget.indicatorCenterSize ?? 4
-  const indicatorCenterColor = withOpacity(widget.indicatorCenterColor ?? widget.indicatorColor ?? DEFAULT_WIDGET_COLOR, 1)
+  const indicatorCenterColor = withOpacity(widget.indicatorCenterColor ?? widget.indicatorColor ?? ARC_DEFAULT_INDICATOR_COLOR, 1)
   const indicatorCenterBorderColor = widget.indicatorCenterBorderColor ?? 'transparent'
   const indicatorCenterBorderWidth = widget.indicatorCenterBorderWidth ?? 0
   // The needle's own drawn origin — indicatorStartDistance out from the true
@@ -262,7 +271,16 @@ export function GaugeWidgetContent({ widget, variables }: { widget: GaugeWidget;
   const resolvedFill = resolveColor(widget.fill, variables)
   const fillColor = withOpacity(resolvedFill.color ?? DEFAULT_WIDGET_COLOR, resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1)
   const resolvedTrack = resolveColor(widget.track, variables)
-  const trackColor = withOpacity(resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1)
+  // Arc style gets its own default track color (medium gray, ARC_DEFAULT_
+  // TRACK_COLOR) rather than the app-wide DEFAULT_WIDGET_COLOR (dark) every
+  // other widget's track falls back to — a bare unset track is far more
+  // common on an arc gauge (there's no box behind it to blend with) than on
+  // a bar gauge, where the dark default already reads fine against the
+  // dashboard background.
+  const trackColor = withOpacity(
+    resolvedTrack.color ?? (widget.style === 'arc' ? ARC_DEFAULT_TRACK_COLOR : DEFAULT_WIDGET_COLOR),
+    resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1
+  )
   const resolvedBorder = resolveBorderColor(widget, variables)
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
 

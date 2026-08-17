@@ -30,6 +30,65 @@ export function setSubDeckWidgets(dashboard: Dashboard, subDeckId: string | null
   }
 }
 
+function widgetsEqual(a: Widget, b: Widget): boolean {
+  return a === b || JSON.stringify(a) === JSON.stringify(b)
+}
+
+// Keeps the OLD reference for every widget whose content is unchanged
+// between syncs, rather than the brand-new object JSON.parse always hands
+// back — a drag tick only actually changes the widget(s) being dragged, but
+// naively taking the incoming array wholesale gives every OTHER widget on
+// the same screen a new reference too. That defeats ViewWidget/CanvasWidget's
+// own React.memo (see ViewCanvas.tsx), forcing every widget on screen to
+// re-render on every single tick of someone else's drag — the more widgets
+// on a screen, the worse. Falls back to the old array's own reference too
+// when literally nothing in it changed, so a caller's useMemo one level up
+// (e.g. ViewCanvas's `widgets`) can skip work as well.
+function reconcileWidgetList(oldWidgets: Widget[], newWidgets: Widget[]): Widget[] {
+  const oldById = new Map(oldWidgets.map((w) => [w.id, w]))
+  let changed = oldWidgets.length !== newWidgets.length
+  const reconciled = newWidgets.map((w) => {
+    const old = oldById.get(w.id)
+    if (old && widgetsEqual(old, w)) return old
+    changed = true
+    return w
+  })
+  return changed ? reconciled : oldWidgets
+}
+
+// Reconciles an incoming dashboard:sync payload against the previously-held
+// dashboard, applying reconcileWidgetList to the main deck's widgets and
+// every sub-deck's — see its own comment for why. Called from store.ts's
+// message handler in place of taking `message.dashboard` as-is.
+export function reconcileDashboard(oldDashboard: Dashboard, newDashboard: Dashboard): Dashboard {
+  const widgets = reconcileWidgetList(oldDashboard.widgets, newDashboard.widgets)
+  const oldSubDecksById = new Map((oldDashboard.subDecks ?? []).map((sd) => [sd.id, sd]))
+  let subDecksChanged = (oldDashboard.subDecks?.length ?? 0) !== (newDashboard.subDecks?.length ?? 0)
+  const subDecks = (newDashboard.subDecks ?? []).map((sd) => {
+    const old = oldSubDecksById.get(sd.id)
+    if (!old || old.name !== sd.name) {
+      subDecksChanged = true
+      return sd
+    }
+    const reconciledWidgets = reconcileWidgetList(old.widgets, sd.widgets)
+    if (reconciledWidgets === old.widgets) return old
+    subDecksChanged = true
+    return { ...sd, widgets: reconciledWidgets }
+  })
+  return { ...newDashboard, widgets, subDecks: subDecksChanged ? subDecks : (oldDashboard.subDecks ?? []) }
+}
+
+// Every widget in the dashboard, root deck plus every sub-deck, flattened
+// into one array — for callers that need to scan the whole deck rather than
+// address one specific view (e.g. export's collectImportWarnings/
+// stripMachineSpecificFields in main/index.ts). Same traversal
+// loadDeckDashboard/migrateLegacyDashboard already do inline when migrating
+// every widget list; kept here as its own reusable helper instead of a
+// third copy of that loop.
+export function allDeckWidgets(dashboard: Pick<Dashboard, 'widgets' | 'subDecks'>): Widget[] {
+  return [...dashboard.widgets, ...(dashboard.subDecks ?? []).flatMap((sd) => sd.widgets)]
+}
+
 // Finds a widget by id regardless of which deck view it lives on — main
 // deck first, then each sub-deck. Safe/unambiguous because widget ids are
 // global across the whole Dashboard (see nextId() in renderer/src/id.ts —

@@ -38,6 +38,13 @@ function cloneWidget(widget: Widget, offset: number): Widget {
     return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset }
   }
 
+  // Its own single label (not a labels[] array — see LabelWidget's own
+  // comment in shared/types.ts), still needs a fresh id like every other
+  // widget's own labels do.
+  if (widget.type === 'label') {
+    return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset, label: { ...widget.label, id: nextId() } }
+  }
+
   // Tracks old state id -> new state id so a morph widget's blocks (below)
   // can rekey their perState overrides onto the states they actually get
   // cloned alongside, instead of pointing at ids that no longer exist.

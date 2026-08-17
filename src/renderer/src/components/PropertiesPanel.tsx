@@ -3,6 +3,7 @@ import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useConfirmStore } from '../confirmStore'
 import { nextId, isSectionOpen, setSectionOpen, getLastDcsAircraft, setLastDcsAircraft } from '../id'
+import { usePropertiesExpansionStore, expandAllSections, collapseAllSections } from '../propertiesExpansionStore'
 import { FONT_OPTIONS, resolveFont } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, pickAutoBorderColor, pickLegibleTextColor } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
@@ -16,6 +17,7 @@ import { SequenceRecorder } from './SequenceRecorder'
 import { ColorPickerButton } from './ColorPickerButton'
 import { DETENT_SIZE } from './widgets/DialShapeGraphic'
 import { isMiddlePosition as isMiddleTogglePosition, toggleNameForIndex } from './widgets/ToggleSwitchWidget'
+import { ARC_DEFAULT_TRACK_COLOR, ARC_DEFAULT_INDICATOR_COLOR, ARC_DEFAULT_TICK_COLOR } from './widgets/GaugeWidget'
 import { CodeEditor } from './CodeEditor'
 import { ExpressionEditorModal } from './ExpressionEditorModal'
 import type {
@@ -36,6 +38,7 @@ import type {
   GaugeWidget,
   HorizontalAlign,
   KeypressAction,
+  LabelWidget,
   MorphBlock,
   MorphBlockStateOverride,
   NavigateSubDeckAction,
@@ -78,7 +81,8 @@ const WIDGET_TYPE_LABELS: Record<Widget['type'], string> = {
   'switch-dial': 'Dial switch',
   'switch-toggle': 'Toggle switch',
   dropdown: 'Dropdown',
-  'screen-capture': 'Screen capture'
+  'screen-capture': 'Screen capture',
+  label: 'Label'
 }
 
 // One 3x3 grid replaces the old separate horizontal/vertical button rows —
@@ -151,6 +155,21 @@ function PropertiesSection({
 }): React.JSX.Element {
   const key = sectionKey ?? title
   const [open, setOpen] = useState(() => isSectionOpen(key))
+
+  // Properties panel's own "Expand all"/"Collapse all" header buttons (see
+  // propertiesExpansionStore.ts) — every mounted PropertiesSection reacts
+  // independently, including ones nested inside another (a label/position's
+  // own sub-section), since those are always mounted in the DOM regardless
+  // of their ancestor <details>'s own open/closed state.
+  const command = usePropertiesExpansionStore((s) => s.command)
+  const appliedCommandId = useRef(0)
+  useEffect(() => {
+    if (!command || command.id === appliedCommandId.current) return
+    appliedCommandId.current = command.id
+    setOpen(command.open)
+    setSectionOpen(key, command.open)
+  }, [command, key])
+
   return (
     <details
       className="properties-section"
@@ -305,7 +324,8 @@ function LabelFields({
   backgroundColor,
   onChange,
   onRemove,
-  showAnchor = false
+  showAnchor = false,
+  showRemove = true
 }: {
   label: WidgetLabel
   backgroundColor: string
@@ -313,6 +333,10 @@ function LabelFields({
   onRemove: () => void
   // Dial switch position labels only — see WidgetLabel.labelAnchor.
   showAnchor?: boolean
+  // False for LabelWidget's own single, non-removable label (see its own
+  // PropertiesPanel branch below) — "removing" the only thing a Label
+  // widget draws doesn't mean anything; delete the widget itself instead.
+  showRemove?: boolean
 }): React.JSX.Element {
   const isTextColorExpr = label.textColorExpr !== undefined
   const isAutoTextColor = label.textColor == null && !isTextColorExpr
@@ -409,6 +433,19 @@ function LabelFields({
       <label className="properties__field">
         <span>Padding</span>
         <input type="number" value={label.padding ?? DEFAULT_WIDGET_PADDING} onChange={(e) => onChange({ padding: Number(e.target.value) })} />
+      </label>
+
+      <label className="properties__field">
+        <span>Rotation</span>
+        <select
+          value={label.rotation ?? 0}
+          onChange={(e) => onChange({ rotation: Number(e.target.value) as WidgetLabel['rotation'] })}
+        >
+          <option value={0}>0°</option>
+          <option value={90}>90°</option>
+          <option value={180}>180°</option>
+          <option value={270}>270°</option>
+        </select>
       </label>
 
       <div className="properties__field">
@@ -515,9 +552,11 @@ function LabelFields({
         </>
       )}
 
-      <button type="button" className="properties__file-remove" onClick={onRemove}>
-        Remove label
-      </button>
+      {showRemove && (
+        <button type="button" className="properties__file-remove" onClick={onRemove}>
+          Remove label
+        </button>
+      )}
     </>
   )
 }
@@ -2447,7 +2486,17 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
-        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
         <p className="properties__hint">
           {selectedWidgetIds.length} widgets selected — select just one to edit its properties.
         </p>        <div className="properties__divider" />
@@ -2473,7 +2522,17 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
-        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
         <p className="properties__hint">No widget selected — showing desktop properties.</p>
 
         <label className="properties__field">
@@ -2550,6 +2609,82 @@ export function PropertiesPanel(): React.JSX.Element {
     )
   }
 
+  if (widget.type === 'label') {
+    const lw = widget
+    const minSize = snapToGrid ? gridSize : 1
+
+    function patchWidget(fields: Partial<LabelWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === lw.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    function patchLabel(fields: Partial<WidgetLabel>): void {
+      patchWidget({ label: { ...lw.label, ...fields } })
+    }
+
+    async function handleDeleteLabel(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(lw.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[lw.type]}</p>
+
+        <PropertiesSection title="Label">
+          <LabelFields label={lw.label} backgroundColor={DEFAULT_WIDGET_COLOR} onChange={patchLabel} onRemove={() => {}} showRemove={false} />
+        </PropertiesSection>
+
+        <PropertiesSection title="Advanced">
+          <span className="properties__section-label">Position & Size</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={lw.x} onChange={(e) => patchWidget({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={lw.y} onChange={(e) => patchWidget({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>W</span>
+              <input type="number" min={minSize} value={lw.w} onChange={(e) => patchWidget({ w: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+            <label className="properties__field">
+              <span>H</span>
+              <input type="number" min={minSize} value={lw.h} onChange={(e) => patchWidget({ h: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={lw.zIndex ?? 0} onChange={(e) => patchWidget({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteLabel}>
+          Delete widget
+        </button>
+      </aside>
+    )
+  }
+
   if (widget.type === 'gauge') {
     // Captured into a const rather than relying on control-flow narrowing of
     // `widget` persisting into the nested closures below — same reasoning as
@@ -2604,7 +2739,17 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
-        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[gauge.type]}</p>
 
         <PropertiesSection title="Style & Value">
@@ -2693,7 +2838,7 @@ export function PropertiesPanel(): React.JSX.Element {
           <div className="properties__field">
             <span>Track color</span>
             <ColorPickerButton
-              value={gauge.track.color ?? DEFAULT_WIDGET_COLOR}
+              value={gauge.track.color ?? (gauge.style === 'arc' ? ARC_DEFAULT_TRACK_COLOR : DEFAULT_WIDGET_COLOR)}
               onChange={(color) => patchGauge({ track: { ...gauge.track, color, colorExpr: undefined } })}
               isExpr={isTrackExpr}
               exprValue={gauge.track.colorExpr ?? ''}
@@ -2795,7 +2940,7 @@ export function PropertiesPanel(): React.JSX.Element {
                   <div className="properties__field">
                     <span>Color</span>
                     <ColorPickerButton
-                      value={tickSet.color ?? DEFAULT_WIDGET_COLOR}
+                      value={tickSet.color ?? ARC_DEFAULT_TICK_COLOR}
                       onChange={(color) => patchTickSet(tickSet.id, { color })}
                       opacity={tickSet.opacity ?? 1}
                       onOpacityChange={(v) => patchTickSet(tickSet.id, { opacity: v })}
@@ -2852,7 +2997,7 @@ export function PropertiesPanel(): React.JSX.Element {
                       <div className="properties__field">
                         <span>Label color</span>
                         <ColorPickerButton
-                          value={tickSet.labelColor ?? pickLegibleTextColor(gauge.track.color ?? DEFAULT_WIDGET_COLOR)}
+                          value={tickSet.labelColor ?? pickLegibleTextColor(gauge.track.color ?? (gauge.style === 'arc' ? ARC_DEFAULT_TRACK_COLOR : DEFAULT_WIDGET_COLOR))}
                           onChange={(color) => patchTickSet(tickSet.id, { labelColor: color })}
                         />
                       </div>
@@ -2896,7 +3041,10 @@ export function PropertiesPanel(): React.JSX.Element {
                   </label>
                   <div className="properties__field">
                     <span>Indicator color</span>
-                    <ColorPickerButton value={gauge.indicatorColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => patchGauge({ indicatorColor: color })} />
+                    <ColorPickerButton
+                      value={gauge.indicatorColor ?? ARC_DEFAULT_INDICATOR_COLOR}
+                      onChange={(color) => patchGauge({ indicatorColor: color })}
+                    />
                   </div>
                   <div className="properties__grid2">
                     <label className="properties__field">
@@ -2956,7 +3104,7 @@ export function PropertiesPanel(): React.JSX.Element {
                     <div className="properties__field">
                       <span>Color</span>
                       <ColorPickerButton
-                        value={gauge.indicatorCenterColor ?? gauge.indicatorColor ?? DEFAULT_WIDGET_COLOR}
+                        value={gauge.indicatorCenterColor ?? gauge.indicatorColor ?? ARC_DEFAULT_INDICATOR_COLOR}
                         onChange={(color) => patchGauge({ indicatorCenterColor: color })}
                         auto={gauge.indicatorCenterColor === undefined}
                         onAuto={() => patchGauge({ indicatorCenterColor: undefined })}
@@ -2981,7 +3129,7 @@ export function PropertiesPanel(): React.JSX.Element {
             <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
               <LabelFields
                 label={label}
-                backgroundColor={gauge.track.color ?? DEFAULT_WIDGET_COLOR}
+                backgroundColor={gauge.track.color ?? (gauge.style === 'arc' ? ARC_DEFAULT_TRACK_COLOR : DEFAULT_WIDGET_COLOR)}
                 onChange={(fields) => patchGaugeLabel(label.id, fields)}
                 onRemove={() => confirmRemoveGaugeLabel(label.id)}
               />
@@ -3062,7 +3210,17 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
-        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[adjuster.type]}</p>
 
         <PropertiesSection title="Style & Value">
@@ -3307,7 +3465,17 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
-        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[encoder.type]}</p>
 
         <PropertiesSection title="Step">
@@ -3504,7 +3672,17 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
-        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
 
         <PropertiesSection title="Style">
@@ -3708,7 +3886,17 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
-        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
 
         <PropertiesSection title="Style">
@@ -3828,7 +4016,61 @@ export function PropertiesPanel(): React.JSX.Element {
           </label>
         </PropertiesSection>
 
+        <PropertiesSection title="Inner circle">
+          <label className="properties__field">
+            <span>Inner circle size</span>
+            <input
+              type="number"
+              min={0}
+              value={sw.innerBezelRadius ?? 0}
+              onChange={(e) => patchSwitch({ innerBezelRadius: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <p className="properties__hint">A second circle drawn on top of the base circle. 0 hides it entirely.</p>
+          <div className="properties__field">
+            <span>Inner circle color</span>
+            <ColorPickerButton
+              value={sw.innerBezelColor ?? sw.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ innerBezelColor: color })}
+              auto={sw.innerBezelColor === undefined}
+              onAuto={() => patchSwitch({ innerBezelColor: undefined })}
+              opacity={sw.innerBezelOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ innerBezelOpacity: v })}
+            />
+          </div>
+          <label className="properties__field">
+            <span>Inner circle border width</span>
+            <input
+              type="number"
+              min={0}
+              value={sw.innerBezelBorderWidth ?? 0}
+              onChange={(e) => patchSwitch({ innerBezelBorderWidth: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <div className="properties__field">
+            <span>Inner circle border color</span>
+            <ColorPickerButton
+              value={sw.innerBezelBorderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ innerBezelBorderColor: color })}
+            />
+          </div>
+        </PropertiesSection>
+
         <PropertiesSection title="Lever">
+          <label className="properties__field">
+            <span>Lever shape</span>
+            <select
+              value={sw.leverShape ?? 'normal'}
+              onChange={(e) => patchSwitch({ leverShape: e.target.value === 'normal' ? undefined : (e.target.value as ToggleSwitchWidget['leverShape']) })}
+            >
+              <option value="normal">Normal</option>
+              <option value="bar">Bar</option>
+            </select>
+          </label>
+          <p className="properties__hint">
+            Bar adds a configurable rectangle capping the lever's own tip, and stands in for the middle-position circle entirely on a
+            3-position switch.
+          </p>
           <label className="properties__field">
             <span>Lever length</span>
             <input
@@ -3854,6 +4096,69 @@ export function PropertiesPanel(): React.JSX.Element {
               onChange={(color) => patchSwitch({ leverBorderColor: color })}
             />
           </div>
+
+          {sw.leverShape === 'bar' && (
+            <>
+              <div className="properties__divider" />
+
+              <span className="properties__section-label">Bar</span>
+              <div className="properties__grid2">
+                <label className="properties__field">
+                  <span>Width</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sw.barWidth ?? 20}
+                    onChange={(e) => patchSwitch({ barWidth: Math.max(1, Number(e.target.value)) })}
+                  />
+                </label>
+                <label className="properties__field">
+                  <span>Height</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sw.barHeight ?? 10}
+                    onChange={(e) => patchSwitch({ barHeight: Math.max(1, Number(e.target.value)) })}
+                  />
+                </label>
+              </div>
+              <div className="properties__field">
+                <span>Color</span>
+                <ColorPickerButton
+                  value={sw.barColor ?? sw.fill.color ?? DEFAULT_WIDGET_COLOR}
+                  onChange={(color) => patchSwitch({ barColor: color })}
+                  auto={sw.barColor === undefined}
+                  onAuto={() => patchSwitch({ barColor: undefined })}
+                  opacity={sw.barOpacity ?? sw.fill.backgroundOpacity ?? 1}
+                  onOpacityChange={(v) => patchSwitch({ barOpacity: v })}
+                />
+              </div>
+              <div className="properties__grid2">
+                <label className="properties__field">
+                  <span>Border width</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={sw.barBorderWidth ?? 0}
+                    onChange={(e) => patchSwitch({ barBorderWidth: Math.max(0, Number(e.target.value)) })}
+                  />
+                </label>
+                <label className="properties__field">
+                  <span>Border radius</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={sw.barBorderRadius ?? 0}
+                    onChange={(e) => patchSwitch({ barBorderRadius: Math.max(0, Number(e.target.value)) })}
+                  />
+                </label>
+              </div>
+              <div className="properties__field">
+                <span>Border color</span>
+                <ColorPickerButton value={sw.barBorderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => patchSwitch({ barBorderColor: color })} />
+              </div>
+            </>
+          )}
         </PropertiesSection>
 
         {sw.positions.length === 3 && (
@@ -4015,7 +4320,17 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
-        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
 
         <PropertiesSection title="Style">
@@ -4220,7 +4535,17 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
-        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[dd.type]}</p>
 
         <PropertiesSection title="Style">
@@ -4402,7 +4727,17 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
-        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sc.type]}</p>
 
         <PropertiesSection title="Region">
@@ -4702,7 +5037,17 @@ export function PropertiesPanel(): React.JSX.Element {
   return (
     <aside className="properties" style={{ width: propertiesWidth }}>
       {resizeHandle}
-      <h2 className="properties__title">Properties</h2>
+      <div className="properties__header">
+        <h2 className="properties__title">Properties</h2>
+        <div className="properties__header-actions">
+          <button type="button" className="properties__header-button" onClick={expandAllSections}>
+            Expand all
+          </button>
+          <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+            Collapse all
+          </button>
+        </div>
+      </div>
       <p className="properties__widget-type">{WIDGET_TYPE_LABELS[statefulWidget.type]}</p>
 
       <PropertiesSection title="States">

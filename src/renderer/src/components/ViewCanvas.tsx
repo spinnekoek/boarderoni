@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { isBoarderoniAndroidApp, setKeepScreenOn } from '../androidBridge'
@@ -29,6 +29,7 @@ import { RockerSwitchWidgetContent } from './widgets/RockerSwitchWidget'
 import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
 import { ToggleSwitchWidgetContent } from './widgets/ToggleSwitchWidget'
 import { DropdownWidgetContent } from './widgets/DropdownWidget'
+import { LabelWidgetContent } from './widgets/LabelWidget'
 import { useAdjusterDrag } from '../useAdjusterDrag'
 import { useMorphSliderDrag } from '../useMorphSliderDrag'
 import { useEncoderDrag } from '../useEncoderDrag'
@@ -387,7 +388,17 @@ function MorphView({ widget, variables, error }: { widget: MorphButtonWidget; va
 // each own their own drag hook (AdjusterView/EncoderView/MorphView above),
 // none of which fits TriggerableViewWidget's plain press/release +
 // getEffectiveStates model on their own.
-function ViewWidget({
+// memo'd because every widget on a screen otherwise re-renders on every
+// single dashboard:sync, even one caused by someone else dragging a single
+// unrelated widget elsewhere in the deck — see reconcileDashboard's own
+// comment in shared/subDecks.ts, which is what makes this memo effective:
+// it preserves `widget`'s object identity across syncs whenever this
+// specific widget's content didn't change, so React.memo's default shallow
+// prop comparison (Object.is per prop) can actually skip re-rendering it.
+// `variables`/`deckId` are the same object/value for every widget on a
+// given render, so a real variable change still re-renders every widget
+// that depends on it, same as before this existed.
+const ViewWidget = memo(function ViewWidget({
   widget,
   variables,
   deckId,
@@ -399,6 +410,7 @@ function ViewWidget({
   error?: string
 }): React.JSX.Element {
   if (widget.type === 'gauge') return <GaugeWidgetContent widget={widget} variables={variables} />
+  if (widget.type === 'label') return <LabelWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'screen-capture') return <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />
   if (widget.type === 'adjuster') return <AdjusterView widget={widget} variables={variables} />
   if (widget.type === 'encoder') return <EncoderView widget={widget} variables={variables} />
@@ -408,7 +420,7 @@ function ViewWidget({
   if (widget.type === 'switch-toggle') return <ToggleSwitchView widget={widget} variables={variables} />
   if (widget.type === 'dropdown') return <DropdownView widget={widget} variables={variables} />
   return <TriggerableViewWidget widget={widget} variables={variables} error={error} />
-}
+})
 
 // One deck view's worth of widgets, absolutely positioned within whatever
 // positioned box contains this — the fullscreen root canvas below, or an

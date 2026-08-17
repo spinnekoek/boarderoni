@@ -721,6 +721,15 @@ button.deck-button:focus-visible {
 	overflow: hidden;
 }
 
+/* The whole widget is just its one label (see LabelWidget.tsx) — no border/
+   background of its own to clip against, so overflow stays visible, same
+   as .deck-button__label's own (a negative padding can push text past this
+   box on purpose — see its own comment in labels.tsx). */
+.deck-label {
+	position: absolute;
+	inset: 0;
+}
+
 /* The arc style's own viewBox is fit to the swept arc itself (see GaugeArc
    in GaugeWidget.tsx), not the widget's box — tick marks/labels are
    deliberately excluded from that fit so they can extend past it, which
@@ -1227,6 +1236,11 @@ button.deck-morph-cell:focus-visible {
 	border-left: 1px solid #2a2e37;
 	background: #191c22;
 	overflow-y: auto;
+	/* Reserves the scrollbar's own width always, whether or not content is
+	   currently tall enough to need one — otherwise everything inside
+	   visibly shifts a few pixels wider/narrower every time content crosses
+	   that threshold (e.g. expanding/collapsing a section via "Expand all"). */
+	scrollbar-gutter: stable;
 }
 
 .properties__resize-handle {
@@ -1244,12 +1258,42 @@ button.deck-morph-cell:focus-visible {
 	background: rgba(91, 141, 239, 0.3);
 }
 
+.properties__header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+
 .properties__title {
 	font-size: 13px;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
 	color: #9098a8;
-	margin: 0 0 4px;
+	margin: 0;
+}
+
+/* "Expand all"/"Collapse all" — see propertiesExpansionStore.ts. */
+.properties__header-actions {
+	display: flex;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+.properties__header-button {
+	background: none;
+	border: 1px solid #3a3f4a;
+	border-radius: 4px;
+	color: #9098a8;
+	padding: 3px 8px;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.properties__header-button:hover {
+	color: #e8e8ea;
+	border-color: #4a505e;
 }
 
 .properties__widget-type {

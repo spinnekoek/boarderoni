@@ -25,6 +25,15 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [busy, setBusy] = useState(false)
+  const [exportingId, setExportingId] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
+  // Non-blocking, dismissible — collectImportWarnings' findings (an
+  // unresolved REST data source, a screen-capture region that needs
+  // re-picking) don't mean the import failed, just that something needs
+  // manual follow-up. Separate from `error` since a successful import can
+  // still have warnings, and an import error shouldn't be swallowed by
+  // dismissing an unrelated stale warning (or vice versa).
+  const [importWarnings, setImportWarnings] = useState<string[] | null>(null)
 
   const canManage = mode === 'edit'
   const decks = canManage ? restDecks : lobbyDecks
@@ -105,6 +114,47 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
     }
   }
 
+  // The main process owns the native save dialog and does the file write
+  // itself (see the /api/decks/:id/export handler in main/index.ts) — this
+  // request just triggers it and reports whether it actually happened.
+  async function handleExport(deck: DeckSummary): Promise<void> {
+    if (exportingId) return
+    setExportingId(deck.id)
+    try {
+      const res = await fetch(apiUrl(`/api/decks/${deck.id}/export`), { method: 'POST' })
+      if (!res.ok) throw new Error(`Server responded ${res.status}`)
+    } catch {
+      setError(`Could not export "${deck.name}".`)
+    } finally {
+      setExportingId(null)
+    }
+  }
+
+  // Same "main process owns the native dialog" shape as export — this picks
+  // the file, validates/normalizes it, writes the new deck, and returns
+  // both the new DeckSummary and any collectImportWarnings findings.
+  async function handleImport(): Promise<void> {
+    if (importing) return
+    setImporting(true)
+    setImportWarnings(null)
+    try {
+      const res = await fetch(apiUrl('/api/decks/import'), { method: 'POST' })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null
+        setError(body?.error ?? 'Could not import that deck.')
+        return
+      }
+      const body = (await res.json()) as { canceled?: true } | { deck: DeckSummary; warnings: string[] }
+      if ('canceled' in body) return
+      load()
+      if (body.warnings.length > 0) setImportWarnings(body.warnings)
+    } catch {
+      setError('Could not import that deck.')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   return (
     <div className="deck-picker">
       <div className="deck-picker__panel">
@@ -115,6 +165,20 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
             <p>{error}</p>
             <button className="deck-picker__retry" onClick={load}>
               Retry
+            </button>
+          </div>
+        )}
+
+        {importWarnings && (
+          <div className="deck-picker__error">
+            <p>Deck imported, but needs a look:</p>
+            <ul>
+              {importWarnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+            <button className="deck-picker__retry" onClick={() => setImportWarnings(null)}>
+              Dismiss
             </button>
           </div>
         )}
@@ -161,6 +225,17 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
                       ✎
                     </button>
                     <button
+                      className="deck-picker__item-action"
+                      title="Export"
+                      disabled={exportingId === deck.id}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleExport(deck)
+                      }}
+                    >
+                      ⇩
+                    </button>
+                    <button
                       className="deck-picker__item-action deck-picker__item-action--danger"
                       title="Delete"
                       onClick={(e) => {
@@ -189,6 +264,9 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
             />
             <button disabled={busy} onClick={handleCreate}>
               + Create
+            </button>
+            <button disabled={importing} onClick={handleImport}>
+              Import…
             </button>
           </div>
         )}

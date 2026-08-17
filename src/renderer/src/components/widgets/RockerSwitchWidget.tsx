@@ -76,7 +76,7 @@ export function RockerSwitchWidgetContent({
           transform: widget.rotateAngle ? `rotate(${widget.rotateAngle}deg)` : undefined
         }}
       >
-        {widget.positions.map((position, index) => {
+        {(widget.positions ?? []).map((position, index) => {
           const resolvedColor = resolveColor(position, variables)
           const unselectedColor = resolvedColor.color ?? DEFAULT_WIDGET_COLOR
           const active = index === (pressedIndex ?? activeIndex)

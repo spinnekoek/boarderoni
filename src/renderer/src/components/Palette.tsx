@@ -9,6 +9,7 @@ import type {
   DropdownWidget,
   EncoderWidget,
   GaugeWidget,
+  LabelWidget,
   MorphButtonWidget,
   RockerSwitchWidget,
   ScreenCaptureWidget,
@@ -78,7 +79,13 @@ export function Palette(): React.JSX.Element {
       style: 'bar',
       orientation: 'horizontal',
       fill: { color: '#5b8def' },
-      track: { color: DEFAULT_WIDGET_COLOR },
+      // Left unset, not DEFAULT_WIDGET_COLOR — GaugeWidgetContent's own
+      // trackColor fallback already resolves to that same value for 'bar'
+      // (no visual change here), but leaves the arc-specific gray default
+      // free to apply if this gauge is later switched to 'arc' in the
+      // properties panel, rather than an explicit value permanently
+      // shadowing it.
+      track: {},
       labels: []
     }
     addWidget(widget)
@@ -225,6 +232,20 @@ export function Palette(): React.JSX.Element {
     selectWidget(widget.id)
   }
 
+  function handleAddLabel(): void {
+    const widget: LabelWidget = {
+      id: nextId(),
+      type: 'label',
+      x: 40,
+      y: 40,
+      w: 160,
+      h: 40,
+      label: { id: nextId(), text: 'Label', fontFamily: DEFAULT_FONT_ID, align: 'center', verticalAlign: 'center' }
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
   function handleAddScreenCapture(): void {
     const widget: ScreenCaptureWidget = {
       id: nextId(),
@@ -246,6 +267,9 @@ export function Palette(): React.JSX.Element {
       <h2 className="palette__title">Widgets</h2>
       <button className="palette__item" onClick={handleAddButton}>
         + Button
+      </button>
+      <button className="palette__item" onClick={handleAddLabel}>
+        + Label
       </button>
       <button className="palette__item" onClick={handleAddMorph}>
         + Morph button

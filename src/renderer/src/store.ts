@@ -18,7 +18,7 @@ import {
   type Widget,
   type WidgetEventKind
 } from '@shared/types'
-import { getSubDeckWidgets, setSubDeckWidgets, findWidgetAnywhere } from '@shared/subDecks'
+import { getSubDeckWidgets, setSubDeckWidgets, findWidgetAnywhere, reconcileDashboard } from '@shared/subDecks'
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSettings, DcsBiosStatus, DcsBiosWorkerStats } from '@shared/dcsBiosTypes'
 import { getDeviceId, setLastDeckId, clearLastDeckId, nextId } from './id'
 
@@ -187,7 +187,12 @@ interface DashboardStore {
   disconnect: () => void
   requestApprovedDevices: () => void
   revokeDeviceApproval: (deviceId: string) => void
-  updateWidgets: (widgets: Widget[]) => void
+  // options.final mirrors triggerWidget's own final param (see its doc
+  // comment) — pass { final: false } for a throttled in-flight drag tick
+  // (see useWidgetDrag's scheduleSend) so the server debounces its disk
+  // save instead of writing on every frame; omitted/true for everything
+  // else (one-off edits, a drag's own final tick), unchanged from before.
+  updateWidgets: (widgets: Widget[], options?: { final?: boolean }) => void
   updateDashboardMeta: (
     fields: Partial<
       Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundColorExpr' | 'backgroundFit' | 'backgroundAnchor' | 'variables' | 'eventSources'>
@@ -322,9 +327,9 @@ function pickerResetState(): Pick<
 // narrower parameter type.
 function widgetDisplayLabel(widget: Widget | undefined): string | undefined {
   if (!widget) return undefined
-  if (widget.type === 'button' || widget.type === 'morph') return widget.states[0]?.labels[0]?.text
+  if (widget.type === 'button' || widget.type === 'morph') return widget.states?.[0]?.labels?.[0]?.text
   if (widget.type === 'switch-rocker' || widget.type === 'switch-dial' || widget.type === 'switch-toggle' || widget.type === 'dropdown')
-    return widget.positions[0]?.labels[0]?.text
+    return widget.positions?.[0]?.labels?.[0]?.text
   if (widget.type === 'screen-capture') return undefined
   return widget.labels[0]?.text
 }
@@ -495,7 +500,12 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // never needed to be — edit mode, or an already-trusted device) —
         // see main/index.ts's sendInitialState — so receiving it doubles as
         // "no longer pending."
-        set({ dashboard: message.dashboard, devicePending: false })
+        // reconcileDashboard (not the raw message.dashboard) preserves
+        // widget object identity across syncs wherever content didn't
+        // change — see its own comment in shared/subDecks.ts for why that
+        // matters: it's what lets ViewWidget/CanvasWidget's React.memo
+        // actually skip re-rendering widgets a drag tick didn't touch.
+        set({ dashboard: reconcileDashboard(get().dashboard, message.dashboard), devicePending: false })
       } else if (message.type === 'device:pending') {
         set({ devicePending: true })
       } else if (message.type === 'device:denied') {
@@ -653,10 +663,10 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     set(pickerResetState())
   },
 
-  updateWidgets: (widgets) => {
+  updateWidgets: (widgets, options) => {
     const dashboard = setSubDeckWidgets(get().dashboard, get().editingSubDeckId, widgets)
     set({ dashboard })
-    send({ type: 'dashboard:update', dashboard })
+    send({ type: 'dashboard:update', dashboard, final: options?.final ?? true })
   },
 
   updateDashboardMeta: (fields) => {

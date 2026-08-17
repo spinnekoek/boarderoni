@@ -14,6 +14,11 @@ const LEVER_BASE_HALF_WIDTH = 4 // narrow end — tapers down into the pivot, li
 // matches LEVER_TIP_HALF_WIDTH exactly rather than an unrelated constant.
 // Overridable per-widget via widget.circleRadius.
 const CIRCLE_RADIUS = LEVER_TIP_HALF_WIDTH
+// Defaults for widget.barWidth/barHeight — leverShape 'bar' only, see its
+// own comment in shared/types.ts. Wider than tall, like a real toggle's
+// paddle/bat handle capping the post.
+const BAR_WIDTH = 20
+const BAR_HEIGHT = 10
 // Just past the bezel rim — the ring a position's own label anchors off of,
 // same role DialSwitchWidget's detentRadius plays for its ring detents. Added
 // to the EFFECTIVE bezel radius (widget.bezelRadius ?? BEZEL_RADIUS) below,
@@ -157,8 +162,31 @@ export function ToggleSwitchWidgetContent({
   const circleRadius = widget.circleRadius ?? CIRCLE_RADIUS
   const circleBorderWidth = widget.circleBorderWidth ?? 0
   const circleBorderColor = withOpacity(widget.circleBorderColor ?? 'transparent', 1)
+  // Opacity deliberately does NOT inherit widget.track.backgroundOpacity the
+  // way the color above inherits resolvedTrack.color — an invisible/
+  // transparent bezel (track.backgroundOpacity: 0) is a common, intentional
+  // look (just the lever against a background image, no backing plate), and
+  // chaining through it silently zeroed out an explicitly-chosen
+  // innerBezelColor with no visible cause. Defaults straight to 1 instead,
+  // so setting a color actually shows it regardless of the bezel's own
+  // opacity.
+  const innerBezelColor = withOpacity(widget.innerBezelColor ?? resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, widget.innerBezelOpacity ?? 1)
+  // 0 (invisible) by default — see its own comment in shared/types.ts for why.
+  const innerBezelRadius = widget.innerBezelRadius ?? 0
+  const innerBezelBorderWidth = widget.innerBezelBorderWidth ?? 0
+  const innerBezelBorderColor = withOpacity(widget.innerBezelBorderColor ?? 'transparent', 1)
+  const leverShape = widget.leverShape ?? 'normal'
+  const barWidth = widget.barWidth ?? BAR_WIDTH
+  const barHeight = widget.barHeight ?? BAR_HEIGHT
+  const barColor = withOpacity(
+    widget.barColor ?? resolvedFill.color ?? DEFAULT_WIDGET_COLOR,
+    widget.barOpacity ?? resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1
+  )
+  const barBorderWidth = widget.barBorderWidth ?? 0
+  const barBorderColor = withOpacity(widget.barBorderColor ?? 'transparent', 1)
+  const barBorderRadius = widget.barBorderRadius ?? 0
   const orientation = widget.orientation ?? 'vertical'
-  const count = widget.positions.length
+  const count = widget.positions?.length ?? 0
   const dragMode = widget.interactionMode === 'drag'
   const effectiveIndex = dragIndex ?? activeIndex
   const showCircle = isMiddlePosition(effectiveIndex, count)
@@ -175,15 +203,38 @@ export function ToggleSwitchWidgetContent({
     >
       <svg className="deck-toggle-switch__bezel" viewBox="0 0 100 100">
         <circle cx={50} cy={50} r={bezelRadius} fill={trackColor} stroke={borderColor} strokeWidth={borderWidth} />
-        {showCircle ? (
+        {innerBezelRadius > 0 && (
           <circle
             cx={50}
             cy={50}
-            r={circleRadius}
-            fill={circleColor}
-            stroke={circleBorderWidth > 0 ? circleBorderColor : undefined}
-            strokeWidth={circleBorderWidth > 0 ? circleBorderWidth : undefined}
+            r={innerBezelRadius}
+            fill={innerBezelColor}
+            stroke={innerBezelBorderWidth > 0 ? innerBezelBorderColor : undefined}
+            strokeWidth={innerBezelBorderWidth > 0 ? innerBezelBorderWidth : undefined}
           />
+        )}
+        {showCircle ? (
+          leverShape === 'bar' ? (
+            <rect
+              x={50 - barWidth / 2}
+              y={50 - barHeight / 2}
+              width={barWidth}
+              height={barHeight}
+              rx={barBorderRadius}
+              fill={barColor}
+              stroke={barBorderWidth > 0 ? barBorderColor : undefined}
+              strokeWidth={barBorderWidth > 0 ? barBorderWidth : undefined}
+            />
+          ) : (
+            <circle
+              cx={50}
+              cy={50}
+              r={circleRadius}
+              fill={circleColor}
+              stroke={circleBorderWidth > 0 ? circleBorderColor : undefined}
+              strokeWidth={circleBorderWidth > 0 ? circleBorderWidth : undefined}
+            />
+          )
         ) : (
           <g transform={`rotate(${leverAngle} 50 50)`}>
             <path
@@ -192,11 +243,23 @@ export function ToggleSwitchWidgetContent({
               stroke={leverBorderWidth > 0 ? leverBorderColor : undefined}
               strokeWidth={leverBorderWidth > 0 ? leverBorderWidth : undefined}
             />
+            {leverShape === 'bar' && (
+              <rect
+                x={50 - barWidth / 2}
+                y={50 - leverLength - barHeight / 2}
+                width={barWidth}
+                height={barHeight}
+                rx={barBorderRadius}
+                fill={barColor}
+                stroke={barBorderWidth > 0 ? barBorderColor : undefined}
+                strokeWidth={barBorderWidth > 0 ? barBorderWidth : undefined}
+              />
+            )}
           </g>
         )}
       </svg>
       <div className="deck-toggle-switch__zones" style={{ flexDirection: orientation === 'vertical' ? 'column' : 'row' }}>
-        {widget.positions.map((position, index) => {
+        {(widget.positions ?? []).map((position, index) => {
           const selected = !interactive && position.id === selectedPositionId
           return (
             <div
@@ -225,11 +288,11 @@ export function ToggleSwitchWidgetContent({
           )
         })}
       </div>
-      {widget.positions.map((position, index) => {
+      {(widget.positions ?? []).map((position, index) => {
         const angle = angleForIndex(index, count, orientation)
         const labelRingRadius = bezelRadius + LABEL_RING_OFFSET
         const dotVb = polarToCartesian(50, 50, labelRingRadius, angle)
-        return position.labels.map((label) => {
+        return (position.labels ?? []).map((label) => {
           const labelVb = labelAnchorPoint(dotVb, angle, labelRingRadius, label.labelDistance ?? LABEL_OFFSET, label.labelAnchor, LABEL_OFFSET)
           const labelPx = viewBoxToPixel(labelVb.x, labelVb.y, widget.w, widget.h)
           return (

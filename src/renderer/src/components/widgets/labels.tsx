@@ -56,9 +56,13 @@ export function renderWidgetLabel(label: WidgetLabel, backgroundColor: string, v
   const overflow = Math.min(padding, 0)
   const dx = align === 'left' ? overflow : align === 'right' ? -overflow : 0
   const dy = verticalAlign === 'top' ? overflow : verticalAlign === 'bottom' ? -overflow : 0
+  const rotation = label.rotation ?? 0
+  const transformParts: string[] = []
+  if (overflow !== 0) transformParts.push(`translate(${dx}px, ${dy}px)`)
+  if (rotation !== 0) transformParts.push(`rotate(${rotation}deg)`)
   const labelStyle: React.CSSProperties = {
     padding: Math.max(padding, 0),
-    transform: overflow !== 0 ? `translate(${dx}px, ${dy}px)` : undefined,
+    transform: transformParts.length > 0 ? transformParts.join(' ') : undefined,
     fontFamily: resolveFont(label.fontFamily).cssFamily,
     fontSize: label.fontSize ?? DEFAULT_WIDGET_FONT_SIZE,
     color: withOpacity(resolvedTextColor.color, resolvedTextColor.opacity ?? label.textOpacity ?? 1),
@@ -79,5 +83,8 @@ export function renderWidgetLabel(label: WidgetLabel, backgroundColor: string, v
 // widget — they don't stack or affect each other's layout, so two labels
 // sharing an align just overlap.
 export function renderWidgetLabels(labels: WidgetLabel[], backgroundColor: string, variables: VariableMap): React.JSX.Element[] {
-  return labels.map((label) => renderWidgetLabel(label, backgroundColor, variables))
+  // Every widget type funnels its labels[] through here — one guard against
+  // a corrupted/hand-edited save's missing array covers all of them, rather
+  // than repeating `?? []` at each of their call sites.
+  return (labels ?? []).map((label) => renderWidgetLabel(label, backgroundColor, variables))
 }

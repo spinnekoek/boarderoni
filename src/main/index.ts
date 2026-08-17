@@ -17,15 +17,18 @@ import { randomUUID } from 'node:crypto'
 import { hostname, networkInterfaces } from 'node:os'
 import { WebSocketServer, WebSocket } from 'ws'
 import { Bonjour, type Service } from 'bonjour-service'
+import { z } from 'zod'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
 import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN, DECK_CLOSE_CODE_DENIED, MDNS_SERVICE_TYPE } from '../shared/constants'
 import {
   DEFAULT_DASHBOARD,
+  DECK_EXPORT_FORMAT_VERSION,
   type ActionStep,
   type ButtonWidget,
   type CallRestAction,
   type ClientToServer,
   type Dashboard,
+  type DeckExportFile,
   type DeckSummary,
   type DeviceInfo,
   type DialSwitchWidget,
@@ -39,6 +42,7 @@ import {
   type SendDcsCommandAction,
   type SequenceStep,
   type ServerToClient,
+  type SwitchPosition,
   type Variable,
   type VariableValue,
   type Widget,
@@ -46,7 +50,7 @@ import {
   type WidgetEventKind
 } from '../shared/types'
 import { getEventSteps } from '../shared/widgetEvents'
-import { findSubDeck, findWidgetAnywhere } from '../shared/subDecks'
+import { findSubDeck, findWidgetAnywhere, allDeckWidgets } from '../shared/subDecks'
 import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression } from '../shared/expr'
 import { extractPlaceholders } from '../shared/restPlaceholders'
 import { EVENT_SOURCE_PRODUCERS } from './eventSourceProducers'
@@ -207,6 +211,24 @@ function migrateDialSwitchIncrementDecrement(widget: DialSwitchWidget): DialSwit
   return { ...widget, events: { ...widget.events, increment: events?.increment ?? [], decrement: events?.decrement ?? [] } }
 }
 
+// SwitchWidgetBase.positions is typed as "at least 2" but nothing on the
+// load path ever enforced that at runtime — a corrupted/hand-edited
+// dashboard.json, or a widget caught mid-migration by an old app version,
+// could carry a missing/undersized array. Every render path downstream
+// assumes it, so backfill to the same two-position shape Palette.tsx gives a
+// freshly-created switch/dropdown, rather than let the render crash blank
+// the whole app the next time this deck loads (see ErrorBoundary.tsx).
+function backfillSwitchPositions<T extends { positions: SwitchPosition[] }>(widget: T): T {
+  if (Array.isArray(widget.positions) && widget.positions.length >= 2) return widget
+  return {
+    ...widget,
+    positions: [
+      { id: randomUUID(), name: 'Position 1', labels: [], onSelect: [] },
+      { id: randomUUID(), name: 'Position 2', labels: [], onSelect: [] }
+    ]
+  }
+}
+
 function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget): Widget {
   widget = migrateWidgetEvents(widget) as Widget & LegacyButtonWidget & LegacyActionWidget
   widget = migrateSwitchWidget(widget) as Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget
@@ -214,25 +236,39 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
   // Dropdown has its own narrower orientation migration too (see
   // migrateDropdownOrientation) alongside the events backfill every switch
   // type below also gets.
-  if (widget.type === 'dropdown') return migrateSwitchWidgetPositionChangeEvents(migrateDropdownOrientation(widget))
+  if (widget.type === 'dropdown') return migrateSwitchWidgetPositionChangeEvents(migrateDropdownOrientation(backfillSwitchPositions(widget)))
 
   if (widget.type === 'switch-dial') {
     return migrateDialSwitchIncrementDecrement(
       migrateSwitchWidgetPositionChangeEvents(
-        migrateSwitchWidgetTopLevelLabels(migrateDialSwitchLabelAnchor(widget as DialSwitchWidget & LegacyDialSwitchWidget))
+        migrateSwitchWidgetTopLevelLabels(migrateDialSwitchLabelAnchor(backfillSwitchPositions(widget as DialSwitchWidget & LegacyDialSwitchWidget)))
       )
     )
   }
 
-  if (widget.type === 'switch-toggle') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(widget))
+  if (widget.type === 'switch-toggle') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
 
-  if (widget.type === 'switch-rocker') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(widget))
+  if (widget.type === 'switch-rocker') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
 
-  // Morph/gauge/adjuster/encoder/screen-capture widgets never existed in any
-  // of the legacy shapes below — they're always created with their current
-  // shape from the start (morph with states[]/blocks[], the rest with no
-  // states[] at all, screen-capture with no labels concept at all).
-  if (widget.type === 'morph' || widget.type === 'gauge' || widget.type === 'adjuster' || widget.type === 'encoder' || widget.type === 'screen-capture') {
+  // Morph/gauge/adjuster/encoder/screen-capture/label widgets never existed
+  // in any of the legacy shapes below — they're always created with their
+  // current shape from the start (morph with states[]/blocks[], the rest
+  // with no states[] at all, screen-capture with no labels concept at all).
+  // label is the important one to keep out of the block below: its own
+  // `label: WidgetLabel` (singular — see LabelWidget's own comment in
+  // shared/types.ts for why, deliberately not the flat `labels[]` every
+  // other type carries) has nothing to do with the legacy flat-field
+  // `label?: string` the block below expects — falling through to it would
+  // destructure `label` off as if it were that legacy string, discard it via
+  // `...rest`, and leave the widget with no `label` at all.
+  if (
+    widget.type === 'morph' ||
+    widget.type === 'gauge' ||
+    widget.type === 'adjuster' ||
+    widget.type === 'encoder' ||
+    widget.type === 'screen-capture' ||
+    widget.type === 'label'
+  ) {
     return widget
   }
 
@@ -249,7 +285,10 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
     widget = { ...rest, labels: widget.labels!.map((l) => (l.padding === undefined ? { ...l, padding } : l)) }
   }
 
-  if (!Array.isArray(widget.states)) {
+  // Missing entirely (pre-states-array shape) or emptied out by corruption —
+  // widget.states[0] is assumed present everywhere downstream (see
+  // ErrorBoundary.tsx), same reasoning as backfillSwitchPositions above.
+  if (!Array.isArray(widget.states) || widget.states.length === 0) {
     const { labels, color, borderColor, backgroundOpacity, borderOpacity, ...rest } = widget
     return {
       ...rest,
@@ -329,25 +368,37 @@ function deckBackgroundImageFile(deckId: string): string {
   return join(deckDir(deckId), 'background-image')
 }
 
+// Shared "old save -> current shape" normalization — every caller that
+// hands a JSON.parse'd (or otherwise untrusted-vintage) Dashboard-shaped
+// object to the rest of the app must route it through here first, rather
+// than trusting its shape as-is. Three callers: loadDeckDashboard (below),
+// migrateLegacyDashboard's one-time file-layout migration, and deck import
+// (handleDecksApi) — previously the first two duplicated this inline, which
+// meant a new migration step had to be remembered in two places; now it's
+// one function all three share.
+function normalizeDashboard(loaded: Dashboard & { backgroundImage?: string }): Dashboard {
+  // Migrate off the old shape, which embedded the image as a data URL
+  // directly in the dashboard JSON (re-sent over the WebSocket on every
+  // single change — see backgroundImageVersion in shared/types.ts).
+  delete loaded.backgroundImage
+  loaded.widgets = loaded.widgets.map(migrateWidget)
+  // Dashboards saved before Variable existed have no `variables` key at
+  // all — normalize once here so nothing downstream needs `?? []`.
+  loaded.variables = loaded.variables ?? []
+  loaded.eventSources = loaded.eventSources ?? []
+  // Same normalization for sub-decks, saved before SubDeck existed — and
+  // each sub-deck's own widgets need the same migrateWidget treatment the
+  // main deck's widgets just got above.
+  loaded.subDecks = (loaded.subDecks ?? []).map((sd) => ({ ...sd, widgets: sd.widgets.map(migrateWidget) }))
+  return loaded
+}
+
 function loadDeckDashboard(deckId: string): Dashboard | null {
   try {
     const file = deckDashboardFile(deckId)
     if (!existsSync(file)) return null
     const loaded = JSON.parse(readFileSync(file, 'utf-8')) as Dashboard & { backgroundImage?: string }
-    // Migrate off the old shape, which embedded the image as a data URL
-    // directly in the dashboard JSON (re-sent over the WebSocket on every
-    // single change — see backgroundImageVersion in shared/types.ts).
-    delete loaded.backgroundImage
-    loaded.widgets = loaded.widgets.map(migrateWidget)
-    // Dashboards saved before Variable existed have no `variables` key at
-    // all — normalize once here so nothing downstream needs `?? []`.
-    loaded.variables = loaded.variables ?? []
-    loaded.eventSources = loaded.eventSources ?? []
-    // Same normalization for sub-decks, saved before SubDeck existed — and
-    // each sub-deck's own widgets need the same migrateWidget treatment the
-    // main deck's widgets just got above.
-    loaded.subDecks = (loaded.subDecks ?? []).map((sd) => ({ ...sd, widgets: sd.widgets.map(migrateWidget) }))
-    return loaded
+    return normalizeDashboard(loaded)
   } catch (err) {
     // A single corrupted deck must not take down the picker list or the app —
     // log and treat it as absent rather than throwing.
@@ -392,12 +443,7 @@ function migrateLegacyDashboard(): void {
   try {
     mkdirSync(decksDir, { recursive: true })
     if (existsSync(legacyDashboardFile)) {
-      const loaded = JSON.parse(readFileSync(legacyDashboardFile, 'utf-8')) as Dashboard & { backgroundImage?: string }
-      delete loaded.backgroundImage
-      loaded.widgets = loaded.widgets.map(migrateWidget)
-      loaded.variables = loaded.variables ?? []
-      loaded.eventSources = loaded.eventSources ?? []
-      loaded.subDecks = (loaded.subDecks ?? []).map((sd) => ({ ...sd, widgets: sd.widgets.map(migrateWidget) }))
+      const loaded = normalizeDashboard(JSON.parse(readFileSync(legacyDashboardFile, 'utf-8')) as Dashboard & { backgroundImage?: string })
       const id = loaded.id || 'default'
       mkdirSync(deckDir(id), { recursive: true })
       writeFileSync(deckDashboardFile(id), JSON.stringify({ ...loaded, id }, null, 2), 'utf-8')
@@ -669,6 +715,64 @@ function listDeckSummaries(): DeckSummary[] {
   return summaries
 }
 
+// Every SequenceStep this widget can fire, from wherever they live on it —
+// its own events (press/release/move/etc., only present on interactive
+// types — Gauge/Label/ScreenCaptureWidget have none) plus, for the switch
+// family, each position's own onSelect. Used by collectImportWarnings below
+// to find every CallRestAction reachable from a deck, regardless of which
+// event/position it's attached to.
+function sequenceStepsForWidget(widget: Widget): SequenceStep[] {
+  const eventSteps = 'events' in widget && widget.events ? Object.values(widget.events).flat() : []
+  const positionSteps = 'positions' in widget && Array.isArray(widget.positions) ? widget.positions.flatMap((p) => p.onSelect ?? []) : []
+  return [...eventSteps, ...positionSteps]
+}
+
+// Surfaces the two ways an imported deck can be structurally fine but still
+// not work correctly on this machine (see the research behind this
+// feature): a CallRestAction pointing at a REST data source id that only
+// ever existed in the exporting machine's own rest-data-sources.json (never
+// part of the export — see RestDataSource's own "NOT per-Dashboard" comment
+// in shared/types.ts), and a ScreenCaptureWidget's region, which is
+// absolute virtual-desktop pixel coordinates tied to the exporting
+// machine's own monitor layout. Neither of these crashes anything — they
+// just silently do the wrong thing — so this doesn't block the import, it
+// just tells the user what to go re-link/re-pick afterward.
+function collectImportWarnings(dashboard: Dashboard): string[] {
+  const dataSourceIds = new Set(getRestDataSources().map((s) => s.id))
+  const warnings: string[] = []
+  for (const widget of allDeckWidgets(dashboard)) {
+    for (const step of sequenceStepsForWidget(widget)) {
+      if (step.kind === 'action' && step.action.kind === 'call-rest' && !dataSourceIds.has(step.action.dataSourceId)) {
+        warnings.push(`A ${widget.type} widget references a REST data source that doesn't exist on this machine — re-link it after import.`)
+      }
+    }
+    if (widget.type === 'screen-capture' && widget.region) {
+      warnings.push('A screen capture widget needs its region re-picked on this machine.')
+    }
+  }
+  return [...new Set(warnings)]
+}
+
+// Clears the one field that isn't just "possibly wrong" (like the REST
+// data source ids collectImportWarnings flags above) but actively
+// meaningless on a different machine: a ScreenCaptureWidget's region/
+// displayId, tied to the exporting machine's own monitor arrangement.
+// SendDcsCommandAction is left untouched — it's pure DCS-BIOS protocol
+// vocabulary (aircraft/identifier/interface/argument), not tied to any
+// path or install on the exporting machine.
+function stripMachineSpecificFields(dashboard: Dashboard): Dashboard {
+  function stripWidget(widget: Widget): Widget {
+    if (widget.type !== 'screen-capture') return widget
+    const { region: _region, displayId: _displayId, ...rest } = widget
+    return rest as Widget
+  }
+  return {
+    ...dashboard,
+    widgets: dashboard.widgets.map(stripWidget),
+    subDecks: (dashboard.subDecks ?? []).map((sd) => ({ ...sd, widgets: sd.widgets.map(stripWidget) }))
+  }
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = ''
@@ -700,8 +804,33 @@ function sendJson(res: ServerResponse, status: number, body?: unknown): void {
   res.end(JSON.stringify(body))
 }
 
+// Loose on purpose — only checks the envelope shape (the magic marker,
+// formatVersion, and that `dashboard` at least looks like a Dashboard),
+// not every widget's own shape. Widget-level shape evolution is already
+// migrateWidget's job (called via normalizeDashboard right after this
+// parses), same as it is for a plain dashboard.json — re-validating that
+// whole discriminated union here would just duplicate that tolerance, not
+// add safety. `.passthrough()` on the dashboard object keeps every field
+// this doesn't explicitly name (backgroundColor, subDecks, variables,
+// eventSources, ...) rather than stripping them.
+const deckExportFileSchema = z.object({
+  boarderoniExport: z.literal(true),
+  formatVersion: z.number(),
+  exportedAt: z.number(),
+  appVersion: z.string(),
+  dashboard: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      widgets: z.array(z.unknown())
+    })
+    .passthrough(),
+  backgroundImage: z.object({ mime: z.string(), dataBase64: z.string() }).optional()
+})
+
 async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   const idMatch = /^\/api\/decks\/([^/]+)$/.exec(url.pathname)
+  const exportMatch = /^\/api\/decks\/([^/]+)\/export$/.exec(url.pathname)
 
   if (url.pathname === '/api/decks' && req.method === 'GET') {
     sendJson(res, 200, listDeckSummaries())
@@ -722,6 +851,93 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
     mkdirSync(deckDir(id), { recursive: true })
     writeFileSync(deckDashboardFile(id), JSON.stringify(dashboard, null, 2), 'utf-8')
     sendJson(res, 201, { id, name } satisfies DeckSummary)
+    return
+  }
+
+  if (exportMatch && req.method === 'POST') {
+    const deckId = exportMatch[1]
+    if (!deckExists(deckId)) {
+      sendJson(res, 404, { error: 'Deck not found' })
+      return
+    }
+    const dashboard = rooms.get(deckId)?.dashboard ?? loadDeckDashboard(deckId)
+    if (!dashboard) {
+      sendJson(res, 404, { error: 'Deck not found' })
+      return
+    }
+    const bgFile = deckBackgroundImageFile(deckId)
+    const backgroundImage =
+      dashboard.backgroundImageMime && existsSync(bgFile)
+        ? { mime: dashboard.backgroundImageMime, dataBase64: readFileSync(bgFile).toString('base64') }
+        : undefined
+    const exportFile: DeckExportFile = {
+      boarderoniExport: true,
+      formatVersion: DECK_EXPORT_FORMAT_VERSION,
+      exportedAt: Date.now(),
+      appVersion: app.getVersion(),
+      dashboard,
+      backgroundImage
+    }
+    const result = await dialog.showSaveDialog({
+      defaultPath: `${dashboard.name}.boarderoni`,
+      filters: [{ name: 'Boarderoni Deck', extensions: ['boarderoni'] }]
+    })
+    if (result.canceled || !result.filePath) {
+      sendJson(res, 200, { canceled: true })
+      return
+    }
+    writeFileSync(result.filePath, JSON.stringify(exportFile, null, 2), 'utf-8')
+    sendJson(res, 200, { ok: true })
+    return
+  }
+
+  if (url.pathname === '/api/decks/import' && req.method === 'POST') {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Boarderoni Deck', extensions: ['boarderoni', 'json'] }]
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      sendJson(res, 200, { canceled: true })
+      return
+    }
+    let raw: unknown
+    try {
+      raw = JSON.parse(readFileSync(result.filePaths[0], 'utf-8'))
+    } catch {
+      sendJson(res, 400, { error: 'That file is not valid JSON.' })
+      return
+    }
+    const parsed = deckExportFileSchema.safeParse(raw)
+    if (!parsed.success) {
+      sendJson(res, 400, { error: "That file isn't a Boarderoni deck export." })
+      return
+    }
+    const exportFile = parsed.data as unknown as DeckExportFile
+    if (exportFile.formatVersion > DECK_EXPORT_FORMAT_VERSION) {
+      sendJson(res, 400, { error: 'This deck was exported from a newer version of Boarderoni and can’t be imported here.' })
+      return
+    }
+    // New id always, regardless of what the export carried — avoids
+    // colliding with an existing local deck (including, in the edge case
+    // of re-importing your own export, the very deck it came from).
+    const id = randomUUID()
+    let dashboard = normalizeDashboard({ ...structuredClone(exportFile.dashboard), id })
+    dashboard = stripMachineSpecificFields(dashboard)
+    mkdirSync(deckDir(id), { recursive: true })
+    if (exportFile.backgroundImage) {
+      writeFileSync(deckBackgroundImageFile(id), Buffer.from(exportFile.backgroundImage.dataBase64, 'base64'))
+      dashboard.backgroundImageMime = exportFile.backgroundImage.mime
+      // Never reuse the exported value — it's a cache-buster local to the
+      // exporting machine (see Dashboard.backgroundImageVersion's own
+      // comment), not meaningful here.
+      dashboard.backgroundImageVersion = Date.now()
+    } else {
+      delete dashboard.backgroundImageMime
+      delete dashboard.backgroundImageVersion
+    }
+    writeFileSync(deckDashboardFile(id), JSON.stringify(dashboard, null, 2), 'utf-8')
+    const warnings = collectImportWarnings(dashboard)
+    sendJson(res, 201, { deck: { id, name: dashboard.name } satisfies DeckSummary, warnings })
     return
   }
 
@@ -1332,10 +1548,10 @@ async function triggerAction(
     return
   }
 
-  // Gauge/screen-capture are passive — neither has `.events` at all, so a
+  // Gauge/screen-capture/label are passive — none has `.events` at all, so a
   // stale/malicious action:trigger naming one lands here rather than
   // crashing on getEventSteps below (which assumes EventfulWidget).
-  if (widget.type === 'gauge' || widget.type === 'screen-capture') {
+  if (widget.type === 'gauge' || widget.type === 'screen-capture' || widget.type === 'label') {
     sendError(ws, widgetId, 'This widget cannot be triggered')
     return
   }
@@ -1516,7 +1732,17 @@ wss.on('connection', (ws: TrackedSocket, req) => {
       case 'dashboard:update':
         if (!activeRoom) break
         activeRoom.dashboard = message.dashboard
-        saveDeckDashboard(activeRoom)
+        // Same immediate/debounced split as applyVariableUpdates — an
+        // in-flight drag tick (final: false) must not do a blocking
+        // full-dashboard writeFileSync on every frame; the drag's own final
+        // tick (or any one-off edit) still saves synchronously so nothing's
+        // lost if the app closes right after.
+        if (message.final ?? true) {
+          cancelScheduledSave(activeRoom)
+          saveDeckDashboard(activeRoom)
+        } else {
+          scheduleDebouncedSave(activeRoom)
+        }
         broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard }, ws)
         syncEventSources(activeRoom)
         break
@@ -1962,6 +2188,14 @@ function createEditorWindow(): void {
   win.on('resize', scheduleSaveWindowState)
   win.on('move', scheduleSaveWindowState)
   win.on('close', () => saveWindowState(win))
+
+  // Renderer console output (including ErrorBoundary's componentDidCatch
+  // logs) otherwise only reaches DevTools, invisible from the terminal
+  // running electron-vite dev — relay it here so a renderer crash is
+  // diagnosable without opening DevTools by hand.
+  win.webContents.on('console-message', (event) => {
+    console.log(`[renderer:${event.level}] ${event.message}`)
+  })
 
   if (devServerUrl) {
     win.loadURL(`${devServerUrl}?mode=edit`)

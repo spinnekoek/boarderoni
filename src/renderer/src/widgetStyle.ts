@@ -216,7 +216,12 @@ function extractToggleStyle(widget: Extract<Widget, { type: 'switch-toggle' }>) 
       'circleOpacity',
       'circleRadius',
       'circleBorderColor',
-      'circleBorderWidth'
+      'circleBorderWidth',
+      'innerBezelColor',
+      'innerBezelOpacity',
+      'innerBezelRadius',
+      'innerBezelBorderColor',
+      'innerBezelBorderWidth'
     ] as const),
     labels: styleLabels(widget.labels),
     positions: stylePositions(widget.positions)
@@ -232,6 +237,10 @@ function extractDropdownStyle(widget: Extract<Widget, { type: 'dropdown' }>) {
 
 function extractScreenCaptureStyle(widget: Extract<Widget, { type: 'screen-capture' }>) {
   return pick(widget, ['fit', 'brightness', 'contrast', 'saturation', 'sharpen', 'borderColor', 'borderColorExpr', 'borderOpacity'] as const)
+}
+
+function extractLabelStyle(widget: Extract<Widget, { type: 'label' }>) {
+  return { label: pick(widget.label, LABEL_STYLE_KEYS) }
 }
 
 export interface StyleClipboardEntry {
@@ -260,6 +269,8 @@ export function extractWidgetStyle(widget: Widget): StyleClipboardEntry {
       return { widgetType: widget.type, data: extractDropdownStyle(widget) }
     case 'screen-capture':
       return { widgetType: widget.type, data: extractScreenCaptureStyle(widget) }
+    case 'label':
+      return { widgetType: widget.type, data: extractLabelStyle(widget) }
   }
 }
 
@@ -315,6 +326,10 @@ export function applyWidgetStyle(widget: Widget, entry: StyleClipboardEntry): Wi
     case 'screen-capture': {
       const rest = entry.data as ReturnType<typeof extractScreenCaptureStyle>
       return { ...widget, ...rest }
+    }
+    case 'label': {
+      const { label } = entry.data as ReturnType<typeof extractLabelStyle>
+      return { ...widget, label: { ...widget.label, ...label } }
     }
   }
 }

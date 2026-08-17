@@ -34,9 +34,41 @@ export function useWidgetDrag(
 
   const selected = selectedWidgetIds.includes(widget.id)
   const dragState = useRef<DragState | null>(null)
+  // rAF-throttles the in-flight sends below, same pattern/reasoning as
+  // useAdjusterDrag's own scheduleSend — pointermove can fire far faster
+  // than the WS round trip (and the server's full-dashboard broadcast +
+  // disk save) can keep up with, which is what made a drag visibly lag
+  // further behind the longer it ran, worse on a larger deck.
+  const pendingWidgetsRef = useRef<Widget[] | null>(null)
+  const rafScheduledRef = useRef(false)
 
   function snap(value: number): number {
     return snapToGrid ? Math.round(value / gridSize) * gridSize : Math.round(value)
+  }
+
+  function movedWidgets(drag: DragState, dx: number, dy: number): Widget[] {
+    const liveWidgets = getSubDeckWidgets(useDashboardStore.getState().dashboard, useDashboardStore.getState().editingSubDeckId)
+    return liveWidgets.map((w) => {
+      const origin = drag.origins.get(w.id)
+      return origin ? { ...w, x: snap(origin.x + dx), y: snap(origin.y + dy) } : w
+    })
+  }
+
+  // Caps outbound dashboard:update sends to ~once per frame — mirrors
+  // useAdjusterDrag's scheduleSend exactly, including the final: false tag
+  // that lets the server debounce its disk save on these in-flight ticks
+  // (see the dashboard:update handler in main/index.ts).
+  function scheduleSend(widgets: Widget[]): void {
+    pendingWidgetsRef.current = widgets
+    if (rafScheduledRef.current) return
+    rafScheduledRef.current = true
+    requestAnimationFrame(() => {
+      rafScheduledRef.current = false
+      const pending = pendingWidgetsRef.current
+      pendingWidgetsRef.current = null
+      if (pending === null) return
+      updateWidgets(pending, { final: false })
+    })
   }
 
   function handlePointerDown(e: React.PointerEvent): void {
@@ -82,21 +114,24 @@ export function useWidgetDrag(
     const dx = (e.clientX - drag.startX) / zoom
     const dy = (e.clientY - drag.startY) / zoom
     if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) drag.moved = true
-    if (drag.moved) {
-      const liveWidgets = getSubDeckWidgets(useDashboardStore.getState().dashboard, useDashboardStore.getState().editingSubDeckId)
-      updateWidgets(
-        liveWidgets.map((w) => {
-          const origin = drag.origins.get(w.id)
-          return origin ? { ...w, x: snap(origin.x + dx), y: snap(origin.y + dy) } : w
-        })
-      )
-    }
+    if (drag.moved) scheduleSend(movedWidgets(drag, dx, dy))
   }
 
   function handlePointerUp(e: React.PointerEvent): void {
     e.stopPropagation()
     const drag = dragState.current
     dragState.current = null
+    if (drag && drag.moved) {
+      // Final, unthrottled send — guarantees the last position commits (and
+      // gets its synchronous, non-debounced save) even if a scheduled rAF
+      // tick from scheduleSend was still pending; dropping that stale tick
+      // here (rather than letting it fire after) is why this clears
+      // pendingWidgetsRef first.
+      pendingWidgetsRef.current = null
+      const dx = (e.clientX - drag.startX) / zoom
+      const dy = (e.clientY - drag.startY) / zoom
+      updateWidgets(movedWidgets(drag, dx, dy), { final: true })
+    }
     if (drag && !drag.moved && drag.wasSelected) {
       selectWidget(widget.id, drag.additive ? { additive: true } : undefined)
     }

@@ -12,6 +12,7 @@ import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
 import { ToggleSwitchWidgetContent } from './widgets/ToggleSwitchWidget'
 import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { ScreenCaptureWidgetContent } from './widgets/ScreenCaptureWidget'
+import { LabelWidgetContent } from './widgets/LabelWidget'
 import { resolveActivePositionIndex } from '@shared/switchPosition'
 import type { VariableMap } from '@shared/expr'
 import type { BoxWidget } from '@shared/types'
@@ -56,7 +57,11 @@ export function CanvasWidget({
   // widget always shows its resting Default look. Only meaningful for a
   // button (gauge/adjuster have no states at all).
   const isSolePreviewTarget = widget.type === 'button' && selected && selectedWidgetIds.length === 1 && (widget.statesEnabled ?? false)
-  const previewState = widget.type === 'button' ? (isSolePreviewTarget ? (widget.states[activeStateIndex] ?? widget.states[0]) : widget.states[0]) : null
+  // widget.states/positions are typed as always-present non-empty arrays,
+  // but a corrupted/hand-edited save can violate that — fall back to `?? []`
+  // everywhere below rather than letting a stale/malformed deck blank the
+  // whole app (see ErrorBoundary's own comment for what happens without this).
+  const previewState = widget.type === 'button' ? (isSolePreviewTarget ? ((widget.states ?? [])[activeStateIndex] ?? widget.states?.[0]) : widget.states?.[0]) : null
   const resizeState = useRef<ResizeState | null>(null)
   const [resizing, setResizing] = useState(false)
 
@@ -120,6 +125,7 @@ export function CanvasWidget({
         <ButtonWidgetContent widget={widget} state={previewState} interactive={false} variables={variables} />
       )}
       {widget.type === 'gauge' && <GaugeWidgetContent widget={widget} variables={variables} />}
+      {widget.type === 'label' && <LabelWidgetContent widget={widget} variables={variables} />}
       {widget.type === 'screen-capture' && <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />}
       {widget.type === 'adjuster' && <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} />}
       {widget.type === 'encoder' && <EncoderWidgetContent widget={widget} variables={variables} interactive={false} />}
@@ -128,7 +134,7 @@ export function CanvasWidget({
           widget={widget}
           variables={variables}
           interactive={false}
-          activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? (widget.settleToInactive ? null : 0)}
+          activeIndex={resolveActivePositionIndex(widget.positions ?? [], widget.activePositionExpr, variables) ?? (widget.settleToInactive ? null : 0)}
           selectedPositionId={isSoleSelection ? selectedBlockId : null}
           onPositionSelect={(position) => {
             // First click on the widget selects the whole thing (same as
@@ -145,7 +151,7 @@ export function CanvasWidget({
           widget={widget}
           variables={variables}
           interactive={false}
-          activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? 0}
+          activeIndex={resolveActivePositionIndex(widget.positions ?? [], widget.activePositionExpr, variables) ?? 0}
         />
       )}
       {widget.type === 'switch-toggle' && (
@@ -153,7 +159,7 @@ export function CanvasWidget({
           widget={widget}
           variables={variables}
           interactive={false}
-          activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? 0}
+          activeIndex={resolveActivePositionIndex(widget.positions ?? [], widget.activePositionExpr, variables) ?? 0}
           selectedPositionId={isSoleSelection ? selectedBlockId : null}
           onPositionSelect={(position) => {
             // Unlike RockerSwitchWidget's two-step select-then-drill above,
@@ -172,7 +178,7 @@ export function CanvasWidget({
           widget={widget}
           variables={variables}
           interactive={false}
-          activeIndex={resolveActivePositionIndex(widget.positions, widget.activePositionExpr, variables) ?? 0}
+          activeIndex={resolveActivePositionIndex(widget.positions ?? [], widget.activePositionExpr, variables) ?? 0}
         />
       )}
       {resizing && (

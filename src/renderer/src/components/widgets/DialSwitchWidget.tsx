@@ -23,7 +23,7 @@ const LABEL_OFFSET = 12
 export function angleForPosition(widget: DialSwitchWidget, index: number): number {
   const startAngle = widget.startAngle ?? DEFAULT_START_ANGLE
   const endAngle = widget.endAngle ?? DEFAULT_END_ANGLE
-  const count = widget.positions.length
+  const count = widget.positions?.length ?? 0
   return count > 1 ? startAngle + (index / (count - 1)) * (endAngle - startAngle) : startAngle
 }
 
@@ -104,7 +104,7 @@ export function DialSwitchWidgetContent({
   // Precomputed once per position so both the (triangle-only) in-SVG marker
   // below and the plain-HTML marker/labels further down share the same
   // angle/point/color instead of resolving each position's color twice.
-  const positionMarkers = widget.positions.map((position, index) => {
+  const positionMarkers = (widget.positions ?? []).map((position, index) => {
     const angle = angleForPosition(widget, index)
     const dotVb = polarToCartesian(50, 50, detentRadius, angle)
     const dot = viewBoxToPixel(dotVb.x, dotVb.y, widget.w, widget.h)
@@ -211,7 +211,7 @@ export function DialSwitchWidgetContent({
               onClick={handleSelect}
             />
           )}
-          {position.labels.map((positionLabel) => {
+          {(position.labels ?? []).map((positionLabel) => {
             const labelVb = labelAnchorPoint(
               dotVb,
               angle,

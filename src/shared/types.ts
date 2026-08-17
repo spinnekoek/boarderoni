@@ -246,6 +246,13 @@ export interface WidgetLabel {
   // single shared value this used to be before the two were split.
   textAlign?: HorizontalAlign
   padding?: number
+  // Spins just this label's own text in place (around its box's own
+  // center) — independent of align/verticalAlign, which position the box
+  // itself, and of a switch widget's own rotateAngle (e.g.
+  // RockerSwitchWidget's whole-body spin in RockerSwitchWidget.tsx), which
+  // spins the widget's shape/segments and every label together rather than
+  // one label on its own. Unset/0 is the default, unrotated.
+  rotation?: 0 | 90 | 180 | 270
   // DialSwitchWidget only — where THIS label sits relative to its position's
   // detent dot. Unset (the default) places it radially outward along that
   // detent's own angle, just past the dial's rim, so it reads correctly
@@ -834,6 +841,20 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   // below is independent and NOT clamped to this, so a lever can be sized
   // to intentionally poke out past a shrunk bezel.
   bezelRadius?: number
+  // A second, concentric circle drawn on top of the bezel above — always
+  // present regardless of position count (unlike circleColor et al. below,
+  // which are the separate middle-position-only marker). Defaults to radius
+  // 0 (invisible) rather than a fixed fraction of bezelRadius, so an
+  // existing dashboard saved before this field existed doesn't suddenly
+  // grow a visible ring — it only appears once deliberately sized in the
+  // properties panel. Color/opacity default to `track`'s own (matching the
+  // bezel until overridden); border defaults to none. All in
+  // ToggleSwitchWidget.tsx.
+  innerBezelColor?: string
+  innerBezelOpacity?: number
+  innerBezelRadius?: number
+  innerBezelBorderColor?: string
+  innerBezelBorderWidth?: number
   // The lever's own length (from the pivot at the bezel's center out to its
   // tip) and border — independent of the bezel's border above. Length
   // defaults to LEVER_LENGTH, border to none (width 0), both in
@@ -841,6 +862,15 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   leverLength?: number
   leverBorderColor?: string
   leverBorderWidth?: number
+  // 'normal' (default): exactly today's look — a bare tapered lever for
+  // top/bottom, a plain circle (see circleColor etc. below) at an odd-count
+  // switch's middle position. 'bar': a configurable rectangle — barColor/
+  // Width/Height/Border*/Radius below — capping the lever's own tip for
+  // top/bottom (drawn on top of, not instead of, the tapered post, rotating
+  // together with it), and standing in for the circle entirely at the
+  // middle position (there's no lever there to cap) — like a real toggle's
+  // paddle/bat handle mounted on its post. See ToggleSwitchWidget.tsx.
+  leverShape?: 'normal' | 'bar'
   // The plain circle drawn instead of a lever at an odd-count switch's exact
   // middle position (see isMiddlePosition) — a distinct look from the lever/
   // `fill` above, since a real 3-way toggle's neutral throw often reads as a
@@ -848,12 +878,26 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   // opacity default to `fill`'s own (so an existing dashboard's middle
   // position keeps its prior look until deliberately overridden); size
   // defaults to CIRCLE_RADIUS, border to none (width 0) — all in
-  // ToggleSwitchWidget.tsx.
+  // ToggleSwitchWidget.tsx. leverShape 'bar' only (see its own comment
+  // above) — unused (but left in place, not migrated away) once 'bar' is
+  // picked.
   circleColor?: string
   circleOpacity?: number
   circleRadius?: number
   circleBorderColor?: string
   circleBorderWidth?: number
+  // leverShape 'bar' only — see its own comment above. Width/height in the
+  // same 0-100 viewBox units as everything else here; color/opacity default
+  // to `fill`'s own, same reasoning as the circle fields above; border
+  // defaults to none (width 0); corner radius defaults to 0 (a plain
+  // rectangle) — all in ToggleSwitchWidget.tsx.
+  barWidth?: number
+  barHeight?: number
+  barColor?: string
+  barOpacity?: number
+  barBorderColor?: string
+  barBorderWidth?: number
+  barBorderRadius?: number
 }
 
 // Shared shape geometry for a small marker — either one of a DialSwitchWidget's
@@ -1156,6 +1200,25 @@ export interface ScreenCaptureWidget {
   zIndex?: number
 }
 
+// The simplest widget there is — just one WidgetLabel, full-bleed over its
+// own x/y/w/h box. Deliberately a single `label`, not the flat `labels[]`
+// every other widget type carries alongside its own shape (a switch's
+// legend, a gauge's title, ...) — those are ANOTHER label on top of
+// something else already being drawn; this widget IS the label, so there's
+// nothing for a second one to add. No events, no colors of its own (the
+// label's own WidgetLabel.backgroundColor covers that) — see
+// LabelWidgetContent in components/widgets/LabelWidget.tsx.
+export interface LabelWidget {
+  id: string
+  type: 'label'
+  x: number
+  y: number
+  w: number
+  h: number
+  label: WidgetLabel
+  zIndex?: number
+}
+
 export type Widget =
   | ButtonWidget
   | MorphButtonWidget
@@ -1167,6 +1230,7 @@ export type Widget =
   | ToggleSwitchWidget
   | DropdownWidget
   | ScreenCaptureWidget
+  | LabelWidget
 
 // A plain draggable/resizable x/y/w/h rectangle in the editor (unlike
 // MorphButtonWidget's cellW/cellH+blocks shape) — shared prop type for
@@ -1181,6 +1245,7 @@ export type BoxWidget =
   | ToggleSwitchWidget
   | DropdownWidget
   | ScreenCaptureWidget
+  | LabelWidget
 
 // Widgets driven by the WidgetState/statesEnabled/activeStateExpr machinery
 // — used to narrow getEffectiveStates now that Widget includes types
@@ -1241,6 +1306,36 @@ export interface Variable {
 export interface DeckSummary {
   id: string
   name: string
+}
+
+// Bumped only on a breaking change to DeckExportFile's own shape (not on
+// every Dashboard/Widget schema change — those are handled the same way
+// they always have been, by normalizeDashboard/migrateWidget tolerating old
+// shapes structurally). Import rejects any file with a HIGHER formatVersion
+// than this outright ("exported from a newer Boarderoni than this one
+// understands") rather than guessing at how to interpret fields it's never
+// seen — the one thing the app previously had no way to detect at all.
+export const DECK_EXPORT_FORMAT_VERSION = 1
+
+// The on-disk shape of a `.boarderoni` export file — one self-contained JSON
+// document carrying everything loadDeckDashboard would otherwise assemble
+// from a deck's directory (dashboard.json + its sibling background-image
+// file, see Dashboard.backgroundImageVersion's own comment for why that
+// image normally lives outside the JSON). Deliberately NOT hashed/signed —
+// plain, inspectable, hand-editable JSON, same as dashboard.json itself.
+export interface DeckExportFile {
+  boarderoniExport: true
+  formatVersion: number
+  exportedAt: number
+  // app.getVersion() at export time — informational/debugging only, never
+  // compared against anything on import.
+  appVersion: string
+  dashboard: Dashboard
+  // Absent when the deck has no background image at all — see
+  // serveBackgroundImage's own 404-on-missing-file handling in
+  // main/index.ts, which this mirrors instead of forcing every export to
+  // carry an (often large) empty placeholder.
+  backgroundImage?: { mime: string; dataBase64: string }
 }
 
 // One field of an event source's output routed into a Variable. `field` is
@@ -1412,7 +1507,13 @@ export type ClientToServer =
       userAgent?: string
       deviceId?: string
     }
-  | { type: 'dashboard:update'; dashboard: Dashboard }
+  // final follows the same convention as action:trigger's own final below:
+  // false for an in-flight rAF-throttled drag tick (useWidgetDrag's
+  // scheduleSend), true (or omitted) for a one-off edit or a drag's own
+  // final tick on pointer-up — drives the same immediate/debounced disk-save
+  // split (see the dashboard:update handler in main/index.ts), so a fast
+  // widget drag isn't doing a blocking full-dashboard write on every frame.
+  | { type: 'dashboard:update'; dashboard: Dashboard; final?: boolean }
   // event selects which of the widget's events[...] sequences to run (see
   // getEventSteps in shared/widgetEvents.ts) — required, not optional: this
   // app's editor/view clients and server always ship from the same build,
