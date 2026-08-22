@@ -34,6 +34,7 @@ import { useAdjusterDrag } from '../useAdjusterDrag'
 import { useMorphSliderDrag } from '../useMorphSliderDrag'
 import { useEncoderDrag } from '../useEncoderDrag'
 import { useSwitchPosition } from '../useSwitchPosition'
+import { useSwitchGuard } from '../useSwitchGuard'
 import { useDialSwitchDrag } from '../useDialSwitchDrag'
 import { useToggleSwitchDrag } from '../useToggleSwitchDrag'
 import { isMiddlePosition as isMiddleTogglePosition } from './widgets/ToggleSwitchWidget'
@@ -121,7 +122,8 @@ function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; v
   // just satisfies the hook's shared, nullable-for-Rocker return type.
   const { activeIndex: rawActiveIndex, select } = useSwitchPosition(widget, variables)
   const activeIndex = rawActiveIndex ?? 0
-  const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useToggleSwitchDrag(widget, select)
+  const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useToggleSwitchDrag(widget, activeIndex, select)
+  const { open: guardOpen, toggle: guardToggle } = useSwitchGuard(widget, variables)
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   const count = widget.positions.length
   const middleIndex = count % 2 === 1 ? (count - 1) / 2 : -1
@@ -137,6 +139,8 @@ function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; v
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        guardOpen={guardOpen}
+        onGuardToggle={guardToggle}
       />
     ) : (
       <ToggleSwitchWidgetContent
@@ -144,11 +148,20 @@ function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; v
         variables={variables}
         interactive
         activeIndex={activeIndex}
-        onZonePointerDown={select}
+        // A 2-position toggle has no "direction" tapping it should have to
+        // respect — it's just on/off, so any zone flips it regardless of
+        // which one was actually pressed (unlike 3 positions, where each
+        // zone still has to pick its own specific position — you can't
+        // "toggle" onto a specific middle throw). See this behavior's own
+        // bug report: pressing the zone opposite the current position used
+        // to be the only way to flip it; the same-side zone did nothing.
+        onZonePointerDown={count === 2 ? () => select(activeIndex === 0 ? 1 : 0) : select}
         onZonePointerUp={(index) => {
           const isMomentary = !isMiddleTogglePosition(index, count) && (widget.positions[index]?.momentary ?? false)
           if (isMomentary && middleIndex >= 0) select(middleIndex)
         }}
+        guardOpen={guardOpen}
+        onGuardToggle={guardToggle}
       />
     )
 

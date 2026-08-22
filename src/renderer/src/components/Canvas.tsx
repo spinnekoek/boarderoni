@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { useDashboardStore } from '../store'
+import { useDashboardStore, useGridSize } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useEditorShortcuts } from '../useEditorShortcuts'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
@@ -71,7 +71,7 @@ export function Canvas(): React.JSX.Element {
   const selectWidget = useDashboardStore((s) => s.selectWidget)
   const selectWidgets = useDashboardStore((s) => s.selectWidgets)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
-  const gridSize = useEditorSettings((s) => s.gridSize)
+  const gridSize = useGridSize()
   const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
 
   useEditorShortcuts()

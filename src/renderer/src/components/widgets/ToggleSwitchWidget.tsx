@@ -73,6 +73,19 @@ function leverPath(length: number, tipHalfWidth: number, baseHalfWidth: number):
   ].join(' ')
 }
 
+// SVG `points` for a regular hexagon centered at (50,50), one vertex
+// pointing straight up at rotation 0 — bezelShape 'hexagon' only (see its
+// own comment in shared/types.ts). User rotation (widget.bezelRotation) is
+// applied as a separate SVG transform on top of this, same split as the
+// lever's own leverPath (drawn upright, then wrapped in its own
+// rotate(...) transform below) rather than baking the angle into the point
+// math itself.
+function hexagonPoints(radius: number): string {
+  return Array.from({ length: 6 }, (_, i) => polarToCartesian(50, 50, radius, i * 60))
+    .map((p) => `${p.x},${p.y}`)
+    .join(' ')
+}
+
 // The fixed, non-editable name for a given position slot — see
 // ToggleSwitchWidget's own comment in shared/types.ts for why these are
 // forced rather than freeform like Rocker/Dial/Dropdown's. Shared by
@@ -118,13 +131,21 @@ export function ToggleSwitchWidgetContent({
   onPointerMove,
   onPointerUp,
   selectedPositionId,
-  onPositionSelect
+  onPositionSelect,
+  guardOpen,
+  onGuardToggle
 }: {
   widget: ToggleSwitchWidget
   variables: VariableMap
   interactive: boolean
   activeIndex: number
   dragIndex?: number
+  // Only meaningful when widget.guardEnabled — resolved by the caller (see
+  // useSwitchGuard.ts) the same "local tap, optional expr override" way
+  // activeIndex above is. Editor preview (interactive=false) never passes
+  // these, so the guard always renders closed there.
+  guardOpen?: boolean
+  onGuardToggle?: () => void
   // Tap mode only (see ToggleSwitchView) — pressing a zone always selects it
   // immediately (even a momentary one, which springs back on release — see
   // SwitchPosition.momentary); releasing anywhere on that same zone (pointer
@@ -152,6 +173,7 @@ export function ToggleSwitchWidgetContent({
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
   const borderWidth = widget.borderWidth ?? 2
   const bezelRadius = widget.bezelRadius ?? BEZEL_RADIUS
+  const bezelShape = widget.bezelShape ?? 'circle'
   const leverLength = widget.leverLength ?? LEVER_LENGTH
   const leverBorderWidth = widget.leverBorderWidth ?? 0
   const leverBorderColor = withOpacity(widget.leverBorderColor ?? 'transparent', 1)
@@ -185,6 +207,10 @@ export function ToggleSwitchWidgetContent({
   const barBorderWidth = widget.barBorderWidth ?? 0
   const barBorderColor = withOpacity(widget.barBorderColor ?? 'transparent', 1)
   const barBorderRadius = widget.barBorderRadius ?? 0
+  const resolvedGuard = resolveColor(widget.guard ?? {}, variables)
+  const guardColor = withOpacity(resolvedGuard.color ?? '#c0392b', resolvedGuard.opacity ?? widget.guard?.backgroundOpacity ?? 1)
+  const resolvedGuardBorder = resolveBorderColor(widget.guard ?? {}, variables)
+  const guardBorderColor = withOpacity(resolvedGuardBorder.color ?? 'transparent', resolvedGuardBorder.opacity ?? widget.guard?.borderOpacity ?? 1)
   const orientation = widget.orientation ?? 'vertical'
   const count = widget.positions?.length ?? 0
   const dragMode = widget.interactionMode === 'drag'
@@ -201,8 +227,68 @@ export function ToggleSwitchWidgetContent({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
+      <div className="deck-toggle-switch__zones" style={{ flexDirection: orientation === 'vertical' ? 'column' : 'row' }}>
+        {(widget.positions ?? []).map((position, index) => {
+          const selected = !interactive && position.id === selectedPositionId
+          return (
+            <div
+              key={position.id}
+              className={`deck-toggle-switch__zone${selected ? ' deck-toggle-switch__zone--selected' : ''}`}
+              onPointerDown={
+                interactive && !dragMode
+                  ? (e) => {
+                      onZonePointerDown?.(index)
+                      try {
+                        e.currentTarget.setPointerCapture(e.pointerId)
+                      } catch {
+                        // best-effort, see CanvasWidget's handlePointerDown
+                      }
+                    }
+                  : !interactive
+                    ? // Same deliberate non-stopPropagation as RockerSwitchWidgetContent's
+                      // segment click — see its own comment for why the widget-level
+                      // select/drag handler still needs to see this pointerdown too.
+                      () => onPositionSelect?.(position)
+                    : undefined
+              }
+              onPointerUp={interactive && !dragMode ? () => onZonePointerUp?.(index) : undefined}
+              onPointerCancel={interactive && !dragMode ? () => onZonePointerUp?.(index) : undefined}
+            />
+          )
+        })}
+      </div>
+      {(widget.positions ?? []).map((position, index) => {
+        const angle = angleForIndex(index, count, orientation)
+        const labelRingRadius = bezelRadius + LABEL_RING_OFFSET
+        const dotVb = polarToCartesian(50, 50, labelRingRadius, angle)
+        return (position.labels ?? []).map((label) => {
+          const labelVb = labelAnchorPoint(dotVb, angle, labelRingRadius, label.labelDistance ?? LABEL_OFFSET, label.labelAnchor, LABEL_OFFSET)
+          const labelPx = viewBoxToPixel(labelVb.x, labelVb.y, widget.w, widget.h)
+          return (
+            <div key={label.id} className="deck-toggle-switch__label" style={{ left: labelPx.x, top: labelPx.y }}>
+              {renderWidgetLabel(label, trackColor, variables)}
+            </div>
+          )
+        })
+      })}
+      {renderWidgetLabels(widget.labels, trackColor, variables)}
+      {/* Bezel+lever, painted AFTER every label above (rather than first,
+          the more obvious order) so the lever/circle visually sits in front
+          of a label that's been pulled in close via a negative labelDistance
+          (see LabelFields' own "Label distance" comment in
+          PropertiesPanel.tsx) — a real toggle's stalk would occlude a
+          placard behind it the same way. pointer-events:none on
+          .deck-toggle-switch__bezel (see its own CSS comment) means this
+          move doesn't change what the zones below actually receive clicks
+          for — that was already independent of paint order. */}
       <svg className="deck-toggle-switch__bezel" viewBox="0 0 100 100">
-        <circle cx={50} cy={50} r={bezelRadius} fill={trackColor} stroke={borderColor} strokeWidth={borderWidth} />
+        {bezelShape === 'hexagon' ? (
+          <g transform={`rotate(${widget.bezelRotation ?? 0} 50 50)`}>
+            <polygon points={hexagonPoints(bezelRadius)} fill={trackColor} stroke={borderColor} strokeWidth={borderWidth} />
+          </g>
+        ) : (
+          <circle cx={50} cy={50} r={bezelRadius} fill={trackColor} stroke={borderColor} strokeWidth={borderWidth} />
+        )}
         {innerBezelRadius > 0 && (
           <circle
             cx={50}
@@ -258,51 +344,54 @@ export function ToggleSwitchWidgetContent({
           </g>
         )}
       </svg>
-      <div className="deck-toggle-switch__zones" style={{ flexDirection: orientation === 'vertical' ? 'column' : 'row' }}>
-        {(widget.positions ?? []).map((position, index) => {
-          const selected = !interactive && position.id === selectedPositionId
-          return (
-            <div
-              key={position.id}
-              className={`deck-toggle-switch__zone${selected ? ' deck-toggle-switch__zone--selected' : ''}`}
-              onPointerDown={
-                interactive && !dragMode
-                  ? (e) => {
-                      onZonePointerDown?.(index)
-                      try {
-                        e.currentTarget.setPointerCapture(e.pointerId)
-                      } catch {
-                        // best-effort, see CanvasWidget's handlePointerDown
-                      }
-                    }
-                  : !interactive
-                    ? // Same deliberate non-stopPropagation as RockerSwitchWidgetContent's
-                      // segment click — see its own comment for why the widget-level
-                      // select/drag handler still needs to see this pointerdown too.
-                      () => onPositionSelect?.(position)
-                    : undefined
-              }
-              onPointerUp={interactive && !dragMode ? () => onZonePointerUp?.(index) : undefined}
-              onPointerCancel={interactive && !dragMode ? () => onZonePointerUp?.(index) : undefined}
-            />
-          )
-        })}
-      </div>
-      {(widget.positions ?? []).map((position, index) => {
-        const angle = angleForIndex(index, count, orientation)
-        const labelRingRadius = bezelRadius + LABEL_RING_OFFSET
-        const dotVb = polarToCartesian(50, 50, labelRingRadius, angle)
-        return (position.labels ?? []).map((label) => {
-          const labelVb = labelAnchorPoint(dotVb, angle, labelRingRadius, label.labelDistance ?? LABEL_OFFSET, label.labelAnchor, LABEL_OFFSET)
-          const labelPx = viewBoxToPixel(labelVb.x, labelVb.y, widget.w, widget.h)
-          return (
-            <div key={label.id} className="deck-toggle-switch__label" style={{ left: labelPx.x, top: labelPx.y }}>
-              {renderWidgetLabel(label, trackColor, variables)}
-            </div>
-          )
-        })
-      })}
-      {renderWidgetLabels(widget.labels, trackColor, variables)}
+      {/* Closed cover full-size, blocking the whole switch; swapped for the
+          small tab below once open — never both at once, so there's no
+          pointer-events juggling on one element, just two differently-sized
+          ones. Either one has to swallow the pointer gesture itself (not
+          just decide the resulting click) — otherwise it'd still bubble up
+          to ToggleSwitchView's own root press/release wrapper AND (in drag
+          mode) this same element's ancestor .deck-toggle-switch, which owns
+          the drag handlers — either would let a tap on the guard leak
+          straight through to the switch it's supposed to be gating. */}
+      {widget.guardEnabled && !guardOpen && (
+        <div
+          className="deck-toggle-switch__guard"
+          style={{
+            width: widget.guardWidth ?? widget.w,
+            height: widget.guardHeight ?? widget.h,
+            background: guardColor,
+            borderRadius: widget.guardRadius ?? 6,
+            borderStyle: 'solid',
+            borderWidth: widget.guardBorderWidth ?? 1,
+            borderColor: guardBorderColor
+          }}
+          onPointerDown={interactive ? (e) => e.stopPropagation() : undefined}
+          onPointerUp={interactive ? (e) => e.stopPropagation() : undefined}
+          onPointerCancel={interactive ? (e) => e.stopPropagation() : undefined}
+          onClick={interactive ? onGuardToggle : undefined}
+        />
+      )}
+      {/* Open — the flipped-up cover's own hinge edge, still there to grab
+          and flip back down. Deliberately small and pinned to the top
+          rather than covering the switch, so it never blocks the reveal
+          this whole feature exists for. */}
+      {widget.guardEnabled && guardOpen && (
+        <div
+          className="deck-toggle-switch__guard-tab"
+          style={{
+            width: widget.guardWidth ?? widget.w,
+            background: guardColor,
+            borderRadius: widget.guardRadius ?? 6,
+            borderStyle: 'solid',
+            borderWidth: widget.guardBorderWidth ?? 1,
+            borderColor: guardBorderColor
+          }}
+          onPointerDown={interactive ? (e) => e.stopPropagation() : undefined}
+          onPointerUp={interactive ? (e) => e.stopPropagation() : undefined}
+          onPointerCancel={interactive ? (e) => e.stopPropagation() : undefined}
+          onClick={interactive ? onGuardToggle : undefined}
+        />
+      )}
     </div>
   )
 }

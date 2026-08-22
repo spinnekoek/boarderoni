@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useDashboardStore } from '../store'
+import { useDashboardStore, useGridSize } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useWidgetDrag } from '../useWidgetDrag'
 import { morphFootprint, normalizeMorphBlocks, blockNeighbors, neighborCount } from '@shared/morph'
@@ -125,7 +125,7 @@ export function MorphCanvasWidget({
   const selectedBlockId = useDashboardStore((s) => s.selectedBlockId)
   const selectBlock = useDashboardStore((s) => s.selectBlock)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
-  const gridSize = useEditorSettings((s) => s.gridSize)
+  const gridSize = useGridSize()
 
   const resizeState = useRef<ResizeState | null>(null)
   const [resizing, setResizing] = useState(false)

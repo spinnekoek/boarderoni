@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, withOpacity } from '@shared/color'
-import { resolveBorderColor, resolveColor, type VariableMap } from '@shared/expr'
+import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { RockerSwitchWidget, SwitchPosition } from '@shared/types'
 import { renderWidgetLabels } from './labels'
 
@@ -53,6 +53,7 @@ export function RockerSwitchWidgetContent({
   // (non-settling) case too: the segment previewed here is the same one
   // activeIndex settles onto right after anyway.
   const [pressedIndex, setPressedIndex] = useState<number | null>(null)
+  const rotateAngle = widget.rotateAngleExpr ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle) : widget.rotateAngle
 
   return (
     <div
@@ -73,7 +74,7 @@ export function RockerSwitchWidgetContent({
           borderColor,
           // Spins the shape/segments/position-labels together, in place —
           // widget.labels (rendered below, outside this div) stay upright.
-          transform: widget.rotateAngle ? `rotate(${widget.rotateAngle}deg)` : undefined
+          transform: rotateAngle ? `rotate(${rotateAngle}deg)` : undefined
         }}
       >
         {(widget.positions ?? []).map((position, index) => {

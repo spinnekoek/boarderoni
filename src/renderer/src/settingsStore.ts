@@ -11,7 +11,11 @@ const MAX_PROPERTIES_WIDTH = 900
 
 interface EditorSettings {
   snapToGrid: boolean
-  gridSize: number
+  // gridSize itself moved onto Dashboard/SubDeck (see store.ts's setGridSize
+  // and shared/subDecks.ts's getSubDeckGridSize) — it's per-screen now, not
+  // a single machine-local preference like this one, so it doesn't belong in
+  // this store anymore. snapToGrid (whether to snap at all) stays here; only
+  // the step size became per-screen.
   propertiesWidth: number
   // A DEVICE_PRESETS id, or a connected device's id — whichever the canvas's
   // dashed bounding box currently previews. Falls back to the first preset
@@ -25,7 +29,6 @@ interface EditorSettings {
   settingsModalOpen: boolean
   settingsFocusKind: string | null
   setSnapToGrid: (value: boolean) => void
-  setGridSize: (value: number) => void
   setPropertiesWidth: (value: number) => void
   setSelectedDeviceId: (id: string) => void
   openSettings: (focusKind?: string) => void
@@ -39,13 +42,11 @@ export const useEditorSettings = create<EditorSettings>()(
   persist(
     (set) => ({
       snapToGrid: true,
-      gridSize: 8,
       propertiesWidth: 260,
       selectedDeviceId: DEVICE_PRESETS[0].id,
       settingsModalOpen: false,
       settingsFocusKind: null,
       setSnapToGrid: (value) => set({ snapToGrid: value }),
-      setGridSize: (value) => set({ gridSize: Math.max(1, Math.round(value)) }),
       setPropertiesWidth: (value) =>
         set({ propertiesWidth: Math.min(MAX_PROPERTIES_WIDTH, Math.max(MIN_PROPERTIES_WIDTH, Math.round(value))) }),
       setSelectedDeviceId: (id) => set({ selectedDeviceId: id }),

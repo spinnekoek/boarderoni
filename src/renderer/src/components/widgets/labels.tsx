@@ -1,5 +1,5 @@
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { resolveFont } from '@shared/fonts'
+import { resolveFont, DEFAULT_LABEL_LINE_HEIGHT } from '@shared/fonts'
 import { withOpacity } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
 import { resolveLabelText, resolveTextColor, type VariableMap } from '@shared/expr'
@@ -60,11 +60,17 @@ export function renderWidgetLabel(label: WidgetLabel, backgroundColor: string, v
   const transformParts: string[] = []
   if (overflow !== 0) transformParts.push(`translate(${dx}px, ${dy}px)`)
   if (rotation !== 0) transformParts.push(`rotate(${rotation}deg)`)
+  const font = resolveFont(label.fontFamily)
   const labelStyle: React.CSSProperties = {
     padding: Math.max(padding, 0),
     transform: transformParts.length > 0 ? transformParts.join(' ') : undefined,
-    fontFamily: resolveFont(label.fontFamily).cssFamily,
+    fontFamily: font.cssFamily,
     fontSize: label.fontSize ?? DEFAULT_WIDGET_FONT_SIZE,
+    // Overrides the CSS class's own line-height (styles.css's
+    // .deck-button__label) for a custom font that needs a different value —
+    // see FontOption.lineHeight's own comment for why this can't just be a
+    // per-label field like fontSize/color are.
+    lineHeight: font.lineHeight ?? DEFAULT_LABEL_LINE_HEIGHT,
     color: withOpacity(resolvedTextColor.color, resolvedTextColor.opacity ?? label.textOpacity ?? 1),
     justifyContent: JUSTIFY_CONTENT[align],
     alignItems: ALIGN_ITEMS[verticalAlign],

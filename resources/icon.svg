@@ -1,0 +1,40 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1f26"/>
+      <stop offset="1" stop-color="#14161b"/>
+    </linearGradient>
+    <linearGradient id="keyHighlight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="glint" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4dfaff"/>
+      <stop offset="0.6" stop-color="#4dfaff"/>
+      <stop offset="1" stop-color="#ff3cdc"/>
+    </linearGradient>
+  </defs>
+
+  <!-- tile -->
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="4" y="4" width="504" height="504" rx="108" fill="none" stroke="#2a2e37" stroke-width="4"/>
+
+  <!-- 2x2 deck-button grid -->
+  <g>
+    <rect x="64" y="64" width="176" height="176" rx="36" fill="#5b8def"/>
+    <rect x="64" y="64" width="176" height="176" rx="36" fill="url(#keyHighlight)"/>
+
+    <rect x="272" y="64" width="176" height="176" rx="36" fill="#4dfaff"/>
+    <rect x="272" y="64" width="176" height="176" rx="36" fill="url(#keyHighlight)"/>
+
+    <rect x="64" y="272" width="176" height="176" rx="36" fill="#ff3cdc"/>
+    <rect x="64" y="272" width="176" height="176" rx="36" fill="url(#keyHighlight)"/>
+
+    <rect x="272" y="272" width="176" height="176" rx="36" fill="#e2a53d"/>
+    <rect x="272" y="272" width="176" height="176" rx="36" fill="url(#keyHighlight)"/>
+  </g>
+
+  <!-- selection glint ring, same cyan to magenta sweep as the editor's
+       selected-widget outline, marking one key as "active" -->
+  <rect x="264" y="56" width="192" height="192" rx="42" fill="none" stroke="url(#glint)" stroke-width="7"/>
+</svg>

@@ -1,37 +1,44 @@
 import { useRef, useState } from 'react'
-import { angleForIndex, isMiddlePosition } from './components/widgets/ToggleSwitchWidget'
+import { isMiddlePosition } from './components/widgets/ToggleSwitchWidget'
 import type { ToggleSwitchWidget } from '@shared/types'
 
-// Angle (degrees) of the pointer around the widget's center, 0 = up,
-// increasing clockwise — same convention (and unbounded, since a drag can go
-// past the widget's own bounds) as useDialSwitchDrag's own angleFromEvent.
-function angleFromEvent(e: React.PointerEvent, rect: DOMRect): number {
-  const cx = rect.left + rect.width / 2
-  const cy = rect.top + rect.height / 2
-  return (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI + 90
-}
-
-function angularDistance(a: number, b: number): number {
-  const diff = Math.abs(a - b) % 360
-  return diff > 180 ? 360 - diff : diff
-}
-
-// Which position's own angle (see angleForIndex) is closest to a raw drag
-// angle — same "snap to the nearest real position" idea as
-// useDialSwitchDrag's nearestPositionIndex.
-function nearestPositionIndex(widget: ToggleSwitchWidget, pointerAngle: number): number {
-  const orientation = widget.orientation ?? 'vertical'
+// Which position the drag currently resolves to — relative to wherever the
+// switch ALREADY was when the press started (baselineIndex), shifted by how
+// far the pointer has moved since (as a fraction of the widget's own
+// bounding box along its orientation axis), not by where the pointer
+// currently sits in absolute screen space.
+//
+// Two things this deliberately isn't, both tried first:
+// 1. Angle-from-center (the rotary approach useDialSwitchDrag uses) — a
+//    toggle's positions sit in a straight line, not around a circle, and
+//    angle-from-center gets wildly oversensitive near the pivot, which
+//    "start dragging from anywhere" (including near center) hits constantly.
+// 2. A plain linear fraction of the widget's own box (0 at the top/left
+//    edge, 1 at the bottom/right — what .deck-toggle-switch__zones' tap
+//    targets themselves use) — closer, but still absolute: pressing
+//    anywhere already inside the top zone's own screen area and dragging up
+//    a little instantly resolved to top, even from a switch resting at the
+//    bottom, because the very first post-deadzone sample already landed in
+//    top's territory. Physically backwards — grabbing a lever wherever your
+//    finger lands shouldn't teleport it to match your finger's position; it
+//    should move by however far your finger actually travels.
+// This version fixes both: baselineIndex's own zone-center is the fraction
+// you start from, and only the pointer's MOVEMENT since press (independent
+// of where that press physically landed) shifts it from there — so a drag
+// from bottom always sweeps through middle on the way to top, wherever on
+// the widget you happened to grab it.
+function relativePositionIndex(
+  widget: ToggleSwitchWidget,
+  baselineIndex: number,
+  startCoord: number,
+  currentCoord: number,
+  axisLength: number
+): number {
   const count = widget.positions.length
-  let best = 0
-  let bestDistance = Infinity
-  for (let i = 0; i < count; i++) {
-    const distance = angularDistance(pointerAngle, angleForIndex(i, count, orientation))
-    if (distance < bestDistance) {
-      bestDistance = distance
-      best = i
-    }
-  }
-  return best
+  if (axisLength <= 0) return baselineIndex
+  const baselineFraction = (baselineIndex + 0.5) / count
+  const fraction = baselineFraction + (currentCoord - startCoord) / axisLength
+  return Math.min(count - 1, Math.max(0, Math.floor(fraction * count)))
 }
 
 // The middle position a momentary throw springs back to — only exists with
@@ -42,6 +49,19 @@ function nearestPositionIndex(widget: ToggleSwitchWidget, pointerAngle: number):
 function middlePositionIndex(count: number): number {
   return count % 2 === 1 ? (count - 1) / 2 : -1
 }
+
+// Below this many pixels of straight-line movement from where the gesture
+// started, a press still counts as "hasn't dragged yet" — see
+// handlePointerDown/handlePointerMove below for why that distinction exists.
+const DRAG_DEADZONE_PX = 6
+
+// Stretches the axis relativePositionIndex measures movement against, so
+// crossing into the next position takes more actual finger travel than the
+// widget's own bare height/width would give it (1.75x — a full bottom-to-top
+// sweep on a 3-position switch now takes ~1.75x the widget's own height of
+// drag, same proportional spacing between each step's own threshold, just
+// wider throughout).
+const DRAG_RANGE_MULTIPLIER = 1.75
 
 // Drag interaction for a ToggleSwitchWidget in 'drag' mode (see
 // widget.interactionMode) — press anywhere on the widget and drag toward
@@ -55,6 +75,7 @@ function middlePositionIndex(count: number): number {
 // the middle position immediately.
 export function useToggleSwitchDrag(
   widget: ToggleSwitchWidget,
+  activeIndex: number,
   select: (index: number) => void
 ): {
   dragIndex: number | undefined
@@ -64,6 +85,22 @@ export function useToggleSwitchDrag(
 } {
   const [dragIndex, setDragIndex] = useState<number | undefined>(undefined)
   const draggingRef = useRef(false)
+  // Set the instant the gesture crosses DRAG_DEADZONE_PX away from its own
+  // start point — before that, this is a plain press sitting wherever it
+  // landed on the widget (which, unlike a set of separately-tappable tap-mode
+  // zones, is nowhere in particular relative to the current lever angle), not
+  // yet a drag toward some new position. Gates every position-changing effect
+  // below (the live dragIndex preview, a momentary position firing, and the
+  // final commit on release) so a press-and-release with no real movement
+  // never moves the switch off whatever it already showed — see this hook's
+  // own bug report: pressing near the top of a widget currently pointing down
+  // used to always snap it toward the top, even with zero actual drag.
+  const hasMovedRef = useRef(false)
+  const startRef = useRef<{ x: number; y: number } | null>(null)
+  // Captured once, at press-down — see relativePositionIndex's own comment
+  // for why this (not wherever the press physically landed) is what the
+  // drag's movement gets measured from.
+  const baselineIndexRef = useRef(0)
   // Which position (if any) is the currently-held momentary one — tracked
   // separately from dragIndex so a drag that passes over a momentary
   // position and back off it can tell "was that momentary throw already
@@ -82,8 +119,12 @@ export function useToggleSwitchDrag(
 
   function updateFromEvent(e: React.PointerEvent): number {
     const rect = e.currentTarget.getBoundingClientRect()
-    const angle = angleFromEvent(e, rect)
-    const index = nearestPositionIndex(widget, angle)
+    const start = startRef.current!
+    const orientation = widget.orientation ?? 'vertical'
+    const axisLength = (orientation === 'vertical' ? rect.height : rect.width) * DRAG_RANGE_MULTIPLIER
+    const startCoord = orientation === 'vertical' ? start.y : start.x
+    const currentCoord = orientation === 'vertical' ? e.clientY : e.clientX
+    const index = relativePositionIndex(widget, baselineIndexRef.current, startCoord, currentCoord, axisLength)
     setDragIndex(index)
     if (isMomentary(index)) {
       if (heldMomentaryIndexRef.current !== index) {
@@ -98,16 +139,29 @@ export function useToggleSwitchDrag(
 
   function handlePointerDown(e: React.PointerEvent): void {
     draggingRef.current = true
+    hasMovedRef.current = false
+    startRef.current = { x: e.clientX, y: e.clientY }
+    baselineIndexRef.current = activeIndex
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
       // best-effort, see CanvasWidget's handleResizePointerDown
     }
-    updateFromEvent(e)
+    // Deliberately NOT updateFromEvent(e) here — see hasMovedRef's own
+    // comment above. dragIndex stays undefined (rendering the widget's
+    // actual current position, per ToggleSwitchWidgetContent's own
+    // dragIndex ?? activeIndex) until real movement proves this is a drag
+    // and not a stationary press.
   }
 
   function handlePointerMove(e: React.PointerEvent): void {
     if (!draggingRef.current) return
+    if (!hasMovedRef.current) {
+      const start = startRef.current!
+      const distance = Math.hypot(e.clientX - start.x, e.clientY - start.y)
+      if (distance < DRAG_DEADZONE_PX) return
+      hasMovedRef.current = true
+    }
     updateFromEvent(e)
   }
 
@@ -119,6 +173,9 @@ export function useToggleSwitchDrag(
     } catch {
       // best-effort
     }
+    // Never moved past the deadzone — a plain tap, not a drag toward
+    // anything. Leave the switch exactly as it was; nothing to commit.
+    if (!hasMovedRef.current) return
     const index = updateFromEvent(e)
     setDragIndex(undefined)
     // A momentary position never "commits" as the new resting position —

@@ -6,6 +6,7 @@ import type {
   DcsBiosStatus,
   DcsBiosWorkerStats
 } from './dcsBiosTypes'
+import type { CustomFont } from './fonts'
 
 export interface KeypressAction {
   kind: 'keypress'
@@ -364,6 +365,16 @@ export interface ButtonWidget {
   // throws, or names a state that doesn't exist. Independent of isClicked —
   // the resolved state still gets swapped for the Clicked one while pressed.
   activeStateExpr?: string
+  // Spins the button in place around its own center; degrees, clockwise, 0
+  // is unrotated — same convention as RockerSwitchWidget.rotateAngle. Its
+  // labels (part of each WidgetState, rendered inside the same rotated
+  // element) rotate along with it; there's no separate widget-level labels
+  // array here to keep upright the way the rocker's legend does.
+  rotateAngle?: number
+  // Overrides rotateAngle with a live expression (degrees, same convention)
+  // when set — e.g. tying the tilt to a variable instead of a fixed value.
+  // Falls back to rotateAngle if unset or unresolved.
+  rotateAngleExpr?: string
 }
 
 // Grid-relative, NOT normalized to a 0-based origin — col/row 0 always maps
@@ -472,6 +483,7 @@ export interface GaugeTickSet {
   distance?: number
   showLabels?: boolean
   labelColor?: string
+  labelFontFamily?: string
   labelFontSize?: number
   // Decimal places shown on each tick's auto-generated value label. Default 0.
   labelDecimals?: number
@@ -754,6 +766,10 @@ export interface RockerSwitchWidget extends SwitchWidgetBase {
   // that rotated body on purpose, so a legend/title stays upright regardless
   // of how the switch itself is tilted.
   rotateAngle?: number
+  // Overrides rotateAngle with a live expression (degrees, same convention)
+  // when set — e.g. tying the tilt to a variable instead of a fixed value.
+  // Falls back to rotateAngle if unset or unresolved.
+  rotateAngleExpr?: string
   // Off (default): matches every other switch widget — the deployed view
   // client defaults to position 0 active until something's actually tapped,
   // then keeps whichever position was last tapped highlighted (see
@@ -839,8 +855,19 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   // scales off whichever value is effective, so shrinking/growing the bezel
   // doesn't leave labels anchored to the old rim position — leverLength
   // below is independent and NOT clamped to this, so a lever can be sized
-  // to intentionally poke out past a shrunk bezel.
+  // to intentionally poke out past a shrunk bezel. Applies the same
+  // regardless of bezelShape below — a hexagon's own "radius" is the
+  // distance from its center to each vertex, same as a circle's.
   bezelRadius?: number
+  // 'circle' (default/unset): today's plain disc. 'hexagon': a 6-sided bolt-
+  // head-style base instead, same radius/label-ring math either way — see
+  // hexagonPoints in ToggleSwitchWidget.tsx.
+  bezelShape?: 'circle' | 'hexagon'
+  // Hexagon only (a circle looks identical at any rotation, so this is
+  // simply ignored for 'circle') — degrees, clockwise, 0 is unrotated (one
+  // vertex pointing straight up), same convention as RockerSwitchWidget's
+  // own rotateAngle.
+  bezelRotation?: number
   // A second, concentric circle drawn on top of the bezel above — always
   // present regardless of position count (unlike circleColor et al. below,
   // which are the separate middle-position-only marker). Defaults to radius
@@ -898,6 +925,34 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   barBorderColor?: string
   barBorderWidth?: number
   barBorderRadius?: number
+  // Optional flip-up safety cover, drawn on top of everything else in
+  // ToggleSwitchWidget.tsx (bezel, lever, both label sets) — off (default/
+  // unset) draws no guard at all, identical to every dashboard saved before
+  // this existed. Closed (the local per-client default — see ToggleSwitchView
+  // in ViewCanvas.tsx), it's an opaque colored box that catches the tap
+  // itself instead of the switch beneath it; tapping it flips open, at which
+  // point it's rendered pointer-events:none so taps fall straight through to
+  // the switch's own zones underneath — same click-through technique
+  // MorphButtonWidget's own wrapper uses (see .view-canvas__widget--morph in
+  // styles.css). guard's own borderColor/borderColorExpr/borderOpacity (it's
+  // a ColorAppearance, same as track/fill above) cover its border color;
+  // guardBorderWidth is the one border knob ColorAppearance doesn't carry.
+  guardEnabled?: boolean
+  guard?: ColorAppearance
+  guardBorderWidth?: number
+  guardRadius?: number
+  // The guard's own size, independent of the switch's own w/h — centered
+  // over it. Unset defaults to the full widget box (matches the switch's own
+  // bounds), same "unset = today's behavior" convention as everything else
+  // here.
+  guardWidth?: number
+  guardHeight?: number
+  // Drives open/closed from a Variable instead of local taps — same
+  // "expression overrides local tap state" convention as
+  // SwitchWidgetBase.activePositionExpr, e.g. tying the guard to the same
+  // variable the switch itself reports so it stays open once the switch is
+  // already thrown.
+  guardOpenExpr?: string
 }
 
 // Shared shape geometry for a small marker — either one of a DialSwitchWidget's
@@ -1427,6 +1482,14 @@ export interface SubDeck {
   id: string
   name: string
   widgets: Widget[]
+  // Editor-only (never read by the deployed view client — snapping/nudging
+  // is a design-time concern) and deliberately NOT inherited from the parent
+  // Dashboard's own gridSize when a sub-deck is first created — each screen
+  // is its own canvas, often at a different scale/widget density than the
+  // main view, so defaulting to whatever the main view happens to use would
+  // just be a different arbitrary guess. Unset falls back to
+  // DEFAULT_GRID_SIZE (shared/constants.ts), same as Dashboard.gridSize.
+  gridSize?: number
 }
 
 export interface Dashboard {
@@ -1461,6 +1524,11 @@ export interface Dashboard {
   // main/index.ts). See SubDeck's own comment for the one-level-deep and
   // shared-background/variables/eventSources rules.
   subDecks?: SubDeck[]
+  // The main view's own grid size — see SubDeck.gridSize's own comment for
+  // why this is per-screen rather than shared across every screen in the
+  // deck (it used to be a single editor-wide preference, not even
+  // deck-scoped, before this was added).
+  gridSize?: number
 }
 
 export interface DeviceInfo {
@@ -1562,6 +1630,18 @@ export type ClientToServer =
   | { type: 'rest-sources:update'; sources: RestDataSource[] }
   | { type: 'rest-sources:regenerate-token'; sourceId: string }
   | { type: 'rest-sources:delete'; sourceId: string }
+  // App-wide, not per-deck (see main/customFonts.ts) — same "admin action,
+  // edit-role only, full list broadcast back either way" shape as
+  // rest-sources:*, except the resulting fonts:list also goes to 'view'
+  // clients (see broadcastCustomFonts in main/index.ts), since they render
+  // labels that may use a custom font too, not just the desktop editor.
+  | { type: 'fonts:get' }
+  | { type: 'fonts:upload'; dataUrl: string; label: string; filename: string }
+  | { type: 'fonts:delete'; fontId: string }
+  // null clears back to DEFAULT_LABEL_LINE_HEIGHT (labels.tsx) — see
+  // CustomFont.lineHeight's own comment in shared/fonts.ts for why this is
+  // per-font rather than a per-label field.
+  | { type: 'fonts:update'; fontId: string; lineHeight: number | null }
   | { type: 'screen-capture:list-displays' }
   // Opens a native full-screen overlay (see main/screenCapture.ts) on the
   // chosen display for a drag-to-select rectangle. Unlike
@@ -1637,6 +1717,12 @@ export type ServerToClient =
   // used for /api/apk-info) so the Settings panel can build
   // http://<lanAddress>:<port> without a second HTTP round trip.
   | { type: 'rest-sources:list'; sources: RestDataSourceStatus[]; lanAddress: string | null }
+  // Reply to fonts:get, and pushed to every connected client (both roles —
+  // see broadcastCustomFonts) after a fonts:upload/delete, plus once more as
+  // part of sendInitialState for a client that just got real dashboard
+  // content — same "full current list either way" reasoning as
+  // rest-sources:list.
+  | { type: 'fonts:list'; fonts: CustomFont[] }
   | { type: 'screen-capture:displays'; displays: { id: number; label: string; bounds: ScreenRegion }[] }
   // Targeted at the ONE socket that triggered the navigate-subdeck action,
   // never broadcast — which deck view is "current" is per-client UI state,

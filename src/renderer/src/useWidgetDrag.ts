@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { useDashboardStore } from './store'
+import { useDashboardStore, useGridSize } from './store'
 import { useEditorSettings } from './settingsStore'
 import { getSubDeckWidgets } from '@shared/subDecks'
 import type { Widget } from '@shared/types'
@@ -30,7 +30,7 @@ export function useWidgetDrag(
   const selectWidget = useDashboardStore((s) => s.selectWidget)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
-  const gridSize = useEditorSettings((s) => s.gridSize)
+  const gridSize = useGridSize()
 
   const selected = selectedWidgetIds.includes(widget.id)
   const dragState = useRef<DragState | null>(null)

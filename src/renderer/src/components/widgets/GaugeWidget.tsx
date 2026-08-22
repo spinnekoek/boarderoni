@@ -112,6 +112,7 @@ function gaugeTicks({
               id: `${tickSet.id}-${i}`,
               text: value.toFixed(tickSet.labelDecimals ?? 0),
               textColor: tickSet.labelColor,
+              fontFamily: tickSet.labelFontFamily,
               fontSize: tickSet.labelFontSize,
               align: 'center',
               verticalAlign: 'center'
@@ -203,6 +204,18 @@ function GaugeArc({
 
   return (
     <>
+      {/* Tick labels painted BEFORE the arc's own SVG (needle included) below
+          — rendered as plain absolutely-positioned divs rather than inside
+          that SVG (see this function's own leading comment for why), so
+          without this ordering they'd sit on top of the needle wherever the
+          two overlap instead of the needle sweeping over them, the way a
+          real gauge's pointer physically covers the tick marks/numbers
+          beneath it. Passive widget (GaugeWidgetContent has no pointer
+          handlers at all — see its own comment below), so this is purely a
+          paint-order change. */}
+      {tickResults.map((r) => (
+        <div key={r.id}>{r.labels}</div>
+      ))}
       <svg className="deck-gauge__arc" viewBox={`${viewBoxRect.x} ${viewBoxRect.y} ${viewBoxRect.width} ${viewBoxRect.height}`}>
         <path d={describeArc(0, 0, ARC_RADIUS, startAngle, endAngle)} stroke={trackColor} strokeWidth={ARC_STROKE_WIDTH} fill="none" strokeLinecap="round" />
         <path
@@ -252,9 +265,6 @@ function GaugeArc({
           </>
         )}
       </svg>
-      {tickResults.map((r) => (
-        <div key={r.id}>{r.labels}</div>
-      ))}
     </>
   )
 }

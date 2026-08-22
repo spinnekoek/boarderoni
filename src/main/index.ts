@@ -50,12 +50,14 @@ import {
   type WidgetEventKind
 } from '../shared/types'
 import { getEventSteps } from '../shared/widgetEvents'
+import { FONT_MIME_BY_EXTENSION, fontExtension } from '../shared/fonts'
 import { findSubDeck, findWidgetAnywhere, allDeckWidgets } from '../shared/subDecks'
 import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression } from '../shared/expr'
 import { extractPlaceholders } from '../shared/restPlaceholders'
 import { EVENT_SOURCE_PRODUCERS } from './eventSourceProducers'
 import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuality, addMjpegViewer } from './screenCapture'
 import { getAppSettings, updateAppSettings } from './appSettings'
+import { getCustomFonts, addCustomFont, deleteCustomFont, updateCustomFontLineHeight, customFontFile } from './customFonts'
 import { getRestDataSources, updateRestDataSources, createRestDataSource, regenerateRestDataSourceToken } from './restDataSources'
 import { syncRestIncomingServers, getRestListenStatus } from './restIncoming'
 import { isDeviceApproved, approveDevice, revokeDevice, renameApprovedDevice, listApprovedDevices } from './deviceApproval'
@@ -520,6 +522,51 @@ function serveBackgroundImage(res: ServerResponse, deckId: string): void {
       return
     }
     res.writeHead(200, { 'Content-Type': room.dashboard.backgroundImageMime!, 'Cache-Control': 'public, max-age=31536000, immutable' })
+    res.end(data)
+  })
+}
+
+// GET /fonts/:id — unlike /background-image, `id` is server-generated
+// (randomUUID, see addCustomFont) rather than a deck id already validated
+// elsewhere, so it gets its own DECK_ID_PATTERN-shaped check here before
+// touching the filesystem. Immutable long-cache is safe (unlike the
+// background image's own versioned cache-busting) because a given id's
+// bytes never change after upload — deleting one frees the id rather than
+// reusing it for different content.
+function serveCustomFont(res: ServerResponse, id: string): void {
+  if (!DECK_ID_PATTERN.test(id)) {
+    res.writeHead(404)
+    res.end('Not found')
+    return
+  }
+  const font = getCustomFonts().find((f) => f.id === id)
+  if (!font) {
+    res.writeHead(404)
+    res.end('Not found')
+    return
+  }
+  readFile(customFontFile(id), (err, data) => {
+    if (err) {
+      res.writeHead(404)
+      res.end('Not found')
+      return
+    }
+    const mime = FONT_MIME_BY_EXTENSION[fontExtension(font.filename)] ?? 'application/octet-stream'
+    // Unlike /background-image (a plain <img src>, which browsers load
+    // cross-origin with no CORS header needed), a font referenced from
+    // @font-face's src: url() is CORS-checked even for a simple GET — every
+    // browser refuses to actually use it cross-origin without this, silently
+    // falling back to the next font in the stack (Times New Roman, if
+    // nothing else matches) instead of erroring loudly. Origin genuinely
+    // differs from the page's own in dev (Vite's :5173 vs this server's own
+    // SERVER_PORT) — same reasoning `npm run dev` startup output already
+    // exists to explain elsewhere. `*` is fine: this is public, unauthenticated
+    // font bytes, nothing credentialed being exposed.
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Access-Control-Allow-Origin': '*'
+    })
     res.end(data)
   })
 }
@@ -1011,6 +1058,11 @@ const httpServer = createServer((req, res) => {
     return
   }
 
+  if (url.pathname.startsWith('/fonts/')) {
+    serveCustomFont(res, url.pathname.slice('/fonts/'.length))
+    return
+  }
+
   if (url.pathname === '/screen-capture/frame') {
     serveScreenCaptureFrame(res, url.searchParams.get('deck') ?? '', url.searchParams.get('widget') ?? '')
     return
@@ -1083,6 +1135,11 @@ const HEARTBEAT_INTERVAL_MS = 30_000
 function sendInitialState(ws: WebSocket, room: DeckRoom): void {
   ws.send(JSON.stringify({ type: 'dashboard:sync', dashboard: room.dashboard } satisfies ServerToClient))
   ws.send(JSON.stringify({ type: 'devices:sync', devices: Array.from(room.devices.values()) } satisfies ServerToClient))
+  // App-wide, not room-scoped (see broadcastCustomFonts) — sent here too so
+  // a client renders any custom-font labels correctly from its very first
+  // dashboard:sync instead of a brief flash of fallback font until a later
+  // fonts:get.
+  ws.send(JSON.stringify({ type: 'fonts:list', fonts: getCustomFonts() } satisfies ServerToClient))
   ws.send(JSON.stringify({ type: 'dcsbios:status', ...getDcsBiosStatus() } satisfies ServerToClient))
   const stats = getDcsBiosWorkerStats()
   if (stats) ws.send(JSON.stringify({ type: 'dcsbios:stats', ...stats } satisfies ServerToClient))
@@ -1337,6 +1394,18 @@ function broadcastRestSources(): void {
   const payload = JSON.stringify(restSourcesPayload())
   for (const [sock, sctx] of socketContext) {
     if (sctx.role === 'edit' && sock.readyState === WebSocket.OPEN) sock.send(payload)
+  }
+}
+
+// Unlike broadcastRestSources, not role-gated — 'view' clients render
+// labels too, and one might already be showing a dashboard that uses a
+// custom font uploaded (or removed) mid-session, not just the desktop
+// editor that manages the library. See fonts:list's own comment in
+// shared/types.ts.
+function broadcastCustomFonts(): void {
+  const payload = JSON.stringify({ type: 'fonts:list', fonts: getCustomFonts() } satisfies ServerToClient)
+  for (const [sock] of socketContext) {
+    if (sock.readyState === WebSocket.OPEN) sock.send(payload)
   }
 }
 
@@ -2025,6 +2094,33 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         broadcastRestSources()
         break
       }
+      case 'fonts:get': {
+        // Unlike rest-sources:get, not role-gated — see broadcastCustomFonts's
+        // own comment for why 'view' needs this list too.
+        ws.send(JSON.stringify({ type: 'fonts:list', fonts: getCustomFonts() } satisfies ServerToClient))
+        break
+      }
+      case 'fonts:upload': {
+        // Managing the library is still an editor-only action, same as every
+        // other rest-sources:*/device:list-approved admin action — just the
+        // resulting broadcast isn't role-gated the same way theirs are.
+        if (ctx.role !== 'edit') break
+        addCustomFont(message.dataUrl, message.label, message.filename)
+        broadcastCustomFonts()
+        break
+      }
+      case 'fonts:delete': {
+        if (ctx.role !== 'edit') break
+        deleteCustomFont(message.fontId)
+        broadcastCustomFonts()
+        break
+      }
+      case 'fonts:update': {
+        if (ctx.role !== 'edit') break
+        updateCustomFontLineHeight(message.fontId, message.lineHeight)
+        broadcastCustomFonts()
+        break
+      }
       case 'screen-capture:list-displays': {
         ws.send(JSON.stringify({ type: 'screen-capture:displays', displays: listDisplays() } satisfies ServerToClient))
         break
@@ -2175,6 +2271,7 @@ function createEditorWindow(): void {
     y: state.y,
     width: state.width,
     height: state.height,
+    icon: join(__dirname, '../../resources/icon.ico'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js')
     }

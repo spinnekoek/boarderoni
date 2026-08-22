@@ -1,3 +1,4 @@
+import { DEFAULT_GRID_SIZE } from './constants'
 import type { Dashboard, SubDeck, Widget } from './types'
 
 export function findSubDeck(source: Pick<Dashboard, 'subDecks'>, subDeckId: string): SubDeck | undefined {
@@ -27,6 +28,27 @@ export function setSubDeckWidgets(dashboard: Dashboard, subDeckId: string | null
   return {
     ...dashboard,
     subDecks: (dashboard.subDecks ?? []).map((sd) => (sd.id === subDeckId ? { ...sd, widgets } : sd))
+  }
+}
+
+// Read/write-side pair for a view's own gridSize — same "main deck vs. named
+// sub-deck" split as getSubDeckWidgets/setSubDeckWidgets above, just for one
+// number instead of the whole widget array. Falls back to
+// DEFAULT_GRID_SIZE, never undefined, so every caller (Toolbar's input,
+// CanvasWidget/MorphCanvasWidget/useWidgetDrag's snap math,
+// useEditorShortcuts' nudge step) can use the result directly with no `??`
+// of its own.
+export function getSubDeckGridSize(source: Pick<Dashboard, 'gridSize' | 'subDecks'>, subDeckId: string | null | undefined): number {
+  if (!subDeckId) return source.gridSize ?? DEFAULT_GRID_SIZE
+  return findSubDeck(source, subDeckId)?.gridSize ?? DEFAULT_GRID_SIZE
+}
+
+export function setSubDeckGridSize(dashboard: Dashboard, subDeckId: string | null | undefined, gridSize: number): Dashboard {
+  if (!subDeckId) return { ...dashboard, gridSize }
+  if (!findSubDeck(dashboard, subDeckId)) return dashboard
+  return {
+    ...dashboard,
+    subDecks: (dashboard.subDecks ?? []).map((sd) => (sd.id === subDeckId ? { ...sd, gridSize } : sd))
   }
 }
 
@@ -66,7 +88,11 @@ export function reconcileDashboard(oldDashboard: Dashboard, newDashboard: Dashbo
   let subDecksChanged = (oldDashboard.subDecks?.length ?? 0) !== (newDashboard.subDecks?.length ?? 0)
   const subDecks = (newDashboard.subDecks ?? []).map((sd) => {
     const old = oldSubDecksById.get(sd.id)
-    if (!old || old.name !== sd.name) {
+    // gridSize checked alongside name — same reasoning: both are plain
+    // fields on the sub-deck object itself (not inside `widgets`), so a
+    // change to either has to force a fresh object through, or the old one
+    // would keep getting returned below and the update would silently drop.
+    if (!old || old.name !== sd.name || old.gridSize !== sd.gridSize) {
       subDecksChanged = true
       return sd
     }

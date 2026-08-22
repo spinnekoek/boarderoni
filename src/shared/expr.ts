@@ -85,6 +85,16 @@ export function resolveNumericExpr(expr: string, variables: VariableMap): number
   return result.value
 }
 
+// Same mechanism as resolveNumericExpr, but coerced to a boolean (e.g.
+// ToggleSwitchWidget.guardOpenExpr) — any truthy/falsy result works, not
+// just a literal `true`/`false`, so `return variables.GEAR_HANDLE;` is valid
+// as-is. A thrown/failing expression returns undefined so callers fall back
+// to their own default the same way.
+export function resolveBooleanExpr(expr: string, variables: VariableMap): boolean | undefined {
+  const result = tryEvaluateExpression(expr, variables)
+  return result.ok ? Boolean(result.value) : undefined
+}
+
 export function resolveColor(box: ColorAppearance, variables: VariableMap): ResolvedColor {
   if (!box.colorExpr) return { color: box.color }
   const resolved = evaluateColorExpression(box.colorExpr, variables)

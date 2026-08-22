@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useDashboardStore } from '../store'
+import { useDashboardStore, useGridSize } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useConfirmStore } from '../confirmStore'
 import { nextId, isSectionOpen, setSectionOpen, getLastDcsAircraft, setLastDcsAircraft } from '../id'
 import { usePropertiesExpansionStore, expandAllSections, collapseAllSections } from '../propertiesExpansionStore'
-import { FONT_OPTIONS, resolveFont } from '@shared/fonts'
+import { FONT_OPTIONS, resolveFont, customFontToOption } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, pickAutoBorderColor, pickLegibleTextColor } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
 import { deriveClickedState } from '@shared/states'
@@ -65,6 +65,7 @@ import type { DcsBiosCommandCatalogEntry, DcsBiosInputInterface } from '@shared/
 
 const ACTIVE_STATE_EXPR_PLACEHOLDER = "return variables.BATTERY_SW === 0 ? 'Default' : 'Active';"
 const ACTIVE_POSITION_EXPR_PLACEHOLDER = "return variables.GEAR_HANDLE === 1 ? 'Down' : 'Up';"
+const GUARD_OPEN_EXPR_PLACEHOLDER = 'return variables.GEAR_HANDLE === 1;'
 const LABEL_TEXT_EXPR_PLACEHOLDER = 'return "Count: " + variables.my_variable + " {{icon:fa-image}}";'
 
 // Header shown at the top of the properties panel for whichever widget is
@@ -342,6 +343,11 @@ function LabelFields({
   const isAutoTextColor = label.textColor == null && !isTextColorExpr
   const isTextExpr = label.textExpr !== undefined
   const [textExprExpanded, setTextExprExpanded] = useState(false)
+  // Every LabelFields instance reads this directly (rather than the 9-odd
+  // call sites threading it down as a prop) — same "just read the store"
+  // convention as any other component-local hook use in this file.
+  const customFonts = useDashboardStore((s) => s.customFonts)
+  const fontOptions = [...FONT_OPTIONS, ...customFonts.map(customFontToOption)]
 
   return (
     <>
@@ -411,7 +417,7 @@ function LabelFields({
           onChange={(e) => onChange({ fontFamily: e.target.value })}
           style={{ fontFamily: resolveFont(label.fontFamily).cssFamily }}
         >
-          {FONT_OPTIONS.map((f) => (
+          {fontOptions.map((f) => (
             <option key={f.id} value={f.id} style={{ fontFamily: f.cssFamily }}>
               {f.label}
               {f.monospace ? ' (mono)' : ''}
@@ -541,14 +547,14 @@ function LabelFields({
           {(label.labelAnchor ?? 'auto') === 'auto' && (
             <label className="properties__field">
               <span>Label distance</span>
-              <input
-                type="number"
-                min={0}
-                value={label.labelDistance ?? 12}
-                onChange={(e) => onChange({ labelDistance: Math.max(0, Number(e.target.value)) })}
-              />
+              <input type="number" value={label.labelDistance ?? 12} onChange={(e) => onChange({ labelDistance: Number(e.target.value) })} />
             </label>
           )}
+          <p className="properties__hint">
+            Distance outward from the ring/pole along this detent&rsquo;s own angle — negative pulls the label in past the ring, toward
+            (and, if pushed far enough, through) center. Independent of Padding above, which only moves the label within its own small
+            box and clamps hard once it exceeds that box&rsquo;s size.
+          </p>
         </>
       )}
 
@@ -2385,6 +2391,11 @@ export function PropertiesPanel(): React.JSX.Element {
   const selectedBlockId = useDashboardStore((s) => s.selectedBlockId)
   const selectBlock = useDashboardStore((s) => s.selectBlock)
   const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
+  // Built-in + uploaded fonts, for pickers that aren't a LabelFields instance
+  // (which reads the store the same way itself) — e.g. GaugeWidget's own
+  // tick-set label font, below.
+  const customFonts = useDashboardStore((s) => s.customFonts)
+  const fontOptions = [...FONT_OPTIONS, ...customFonts.map(customFontToOption)]
   const setActiveStateIndex = useDashboardStore((s) => s.setActiveStateIndex)
   const confirm = useConfirmStore((s) => s.confirm)
 
@@ -2432,7 +2443,7 @@ export function PropertiesPanel(): React.JSX.Element {
   const propertiesWidth = useEditorSettings((s) => s.propertiesWidth)
   const setPropertiesWidth = useEditorSettings((s) => s.setPropertiesWidth)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
-  const gridSize = useEditorSettings((s) => s.gridSize)
+  const gridSize = useGridSize()
   const resizeState = useRef<ResizeState | null>(null)
   const dragStateIndex = useRef<number | null>(null)
   const [activeStateExprExpanded, setActiveStateExprExpanded] = useState(false)
@@ -2974,6 +2985,21 @@ export function PropertiesPanel(): React.JSX.Element {
 
                   {tickSet.showLabels && (
                     <>
+                      <label className="properties__field">
+                        <span>Label font</span>
+                        <select
+                          value={resolveFont(tickSet.labelFontFamily).id}
+                          onChange={(e) => patchTickSet(tickSet.id, { labelFontFamily: e.target.value })}
+                          style={{ fontFamily: resolveFont(tickSet.labelFontFamily).cssFamily }}
+                        >
+                          {fontOptions.map((f) => (
+                            <option key={f.id} value={f.id} style={{ fontFamily: f.cssFamily }}>
+                              {f.label}
+                              {f.monospace ? ' (mono)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <div className="properties__grid2">
                         <label className="properties__field">
                           <span>Label font size</span>
@@ -3696,11 +3722,48 @@ export function PropertiesPanel(): React.JSX.Element {
 
           <label className="properties__field">
             <span>Rotate angle</span>
-            <input type="number" value={sw.rotateAngle ?? 0} onChange={(e) => patchSwitch({ rotateAngle: Number(e.target.value) })} />
+            <div className="properties__file-row">
+              {sw.rotateAngleExpr !== undefined ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input type="number" value={sw.rotateAngle ?? 0} onChange={(e) => patchSwitch({ rotateAngle: Number(e.target.value) })} />
+              )}
+              {sw.rotateAngleExpr !== undefined ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed angle instead"
+                  onClick={() => patchSwitch({ rotateAngleExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the angle with an expression"
+                  onClick={() => patchSwitch({ rotateAngleExpr: '' })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
           </label>
+          {sw.rotateAngleExpr !== undefined && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={2}
+                placeholder="return variables.my_variable;"
+                value={sw.rotateAngleExpr ?? ''}
+                onChange={(e) => patchSwitch({ rotateAngleExpr: e.target.value })}
+              />
+            </label>
+          )}
           <p className="properties__hint">
             Spins the shape/segments and each position&rsquo;s own labels together. The widget&rsquo;s own Labels below (a legend/title)
-            stay upright.
+            stay upright. Falls back to the fixed angle if the expression is unset or fails to evaluate.
           </p>
 
           <label className="properties__checkbox">
@@ -3855,6 +3918,9 @@ export function PropertiesPanel(): React.JSX.Element {
     const isTrackExpr = sw.track.colorExpr !== undefined
     const isFillExpr = sw.fill.colorExpr !== undefined
     const isBorderExpr = sw.borderColorExpr !== undefined
+    const isGuardExpr = sw.guard?.colorExpr !== undefined
+    const isGuardBorderExpr = sw.guard?.borderColorExpr !== undefined
+    const isGuardOpenExpr = sw.guardOpenExpr !== undefined
     const canvasPositionIndex = selectedBlockId ? sw.positions.findIndex((p) => p.id === selectedBlockId) : -1
     const effectiveActivePositionIndex = canvasPositionIndex >= 0 ? canvasPositionIndex : activePositionIndex
 
@@ -3909,6 +3975,17 @@ export function PropertiesPanel(): React.JSX.Element {
           </label>
 
           <label className="properties__field">
+            <span>Base shape</span>
+            <select
+              value={sw.bezelShape ?? 'circle'}
+              onChange={(e) => patchSwitch({ bezelShape: e.target.value === 'circle' ? undefined : (e.target.value as ToggleSwitchWidget['bezelShape']) })}
+            >
+              <option value="circle">Circle</option>
+              <option value="hexagon">Hexagon</option>
+            </select>
+          </label>
+
+          <label className="properties__field">
             <span>Base circle size</span>
             <input
               type="number"
@@ -3917,6 +3994,13 @@ export function PropertiesPanel(): React.JSX.Element {
               onChange={(e) => patchSwitch({ bezelRadius: Math.max(1, Number(e.target.value)) })}
             />
           </label>
+
+          {(sw.bezelShape ?? 'circle') === 'hexagon' && (
+            <label className="properties__field">
+              <span>Base rotation</span>
+              <input type="number" value={sw.bezelRotation ?? 0} onChange={(e) => patchSwitch({ bezelRotation: Number(e.target.value) })} />
+            </label>
+          )}
 
           <label className="properties__field">
             <span>Interaction</span>
@@ -4201,6 +4285,142 @@ export function PropertiesPanel(): React.JSX.Element {
             </div>
           </PropertiesSection>
         )}
+
+        <PropertiesSection title="Safety guard">
+          <label className="properties__checkbox">
+            <input type="checkbox" checked={sw.guardEnabled ?? false} onChange={(e) => patchSwitch({ guardEnabled: e.target.checked })} />
+            Enabled
+          </label>
+          <p className="properties__hint">
+            A flip-up cover over the whole switch — closed by default, blocking every tap until you tap it open, which reveals (and
+            re-enables taps on) the switch underneath.
+          </p>
+
+          {sw.guardEnabled && (
+            <>
+              <div className="properties__field">
+                <span>Cover color</span>
+                <ColorPickerButton
+                  value={sw.guard?.color ?? '#c0392b'}
+                  onChange={(color) => patchSwitch({ guard: { ...sw.guard, color, colorExpr: undefined } })}
+                  isExpr={isGuardExpr}
+                  exprValue={sw.guard?.colorExpr ?? ''}
+                  onExprChange={(code) => patchSwitch({ guard: { ...sw.guard, colorExpr: code } })}
+                  onEnterExpr={() => patchSwitch({ guard: { ...sw.guard, colorExpr: sw.guard?.colorExpr ?? '' } })}
+                  onClearExpr={() => patchSwitch({ guard: { ...sw.guard, colorExpr: undefined } })}
+                  opacity={sw.guard?.backgroundOpacity ?? 1}
+                  onOpacityChange={(v) => patchSwitch({ guard: { ...sw.guard, backgroundOpacity: v } })}
+                />
+              </div>
+
+              <div className="properties__field">
+                <span>Border color</span>
+                <ColorPickerButton
+                  value={sw.guard?.borderColor ?? DEFAULT_WIDGET_COLOR}
+                  onChange={(color) => patchSwitch({ guard: { ...sw.guard, borderColor: color, borderColorExpr: undefined } })}
+                  isExpr={isGuardBorderExpr}
+                  exprValue={sw.guard?.borderColorExpr ?? ''}
+                  onExprChange={(code) => patchSwitch({ guard: { ...sw.guard, borderColorExpr: code } })}
+                  onEnterExpr={() => patchSwitch({ guard: { ...sw.guard, borderColorExpr: sw.guard?.borderColorExpr ?? '' } })}
+                  onClearExpr={() => patchSwitch({ guard: { ...sw.guard, borderColorExpr: undefined } })}
+                  opacity={sw.guard?.borderOpacity ?? 1}
+                  onOpacityChange={(v) => patchSwitch({ guard: { ...sw.guard, borderOpacity: v } })}
+                />
+              </div>
+
+              <label className="properties__field">
+                <span>Border width</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={sw.guardBorderWidth ?? 1}
+                  onChange={(e) => patchSwitch({ guardBorderWidth: Math.max(0, Number(e.target.value)) })}
+                />
+              </label>
+
+              <label className="properties__field">
+                <span>Corner radius</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={sw.guardRadius ?? 6}
+                  onChange={(e) => patchSwitch({ guardRadius: Math.max(0, Number(e.target.value)) })}
+                />
+              </label>
+
+              <div className="properties__divider" />
+
+              <span className="properties__section-label">Size</span>
+              <p className="properties__hint">Independent of the switch's own size — centered over it. Leave blank to match it exactly.</p>
+              <div className="properties__grid2">
+                <label className="properties__field">
+                  <span>W</span>
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder={String(sw.w)}
+                    value={sw.guardWidth ?? ''}
+                    onChange={(e) => patchSwitch({ guardWidth: e.target.value === '' ? undefined : Math.max(1, Number(e.target.value)) })}
+                  />
+                </label>
+                <label className="properties__field">
+                  <span>H</span>
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder={String(sw.h)}
+                    value={sw.guardHeight ?? ''}
+                    onChange={(e) => patchSwitch({ guardHeight: e.target.value === '' ? undefined : Math.max(1, Number(e.target.value)) })}
+                  />
+                </label>
+              </div>
+
+              <div className="properties__divider" />
+
+              <label className="properties__field">
+                <span>Open when</span>
+                <div className="properties__file-row">
+                  {isGuardOpenExpr ? (
+                    <span className="properties__hint-inline">Using expression below</span>
+                  ) : (
+                    <span className="properties__hint-inline">Local tap (starts closed)</span>
+                  )}
+                  {isGuardOpenExpr ? (
+                    <button
+                      type="button"
+                      className="color-picker-button__clear"
+                      title="Go back to local tap control"
+                      onClick={() => patchSwitch({ guardOpenExpr: undefined })}
+                    >
+                      ×
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="color-picker-button__fx"
+                      title="Drive open/closed from an expression"
+                      onClick={() => patchSwitch({ guardOpenExpr: '' })}
+                    >
+                      ƒx
+                    </button>
+                  )}
+                </div>
+              </label>
+              {isGuardOpenExpr && (
+                <label className="properties__field">
+                  <span>Expression</span>
+                  <textarea
+                    className="properties__code"
+                    rows={2}
+                    placeholder={GUARD_OPEN_EXPR_PLACEHOLDER}
+                    value={sw.guardOpenExpr ?? ''}
+                    onChange={(e) => patchSwitch({ guardOpenExpr: e.target.value })}
+                  />
+                </label>
+              )}
+            </>
+          )}
+        </PropertiesSection>
 
         <SwitchPositionsEditor
           positions={sw.positions}
@@ -5449,6 +5669,58 @@ export function PropertiesPanel(): React.JSX.Element {
             {widget.blocks.length} block{widget.blocks.length === 1 ? '' : 's'} — select the widget on the canvas and use its +
             handles to add more.
           </p>
+        )}
+
+        {widget.type === 'button' && (
+          <>
+            <div className="properties__divider" />
+
+            <label className="properties__field">
+              <span>Rotate angle</span>
+              <div className="properties__file-row">
+                {widget.rotateAngleExpr !== undefined ? (
+                  <span className="properties__hint-inline">Using expression below</span>
+                ) : (
+                  <input type="number" value={widget.rotateAngle ?? 0} onChange={(e) => patch({ rotateAngle: Number(e.target.value) })} />
+                )}
+                {widget.rotateAngleExpr !== undefined ? (
+                  <button
+                    type="button"
+                    className="color-picker-button__clear"
+                    title="Use a fixed angle instead"
+                    onClick={() => patch({ rotateAngleExpr: undefined })}
+                  >
+                    ×
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="color-picker-button__fx"
+                    title="Compute the angle with an expression"
+                    onClick={() => patch({ rotateAngleExpr: '' })}
+                  >
+                    ƒx
+                  </button>
+                )}
+              </div>
+            </label>
+            {widget.rotateAngleExpr !== undefined && (
+              <label className="properties__field">
+                <span>Expression</span>
+                <textarea
+                  className="properties__code"
+                  rows={2}
+                  placeholder="return variables.my_variable;"
+                  value={widget.rotateAngleExpr ?? ''}
+                  onChange={(e) => patch({ rotateAngleExpr: e.target.value })}
+                />
+              </label>
+            )}
+            <p className="properties__hint">
+              Spins the whole button, including its labels, in place. Falls back to the fixed angle if the expression is unset or
+              fails to evaluate.
+            </p>
+          </>
         )}
 
         <div className="properties__divider" />

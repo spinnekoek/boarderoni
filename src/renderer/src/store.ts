@@ -18,9 +18,11 @@ import {
   type Widget,
   type WidgetEventKind
 } from '@shared/types'
-import { getSubDeckWidgets, setSubDeckWidgets, findWidgetAnywhere, reconcileDashboard } from '@shared/subDecks'
+import { getSubDeckWidgets, setSubDeckWidgets, getSubDeckGridSize, setSubDeckGridSize, findWidgetAnywhere, reconcileDashboard } from '@shared/subDecks'
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSettings, DcsBiosStatus, DcsBiosWorkerStats } from '@shared/dcsBiosTypes'
+import { registerCustomFonts, type CustomFont } from '@shared/fonts'
 import { getDeviceId, setLastDeckId, clearLastDeckId, nextId } from './id'
+import { syncCustomFontFaces } from './customFontFaces'
 
 // A slide-over sub-deck currently open on the view client — client-local,
 // never persisted/synced beyond the single subdeck:open-overlay message
@@ -144,6 +146,13 @@ interface DashboardStore {
   // a "Call <name>" action per enabled, outgoing-configured source.
   restDataSources: RestDataSourceStatus[]
   restDataSourcesLanAddress: string | null
+  // App-wide, user-uploaded fonts (see main/customFonts.ts) — empty until
+  // first synced. Unlike restDataSources, arrives unasked as part of
+  // sendInitialState (see its own comment in main/index.ts), so it's rarely
+  // actually empty in practice; requestCustomFonts below exists mainly for
+  // the settings modal to have something to call on mount, matching every
+  // other panel's own convention.
+  customFonts: CustomFont[]
   // ScreenCaptureWidget's Properties monitor dropdown — null until first
   // requested (see PropertiesPanel.tsx, fetched once its Region section
   // mounts), same "null vs. empty" convention as dcsBiosAircraft above.
@@ -173,6 +182,18 @@ interface DashboardStore {
   updateRestDataSources: (sources: RestDataSource[]) => void
   regenerateRestDataSourceToken: (sourceId: string) => void
   deleteRestDataSource: (sourceId: string) => void
+  requestCustomFonts: () => void
+  // dataUrl comes from a plain <input type="file"> + FileReader.readAsDataURL
+  // (see SettingsModal.tsx), same client-reads-the-file-itself shape as
+  // uploadBackgroundImage below — necessary here for the same reason: an
+  // Android view client (no filesystem-picker main process to hand this to)
+  // could eventually get a font-upload UI of its own without touching this
+  // path at all.
+  uploadCustomFont: (dataUrl: string, label: string, filename: string) => void
+  deleteCustomFont: (fontId: string) => void
+  // null resets to the shared default — see CustomFont.lineHeight's own
+  // comment in shared/fonts.ts.
+  updateCustomFontLineHeight: (fontId: string, lineHeight: number | null) => void
   connect: (mode: Mode, deckId: string) => void
   // View mode, no deck chosen yet — establishes approval (and the deck
   // list, once approved) before any specific deck is even in the picture.
@@ -200,6 +221,13 @@ interface DashboardStore {
   ) => void
   uploadBackgroundImage: (dataUrl: string) => void
   clearBackgroundImage: () => void
+  // Patches whichever screen is currently being edited (main deck or the
+  // open sub-deck) — see getSubDeckGridSize/setSubDeckGridSize in
+  // shared/subDecks.ts. Read the current value via the useGridSize() hook
+  // below, not a field on this store — it's derived from
+  // dashboard.gridSize/subDecks + editingSubDeckId, not its own piece of
+  // state to keep in sync by hand.
+  setGridSize: (value: number) => void
   // Edit mode's toolbar screen switcher. Also resets selection state — a
   // selection made on one deck view has no meaning on another, same as
   // selectWidget(null) already does on every other selection-invalidating
@@ -365,6 +393,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   enabledDataSources: null,
   restDataSources: [],
   restDataSourcesLanAddress: null,
+  customFonts: [],
   screenCaptureDisplays: null,
 
   requestScreenCaptureDisplays: () => {
@@ -439,6 +468,22 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   deleteRestDataSource: (sourceId) => {
     send({ type: 'rest-sources:delete', sourceId })
+  },
+
+  requestCustomFonts: () => {
+    send({ type: 'fonts:get' })
+  },
+
+  uploadCustomFont: (dataUrl, label, filename) => {
+    send({ type: 'fonts:upload', dataUrl, label, filename })
+  },
+
+  deleteCustomFont: (fontId) => {
+    send({ type: 'fonts:delete', fontId })
+  },
+
+  updateCustomFontLineHeight: (fontId, lineHeight) => {
+    send({ type: 'fonts:update', fontId, lineHeight })
   },
 
   connect: (mode, deckId) => {
@@ -581,6 +626,17 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set({ enabledDataSources: message.enabledDataSources })
       } else if (message.type === 'rest-sources:list') {
         set({ restDataSources: message.sources, restDataSourcesLanAddress: message.lanAddress })
+      } else if (message.type === 'fonts:list') {
+        set({ customFonts: message.fonts })
+        // Both side effects outside the render tree, not component effects —
+        // every client (editor and Android view) needs its @font-face rules
+        // AND its resolveFont-visible lineHeight overrides current the
+        // moment this arrives, not just whichever component happens to be
+        // mounted and reading customFonts right now (e.g. a ViewCanvas label
+        // using a font the Settings modal, where uploads happen, isn't even
+        // open to react to).
+        syncCustomFontFaces(message.fonts)
+        registerCustomFonts(message.fonts)
       }
     })
 
@@ -681,6 +737,12 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   clearBackgroundImage: () => {
     send({ type: 'background-image:clear' })
+  },
+
+  setGridSize: (value) => {
+    const dashboard = setSubDeckGridSize(get().dashboard, get().editingSubDeckId, Math.max(1, Math.round(value)))
+    set({ dashboard })
+    send({ type: 'dashboard:update', dashboard })
   },
 
   addWidget: (widget) => {
@@ -836,3 +898,17 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     send({ type: 'device:revoke', deviceId })
   }
 }))
+
+// The currently-editing screen's own grid size — main deck or whichever
+// sub-deck is open (see getSubDeckGridSize in shared/subDecks.ts). A small
+// hook rather than a plain field on DashboardStore so every consumer
+// (Toolbar's input, CanvasWidget/MorphCanvasWidget/useWidgetDrag's snap
+// math) gets this resolved the same way instead of recomputing it inline —
+// drop-in replacement for the old, single global useEditorSettings(s =>
+// s.gridSize).
+export function useGridSize(): number {
+  const gridSize = useDashboardStore((s) => s.dashboard.gridSize)
+  const subDecks = useDashboardStore((s) => s.dashboard.subDecks)
+  const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
+  return getSubDeckGridSize({ gridSize, subDecks }, editingSubDeckId)
+}

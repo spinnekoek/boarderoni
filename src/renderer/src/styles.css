@@ -15,6 +15,17 @@
 	font-style: normal;
 }
 
+/* No @fontsource package (not on Google Fonts) — self-hosted straight from
+   its own OFL-licensed release, same as the HornetDisplay faces above. See
+   src/renderer/fonts/Librestile-OFL.txt for the license text. Only ships an
+   ExtraBold cut. */
+@font-face {
+	font-family: "Librestile";
+	src: url("../fonts/LibrestileExtBold.ttf") format("truetype");
+	font-weight: normal;
+	font-style: normal;
+}
+
 :root {
 	color-scheme: light;
 }
@@ -75,6 +86,56 @@ body {
 .app select,
 .app textarea {
 	user-select: text;
+}
+
+/* One shared look for every <select> in the app (Toolbar, Properties panel,
+   Events modal, Settings, etc.) — previously each context restyled its own
+   background/border/radius by hand (all identical) but left the native
+   browser dropdown arrow/focus ring untouched, which reads distinctly
+   dated against everything else in this dark, custom-styled UI. Custom
+   chevron (plain inline SVG, not an icon font — selects are everywhere and
+   this avoids a FontAwesome dependency just for one small glyph) replaces
+   it; appearance:none is what makes that possible, so it also needs its own
+   background-color/border here rather than trusting the OS's native select
+   chrome to still show them. Context-specific rules below now only need
+   padding/font-size/layout, not the look itself. */
+.app select {
+	appearance: none;
+	-webkit-appearance: none;
+	background-color: #14161b;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8L9.5 4.5' fill='none' stroke='%239098a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 8px center;
+	background-size: 12px;
+	border: 1px solid #3a3f4a;
+	border-radius: 6px;
+	color: #e8e8ea;
+	/* Sensible default for a <select> with no context-specific sizing rule
+	   of its own (e.g. RestDataSourcesSettingsPanel's plain, unclassed one) —
+	   every other context below overrides this with its own tighter/looser
+	   padding, but all keep this same right-side room for the chevron above. */
+	padding: 6px 28px 6px 8px;
+	font-size: 13px;
+	cursor: pointer;
+	transition:
+		border-color 0.15s ease,
+		box-shadow 0.15s ease;
+}
+
+.app select:hover {
+	border-color: #4a505e;
+}
+
+.app select:focus-visible {
+	outline: none;
+	border-color: #5b8def;
+	box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.25);
+}
+
+.app select:disabled {
+	color: #6b7280;
+	cursor: not-allowed;
+	opacity: 0.6;
 }
 
 .app__bar {
@@ -155,11 +216,10 @@ body {
 }
 
 .toolbar__control select {
-	background: #14161b;
-	border: 1px solid #3a3f4a;
-	border-radius: 4px;
-	color: #e8e8ea;
-	padding: 4px 6px;
+	/* Look itself comes from the global .app select rule — this is just the
+	   toolbar's own tighter sizing (right padding wider than a plain input's
+	   would need, to leave room for that rule's chevron). */
+	padding: 4px 26px 4px 6px;
 	font-size: 12px;
 }
 
@@ -944,22 +1004,73 @@ button.deck-button:focus-visible {
    overlay convention as .deck-dial-switch__detent-label, placed via
    labelAnchorPoint/viewBoxToPixel in ToggleSwitchWidget.tsx. Purely
    decorative (not a click target — the zones above already cover the whole
-   widget), so no cursor/pointer-events override needed. */
+   widget), so no cursor/pointer-events override needed. Square (100x100),
+   NOT 60x22 like the dial-switch/gauge-tick versions this was copied from —
+   see the box-sizing fix below for why a lopsided/small box specifically
+   breaks here. translate(-50%,-50%) keeps this box centered on the same
+   anchor point regardless of its size, so resizing it doesn't move anything
+   at padding 0. */
 .deck-toggle-switch__label {
 	position: absolute;
 	transform: translate(-50%, -50%);
-	width: 60px;
-	height: 22px;
+	width: 100px;
+	height: 100px;
 	pointer-events: none;
 }
 
-/* Same box-sizing fix as .deck-dial-switch__detent-label's own — see its
-   comment for why a plain fixed size sidesteps the width:auto equation. */
+/* Same box-sizing fix as .deck-dial-switch__detent-label's own (see its
+   comment for the width:auto equation this sidesteps) — but that comment's
+   "no matter how large" doesn't quite hold: `padding` is one scalar applied
+   to all four sides, and box-sizing:border-box subtracts it straight from
+   this box's own fixed size. Once padding-top+padding-bottom exceeds the
+   box's height, the content area can't go negative, so the browser clamps
+   it and vertical centering drifts downward instead of staying put — with
+   the original 60x22 box that kicked in past padding 11, well within normal
+   use (see the toggle-switch FIRE-label bug report this was fixed from; a
+   first pass squared it to 60x60, raising the ceiling to padding 30, but
+   that still wasn't enough headroom for a label sitting flush against the
+   bezel — see the follow-up report this 100x100 size was bumped for).
+   100x100 raises the ceiling to padding 50 on both axes. */
 .deck-toggle-switch__label .deck-button__label {
 	position: static;
 	width: 100%;
 	height: 100%;
 	box-sizing: border-box;
+}
+
+/* The optional flip-up cover (see ToggleSwitchWidget.guardEnabled) — sits
+   centered over the whole switch, on top of the bezel/lever/labels above.
+   Closed, it's a plain opaque box catching every tap itself, swapped for
+   .deck-toggle-switch__guard-tab below once open (see
+   ToggleSwitchWidgetContent's own comment — never both at once). */
+.deck-toggle-switch__guard {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	box-sizing: border-box;
+	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}
+
+/* The guard's own hinge edge, left poking up out of the top once open — a
+   small, fixed-height strip (not the switch's own guardHeight) rather than
+   the full cover, so it stays out of the switch's own tap area while still
+   being something to grab and flip back down. */
+.deck-toggle-switch__guard-tab {
+	position: absolute;
+	left: 50%;
+	top: 0;
+	transform: translate(-50%, 0);
+	height: 14px;
+	box-sizing: border-box;
+	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.deck-toggle-switch--static .deck-toggle-switch__guard,
+.deck-toggle-switch--static .deck-toggle-switch__guard-tab {
+	cursor: default;
 }
 
 .deck-dial-switch {
@@ -1322,7 +1433,6 @@ button.deck-morph-cell:focus-visible {
 }
 
 .properties__field input,
-.properties__field select,
 /* Set-all-delays' own bulk input (EventSequenceEditor) sits directly in a
    bare .properties__file-row, with no .properties__field ancestor wrapping
    it (there's no label span text for a plain input+button row) — without
@@ -1337,6 +1447,9 @@ button.deck-morph-cell:focus-visible {
 	padding: 6px 8px;
 	font-size: 13px;
 }
+
+/* No .properties__field select rule needed here — its sizing already
+   matches .app select's own default exactly. */
 
 .properties__field input:disabled {
 	color: #6b7280;
@@ -3029,7 +3142,24 @@ button.deck-morph-cell:focus-visible {
 }
 
 .settings-modal {
-	width: 520px;
+	/* Wide enough for two comfortable columns (see .settings-modal__columns
+	   below) — REST data sources/Custom fonts and Approved devices used to
+	   stack single-file all the way down this modal's old 520px width, which
+	   made for a lot of scrolling once Custom fonts was added on top of
+	   everything already there. */
+	width: 880px;
+}
+
+/* REST data sources + Custom fonts on the left, Approved devices on the
+   right — the "Enabled data sources" list above and the Close button below
+   both stay full-width, outside this grid. align-items:start so a taller
+   left column (REST sources can have several expanded entries) doesn't
+   stretch the shorter right column's own box to match. */
+.settings-modal__columns {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 0 32px;
+	align-items: start;
 }
 
 .settings-modal__sources {
@@ -3095,6 +3225,24 @@ button.deck-morph-cell:focus-visible {
 	font-size: 13px;
 	color: #e8e8ea;
 	word-break: break-word;
+}
+
+/* Custom fonts' own per-font line-height override — see its input's own
+   title text in SettingsModal.tsx. Sits between the font name and Delete
+   button in the same .settings-modal__device-row; shrinks to content so a
+   long font name still has room, rather than the row's flex splitting space
+   evenly three ways. */
+.settings-modal__font-line-height {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+	font-size: 12px;
+	color: #9098a8;
+}
+
+.settings-modal__font-line-height input {
+	width: 56px;
 }
 
 .dcsbios-settings {
@@ -3191,7 +3339,6 @@ button.deck-morph-cell:focus-visible {
 	align-items: center;
 }
 
-.events-modal__mapping-row select,
 .events-modal__mapping-variable {
 	min-width: 0;
 	background: #14161b;
@@ -3200,6 +3347,15 @@ button.deck-morph-cell:focus-visible {
 	color: #e8e8ea;
 	padding: 6px 8px;
 	font-size: 13px;
+}
+
+/* Look itself comes from the global .app select rule — just this row's own
+   sizing, with extra right padding for that rule's chevron. */
+/* Padding/font-size already match .app select's own default exactly —
+   min-width is this grid row's only real override (a <select> won't shrink
+   below its own content's width otherwise, which breaks the grid). */
+.events-modal__mapping-row select {
+	min-width: 0;
 }
 
 .events-modal__mapping-arrow {

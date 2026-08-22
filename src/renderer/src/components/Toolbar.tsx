@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useEditorSettings } from '../settingsStore'
-import { useDashboardStore } from '../store'
+import { useDashboardStore, useGridSize } from '../store'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
 import { VariablesModal } from './VariablesModal'
@@ -14,9 +14,9 @@ export function Toolbar(): React.JSX.Element {
   const [eventsOpen, setEventsOpen] = useState(false)
   const [mobileAppOpen, setMobileAppOpen] = useState(false)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
-  const gridSize = useEditorSettings((s) => s.gridSize)
+  const gridSize = useGridSize()
   const setSnapToGrid = useEditorSettings((s) => s.setSnapToGrid)
-  const setGridSize = useEditorSettings((s) => s.setGridSize)
+  const setGridSize = useDashboardStore((s) => s.setGridSize)
   const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
   const setSelectedDeviceId = useEditorSettings((s) => s.setSelectedDeviceId)
   // Reads/writes the store, not local useState, so components other than
@@ -64,7 +64,10 @@ export function Toolbar(): React.JSX.Element {
         <input type="checkbox" checked={snapToGrid} onChange={(e) => setSnapToGrid(e.target.checked)} />
         Snap to grid
       </label>
-      <label className={`toolbar__control${!snapToGrid ? ' toolbar__control--disabled' : ''}`}>
+      <label
+        className={`toolbar__control${!snapToGrid ? ' toolbar__control--disabled' : ''}`}
+        title="Its own value per screen — switching screens (ScreenSwitcher, to the left) shows that screen's own grid size, not one shared across the whole deck."
+      >
         <span>Grid size</span>
         <input
           type="number"

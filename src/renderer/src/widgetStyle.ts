@@ -209,6 +209,8 @@ function extractToggleStyle(widget: Extract<Widget, { type: 'switch-toggle' }>) 
       'borderColorExpr',
       'borderOpacity',
       'bezelRadius',
+      'bezelShape',
+      'bezelRotation',
       'leverLength',
       'leverBorderColor',
       'leverBorderWidth',
@@ -221,7 +223,10 @@ function extractToggleStyle(widget: Extract<Widget, { type: 'switch-toggle' }>) 
       'innerBezelOpacity',
       'innerBezelRadius',
       'innerBezelBorderColor',
-      'innerBezelBorderWidth'
+      'innerBezelBorderWidth',
+      'guard',
+      'guardBorderWidth',
+      'guardRadius'
     ] as const),
     labels: styleLabels(widget.labels),
     positions: stylePositions(widget.positions)

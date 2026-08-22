@@ -36,3 +36,10 @@ export const DEFAULT_WIDGET_FONT_SIZE = 14
 // How much to lighten a widget's default color for its auto-derived
 // "clicked" look, when per-state configuration is turned off.
 export const AUTO_CLICKED_LIGHTEN = 0.18
+
+// Fallback for Dashboard.gridSize/SubDeck.gridSize when unset — a screen
+// saved before per-screen grid size existed, or a freshly-created sub-deck,
+// which doesn't copy its parent's value on purpose (see SubDeck.gridSize's
+// own comment in shared/types.ts). Matches the single global value every
+// screen used to share.
+export const DEFAULT_GRID_SIZE = 8

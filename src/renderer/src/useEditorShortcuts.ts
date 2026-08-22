@@ -1,9 +1,8 @@
 import { useEffect } from 'react'
 import { useDashboardStore } from './store'
-import { useEditorSettings } from './settingsStore'
 import { useConfirmStore } from './confirmStore'
 import { useClipboardStore } from './clipboardStore'
-import { getSubDeckWidgets } from '@shared/subDecks'
+import { getSubDeckWidgets, getSubDeckGridSize } from '@shared/subDecks'
 
 export function isTextInputElement(el: Element | null): boolean {
   return el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
@@ -52,10 +51,11 @@ export function useEditorShortcuts(): void {
         if (selectedWidgetIds.length === 0) return
         e.preventDefault()
         // Ctrl/Cmd steps by a single pixel for fine adjustment; otherwise by
-        // the editor's own grid size — same value Toolbar's "Grid size" field
-        // edits — regardless of whether "Snap to grid" is currently on, since
-        // a keyboard nudge is already exact, not a drag that needs snapping.
-        const step = e.ctrlKey || e.metaKey ? 1 : useEditorSettings.getState().gridSize
+        // this screen's own grid size — same value Toolbar's "Grid size"
+        // field edits — regardless of whether "Snap to grid" is currently
+        // on, since a keyboard nudge is already exact, not a drag that
+        // needs snapping.
+        const step = e.ctrlKey || e.metaKey ? 1 : getSubDeckGridSize(dashboard, editingSubDeckId)
         const [dx, dy] = direction
         const idSet = new Set(selectedWidgetIds)
         const widgets = getSubDeckWidgets(dashboard, editingSubDeckId)
