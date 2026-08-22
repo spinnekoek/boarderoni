@@ -1,10 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Matches resources/icon.svg's 2x2 deck-button grid + selection glint (see
+  that file for the source of truth this was hand-converted from — its own
+  gradients simplified to flat colors here since adaptive-icon foreground
+  layers are plain vector paths, no <linearGradient>). Path data is authored
+  in the same 0-512 coordinate space icon.svg itself uses (so each tile's
+  rounded-rect path below is a 1:1 conversion of that file's <rect> tags,
+  easy to diff against if icon.svg ever changes) rather than the usual
+  108-unit adaptive-icon viewport; the outer <group>'s scale shrinks the
+  whole grid around its own center to fit Android's "safe zone" (content
+  must stay within the center ~66dp of the 108dp canvas so it survives
+  circle/squircle/rounded-square masking on different launchers) without
+  needing to rescale every path coordinate by hand.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M54,24 A30,30 0 1 1 53.99,24 Z" />
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <group
+        android:pivotX="256"
+        android:pivotY="256"
+        android:scaleX="0.725"
+        android:scaleY="0.725">
+        <!-- top-left tile -->
+        <path
+            android:fillColor="#5B8DEF"
+            android:pathData="M100,64 H204 A36,36 0 0 1 240,100 V204 A36,36 0 0 1 204,240 H100 A36,36 0 0 1 64,204 V100 A36,36 0 0 1 100,64 Z" />
+        <!-- top-right tile -->
+        <path
+            android:fillColor="#4DFAFF"
+            android:pathData="M308,64 H412 A36,36 0 0 1 448,100 V204 A36,36 0 0 1 412,240 H308 A36,36 0 0 1 272,204 V100 A36,36 0 0 1 308,64 Z" />
+        <!-- bottom-left tile -->
+        <path
+            android:fillColor="#FF3CDC"
+            android:pathData="M100,272 H204 A36,36 0 0 1 240,308 V412 A36,36 0 0 1 204,448 H100 A36,36 0 0 1 64,412 V308 A36,36 0 0 1 100,272 Z" />
+        <!-- bottom-right tile -->
+        <path
+            android:fillColor="#E2A53D"
+            android:pathData="M308,272 H412 A36,36 0 0 1 448,308 V412 A36,36 0 0 1 412,448 H308 A36,36 0 0 1 272,412 V308 A36,36 0 0 1 308,272 Z" />
+        <!-- selection glint ring around the top-right tile -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#4DFAFF"
+            android:strokeWidth="7"
+            android:pathData="M306,56 H414 A42,42 0 0 1 456,98 V206 A42,42 0 0 1 414,248 H306 A42,42 0 0 1 264,206 V98 A42,42 0 0 1 306,56 Z" />
+    </group>
 </vector>

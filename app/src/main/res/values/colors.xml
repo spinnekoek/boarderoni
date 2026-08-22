@@ -5,5 +5,19 @@
          white during launch or while a page is loading/reloading. -->
     <color name="status_overlay_background">#FF14161B</color>
     <color name="status_text_color">#FFF5F5F5</color>
-    <color name="ic_launcher_background">#FF3A6DF0</color>
+    <!-- manual_ip_input's own text/hint/underline — Theme.Boarderoni is a
+         *Light* MaterialComponents theme (see themes.xml's own comment on
+         why), so a plain EditText with no color overrides defaults to dark
+         text/hint/underline meant for a light background, which reads as
+         near-invisible against this screen's dark status_overlay_background.
+         hint dimmer than the typed-text color so there's still a visible cue
+         once the field isn't empty. -->
+    <color name="status_input_text_color">#FFF5F5F5</color>
+    <color name="status_input_hint_color">#99F5F5F5</color>
+    <!-- Average of icon.svg's #bg gradient (#1c1f26 -> #14161b) — the
+         adaptive icon's background layer has to be a flat color/simple
+         pattern (no gradients across the mask boundary), unlike the
+         standalone desktop icon.svg/icon.png this is otherwise matching.
+         See ic_launcher_foreground.xml for the matching foreground. -->
+    <color name="ic_launcher_background">#FF181A20</color>
 </resources>

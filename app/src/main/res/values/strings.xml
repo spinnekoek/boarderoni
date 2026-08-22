@@ -5,6 +5,10 @@
     <string name="status_lost_connection">Lost connection — retrying…</string>
     <string name="status_no_wifi">No Wi-Fi connection</string>
     <string name="manual_connect_hint">Can\'t find it automatically? Enter the desktop\'s IP</string>
-    <string name="manual_connect_placeholder">192.168.1.23 or 192.168.1.23:5173</string>
+    <!-- Shortened from the earlier "192.168.1.23 or 192.168.1.23:5173" — that
+         version reliably overflowed manual_ip_input's width and got clipped.
+         Still shows both parts of connectManually()'s accepted syntax (host,
+         optionally :port) in one example rather than spelling out "or". -->
+    <string name="manual_connect_placeholder">192.168.1.23:5173</string>
     <string name="manual_connect_button">Connect</string>
 </resources>
