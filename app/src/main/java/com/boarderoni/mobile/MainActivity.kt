@@ -144,6 +144,17 @@ class MainActivity : AppCompatActivity() {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
+        // WebView's own default minimumFontSize is 8 (unlike a desktop
+        // browser, which has no such floor) — any CSS font-size below that
+        // silently gets clamped back up to 8px instead of erroring or being
+        // ignored outright, which is why a label styled smaller than that
+        // looked identical to one at exactly 8px on the tablet but rendered
+        // fine, smaller, in the desktop editor's own (Chromium, same engine,
+        // but not WebView, so no floor) preview. 1 removes the floor in
+        // practice — dashboard labels set their own font-size explicitly
+        // (DEFAULT_WIDGET_FONT_SIZE in shared/constants.ts), so this only
+        // ever matters for someone deliberately going tiny.
+        settings.minimumFontSize = 1
 
         // The dashboard's own CSS already forces `color-scheme: light`, but
         // WebView's algorithmic darkening can still repaint it if left on —
