@@ -40,7 +40,12 @@ const ALIGN_ITEMS: Record<NonNullable<WidgetLabel['verticalAlign']>, string> = {
 // individually padded/aligned/styled, so a caller can place multiple labels
 // (see renderWidgetLabels below) or position just one on its own (DialSwitch
 // positions, one detent-anchored wrapper per label — see DialSwitchWidget.tsx).
-export function renderWidgetLabel(label: WidgetLabel, backgroundColor: string, variables: VariableMap): React.JSX.Element {
+export function renderWidgetLabel(
+  label: WidgetLabel,
+  backgroundColor: string,
+  variables: VariableMap,
+  debugMode: boolean = false
+): React.JSX.Element {
   const resolvedTextColor = resolveTextColor(label, backgroundColor, variables)
   const labelBackgroundColor = label.backgroundColor ? withOpacity(label.backgroundColor, label.backgroundOpacity ?? 1) : 'transparent'
   const padding = label.padding ?? DEFAULT_WIDGET_PADDING
@@ -77,7 +82,7 @@ export function renderWidgetLabel(label: WidgetLabel, backgroundColor: string, v
     textAlign: label.textAlign ?? align
   }
   return (
-    <span key={label.id} className="deck-button__label" style={labelStyle}>
+    <span key={label.id} className={`deck-button__label${debugMode ? ' deck-button__label--debug' : ''}`} style={labelStyle}>
       <span className="deck-button__label-content" style={{ backgroundColor: labelBackgroundColor }}>
         {renderLabelContent(resolveLabelText(label, variables))}
       </span>
@@ -88,9 +93,14 @@ export function renderWidgetLabel(label: WidgetLabel, backgroundColor: string, v
 // Each label is its own absolutely-positioned overlay covering the full
 // widget — they don't stack or affect each other's layout, so two labels
 // sharing an align just overlap.
-export function renderWidgetLabels(labels: WidgetLabel[], backgroundColor: string, variables: VariableMap): React.JSX.Element[] {
+export function renderWidgetLabels(
+  labels: WidgetLabel[],
+  backgroundColor: string,
+  variables: VariableMap,
+  debugMode: boolean = false
+): React.JSX.Element[] {
   // Every widget type funnels its labels[] through here — one guard against
   // a corrupted/hand-edited save's missing array covers all of them, rather
   // than repeating `?? []` at each of their call sites.
-  return (labels ?? []).map((label) => renderWidgetLabel(label, backgroundColor, variables))
+  return (labels ?? []).map((label) => renderWidgetLabel(label, backgroundColor, variables, debugMode))
 }

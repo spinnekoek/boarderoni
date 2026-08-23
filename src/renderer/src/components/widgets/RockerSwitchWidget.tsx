@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { RockerSwitchWidget, SwitchPosition } from '@shared/types'
+import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
 
 // Shared between the editor preview (CanvasWidget, interactive=false, no
@@ -35,6 +36,7 @@ export function RockerSwitchWidgetContent({
   selectedPositionId?: string | null
   onPositionSelect?: (position: SwitchPosition) => void
 }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
   const resolvedTrack = resolveColor(widget.track, variables)
   const trackColor = withOpacity(resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1)
   const resolvedBorder = resolveBorderColor(widget, variables)
@@ -111,12 +113,12 @@ export function RockerSwitchWidgetContent({
               onPointerCancel={interactive ? () => setPressedIndex(null) : undefined}
               onPointerLeave={interactive ? () => setPressedIndex(null) : undefined}
             >
-              {renderWidgetLabels(position.labels, segmentColor, variables)}
+              {renderWidgetLabels(position.labels, segmentColor, variables, debugMode)}
             </div>
           )
         })}
       </div>
-      {renderWidgetLabels(widget.labels, trackColor, variables)}
+      {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
     </div>
   )
 }

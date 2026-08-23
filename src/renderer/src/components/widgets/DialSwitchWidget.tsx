@@ -1,6 +1,7 @@
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, withOpacity } from '@shared/color'
-import { resolveBorderColor, resolveColor, type VariableMap } from '@shared/expr'
+import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { DetentStyle, DialSwitchWidget } from '@shared/types'
+import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabel, renderWidgetLabels } from './labels'
 import { labelAnchorPoint, polarToCartesian, roundedPolygonPath, viewBoxToPixel } from './arcPath'
 import { DEFAULT_DETENT_BORDER_RADIUS, DETENT_SIZE, DialShapeGraphic, SquareIndicatorOverlay } from './DialShapeGraphic'
@@ -59,12 +60,14 @@ export function DialSwitchWidgetContent({
   onPointerMove?: (e: React.PointerEvent) => void
   onPointerUp?: (e: React.PointerEvent) => void
 }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
   const resolvedTrack = resolveColor(widget.track, variables)
   const trackColor = withOpacity(resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1)
   const resolvedFill = resolveColor(widget.fill, variables)
   const needleColor = withOpacity(resolvedFill.color ?? DEFAULT_WIDGET_COLOR, resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1)
   const resolvedBorder = resolveBorderColor(widget, variables)
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
+  const rotateAngle = widget.rotateAngleExpr ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle) : widget.rotateAngle
 
   const effectiveIndex = dragIndex ?? activeIndex
   const needleAngle = angleForPosition(widget, effectiveIndex)
@@ -143,6 +146,11 @@ export function DialSwitchWidgetContent({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
+      {/* Everything — dial face, needle, detents/labels, widget-level labels
+          — rotates together as one unit, same "no separate always-upright
+          layer" choice ButtonWidget/AdjusterWidget/ToggleSwitchWidget's own
+          rotateAngle makes. */}
+      <div className="deck-dial-switch__rotated" style={rotateAngle ? { transform: `rotate(${rotateAngle}deg)` } : undefined}>
       <svg className="deck-dial-switch__dial" viewBox="0 0 100 100">
         <circle cx={50} cy={50} r={45} fill={trackColor} stroke={borderColor} strokeWidth={2} />
         <DialShapeGraphic
@@ -212,24 +220,18 @@ export function DialSwitchWidgetContent({
             />
           )}
           {(position.labels ?? []).map((positionLabel) => {
-            const labelVb = labelAnchorPoint(
-              dotVb,
-              angle,
-              detentRadius,
-              positionLabel.labelDistance ?? LABEL_OFFSET,
-              positionLabel.labelAnchor,
-              LABEL_OFFSET
-            )
+            const labelVb = labelAnchorPoint(dotVb, angle, detentRadius, positionLabel.labelDistance ?? LABEL_OFFSET, positionLabel.labelAnchor)
             const label = viewBoxToPixel(labelVb.x, labelVb.y, widget.w, widget.h)
             return (
               <div key={positionLabel.id} className="deck-dial-switch__detent-label" style={{ left: label.x, top: label.y }} onClick={handleSelect}>
-                {renderWidgetLabel(positionLabel, trackColor, variables)}
+                {renderWidgetLabel(positionLabel, trackColor, variables, debugMode)}
               </div>
             )
           })}
         </div>
       ))}
-      {renderWidgetLabels(widget.labels, trackColor, variables)}
+      {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
+      </div>
     </div>
   )
 }

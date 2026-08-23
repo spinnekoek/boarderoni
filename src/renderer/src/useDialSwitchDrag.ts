@@ -1,15 +1,23 @@
 import { useRef, useState } from 'react'
 import { angleForPosition } from './components/widgets/DialSwitchWidget'
+import { resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { DialSwitchWidget } from '@shared/types'
 
 // Angle (degrees) of the pointer around the widget's center, 0 = up,
 // increasing clockwise — same convention (and unbounded, since a drag can go
 // past the widget's own bounds) as EncoderWidget's own drag math, see
-// useEncoderDrag.ts's own comment.
-function angleFromEvent(e: React.PointerEvent, rect: DOMRect): number {
+// useEncoderDrag.ts's own comment. Counter-rotated by the widget's own
+// resolved rotateAngle (see DialSwitchWidget.tsx) so the raw screen-space
+// pointer angle gets mapped back into the widget's own unrotated frame —
+// angleForPosition's own angles (which nearestPositionIndex below compares
+// this against) are defined in that unrotated frame, so without this a
+// rotated dial's needle would track the pointer at an offset instead of
+// following it directly (same bug, same fix, as AdjusterWidget's own
+// rotateAngle got — see useAdjusterDrag.ts's fractionFromEvent).
+function angleFromEvent(e: React.PointerEvent, rect: DOMRect, rotateAngle: number): number {
   const cx = rect.left + rect.width / 2
   const cy = rect.top + rect.height / 2
-  return (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI + 90
+  return (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI + 90 - rotateAngle
 }
 
 function angularDistance(a: number, b: number): number {
@@ -48,7 +56,8 @@ function nearestPositionIndex(widget: DialSwitchWidget, pointerAngle: number): n
 // device's local remembered position exactly the same way a tap does.
 export function useDialSwitchDrag(
   widget: DialSwitchWidget,
-  select: (index: number) => void
+  select: (index: number) => void,
+  variables: VariableMap
 ): {
   dragIndex: number | undefined
   handlePointerDown: (e: React.PointerEvent) => void
@@ -57,10 +66,14 @@ export function useDialSwitchDrag(
 } {
   const [dragIndex, setDragIndex] = useState<number | undefined>(undefined)
   const draggingRef = useRef(false)
+  // Same resolution DialSwitchWidgetContent itself uses to build the CSS
+  // transform — kept in sync here so the drag math counter-rotates by
+  // exactly what the widget is actually visually rotated by right now.
+  const rotateAngle = (widget.rotateAngleExpr ? resolveNumericExpr(widget.rotateAngleExpr, variables) : undefined) ?? widget.rotateAngle ?? 0
 
   function updateFromEvent(e: React.PointerEvent): number {
     const rect = e.currentTarget.getBoundingClientRect()
-    const angle = angleFromEvent(e, rect)
+    const angle = angleFromEvent(e, rect, rotateAngle)
     const index = nearestPositionIndex(widget, angle)
     setDragIndex(index)
     return index

@@ -491,6 +491,18 @@ export interface GaugeTickSet {
   // "distance past the anchor point" convention as WidgetLabel.labelDistance
   // elsewhere.
   labelDistance?: number
+  // JS function body, `variables` in scope same as any other bindable
+  // expression here — plus this one tick's own already-computed value,
+  // exposed as `variables.$value` (and its index within the set as
+  // `variables.$index`), same convention as evaluateMappingExpression's own
+  // $value/$index. Unset (the default) shows labelDecimals-formatted
+  // `value.toFixed(...)`, same as before this existed — set this to
+  // transform/relabel it instead, e.g. units, a lookup table for named
+  // positions, rounding to a different step than labelDecimals allows. Wired
+  // through as this tick's own WidgetLabel.textExpr (see renderTickSet in
+  // widgets/tickSet.tsx), so it reuses that field's own resolution
+  // (resolveLabelText) rather than a separate mechanism.
+  labelTextExpr?: string
 }
 
 export interface GaugeWidget {
@@ -586,7 +598,7 @@ export interface GaugeWidget {
 // evaluateMappingExpression in shared/expr.ts, the same convention an
 // EventSourceMapping's own `expr` already uses) for whichever expression
 // field the chosen action kind reads.
-export interface AdjusterWidget {
+export interface AdjusterWidget extends DialShapeStyle {
   id: string
   type: 'adjuster'
   x: number
@@ -624,6 +636,53 @@ export interface AdjusterWidget {
   borderColor?: string
   borderColorExpr?: string
   borderOpacity?: number
+  // Knob style only — the dial FACE circle behind the arc/indicator, since
+  // this widget (unlike EncoderWidget/DialSwitchWidget, which always draw
+  // one) previously had none at all — just the arc floating on the widget's
+  // own transparent background. Border reuses `borderColor` above rather
+  // than adding a separate field for it — a knob has no rectangular box
+  // border of its own to conflict with (that field is otherwise slider-
+  // only), so there's no ambiguity in sharing it; only the circle's own
+  // border WIDTH needs a dedicated field, since borderWidthTop/Right/Bottom/
+  // Left above are genuinely slider-only (a circle has no separate sides).
+  // bezelColor unset falls back to `track`'s own color (so an existing
+  // dashboard's knob doesn't suddenly grow a differently-colored circle
+  // behind the arc) but stays independently overridable/opaque via
+  // bezelColor/bezelOpacity, unlike border which always shares borderColor
+  // outright. Default radius sits comfortably inside the arc's own inner
+  // edge (see AdjusterWidget.tsx) so it reads as a face the arc rings
+  // around, not something the arc's own stroke overlaps.
+  bezelRadius?: number
+  bezelColor?: string
+  bezelOpacity?: number
+  bezelBorderWidth?: number
+  // A second, concentric circle drawn on top of the bezel above — same
+  // "always present but defaults to radius 0 (invisible)" convention as
+  // ToggleSwitchWidget's own innerBezelRadius, so an existing dashboard
+  // saved before this field existed doesn't suddenly grow a visible ring.
+  innerBezelRadius?: number
+  innerBezelColor?: string
+  innerBezelOpacity?: number
+  innerBezelBorderColor?: string
+  innerBezelBorderWidth?: number
+  // Knob style only — same shared shape/marks-plus-labels vocabulary as
+  // GaugeWidget's own tickSets, since a knob has the same bounded
+  // startAngle..endAngle/min..max range an arc gauge does (unlike
+  // EncoderWidget's own EncoderTickSet, which is label-less because that
+  // widget has no such range). See renderTickSet in widgets/tickSet.tsx.
+  tickSets?: GaugeTickSet[]
+  // Spins the WHOLE widget in place around its own center — degrees,
+  // clockwise, 0 is unrotated — same convention as ButtonWidget's own
+  // rotateAngle, and deliberately the same "everything rotates together"
+  // choice that one makes rather than RockerSwitchWidget/DialSwitchWidget's
+  // own (which keep their widget-level `labels` upright as a legend/title):
+  // this widget's own `labels` above are rendered inside the same rotated
+  // element, so there's no separate always-upright layer to carve out here.
+  rotateAngle?: number
+  // Overrides rotateAngle with a live expression (degrees, same convention)
+  // when set — e.g. tying the tilt to a variable instead of a fixed value.
+  // Falls back to rotateAngle if unset or unresolved.
+  rotateAngleExpr?: string
   zIndex?: number
 }
 
@@ -636,6 +695,40 @@ export interface AdjusterWidget {
 // "turned one detent" rather than "now at X." A tap that never crosses the
 // threshold instead fires `press`/`release` — many real encoders (CDU data
 // knob, HSI course knob) are also push-buttons.
+// One ring of evenly-spaced tick marks around an EncoderWidget's own dial —
+// decorative only, no labels: unlike GaugeTickSet (which this is deliberately
+// a trimmed-down sibling of), an encoder has no bounded min..max/
+// startAngle..endAngle range to interpolate a value or a sweep from, just a
+// free-spinning 360° grip (see EncoderWidget.stepDegrees) — so there's
+// nothing for a label to display, and no natural sweep to distribute count
+// evenly across other than the full circle. Rendered the same tick-mark way
+// GaugeTickSet's own marks are (see encoderTicks in EncoderWidget.tsx) so a
+// tick's color/border/size read the same as everywhere else a "tick"
+// appears in this app. Multiple sets are addable/removable in the properties
+// panel, same convention as GaugeWidget.tickSets.
+export interface EncoderTickSet {
+  id: string
+  // How many ticks span the full 360° — evenly spaced at 360/count degrees
+  // apart, starting from 0 (up). Unlike GaugeTickSet.count (which draws one
+  // tick at EACH end of a bounded sweep, so count itself is one-less-than-
+  // the-number-of-gaps), a full circle wraps: a tick at 0° and one at 360°
+  // would be the same physical point, so count here already covers the
+  // entire lap on its own. Default 12.
+  count?: number
+  color?: string
+  opacity?: number
+  borderColor?: string
+  borderWidth?: number
+  // Each tick's radial length, in the same 0-100 viewBox units as
+  // EncoderWidget's own dial radius. Default 6.
+  size?: number
+  // Each tick's thickness along the ring (not radially). Default 2.
+  thickness?: number
+  // Distance from the dial's true center to a tick's INNER edge. Unset
+  // defaults to just outside the dial face's own stroke.
+  distance?: number
+}
+
 export interface EncoderWidget extends DialShapeStyle {
   id: string
   type: 'encoder'
@@ -663,6 +756,7 @@ export interface EncoderWidget extends DialShapeStyle {
   borderColor?: string
   borderColorExpr?: string
   borderOpacity?: number
+  tickSets?: EncoderTickSet[]
   zIndex?: number
 }
 
@@ -697,9 +791,16 @@ export interface SwitchPosition extends ColorAppearance {
   // meaningful on a toggle's first/last position (never its middle one,
   // which has no momentary config at all — see the properties panel's own
   // gating): pressing/dragging to a momentary position selects it (fires
-  // onSelect) only while held, springing back to the middle position (fires
-  // ITS onSelect too) the instant you release — see ToggleSwitchView in
-  // ViewCanvas.tsx and useToggleSwitchDrag.ts.
+  // onSelect) only while held, springing back (firing ITS own onSelect too)
+  // the instant you release — to the middle position on a 3-position switch,
+  // or to whichever of Top/Bottom ISN'T the momentary one on a 2-position
+  // switch (there's no middle there to catch it). The properties panel
+  // enforces at most one momentary position at a time on a 2-position
+  // switch, so that "other one" is always unambiguous — a 3-position
+  // switch's two ends stay independent of each other since they both spring
+  // back to the same middle regardless. See ToggleSwitchView in
+  // ViewCanvas.tsx and useToggleSwitchDrag.ts (both via
+  // momentarySpringBackIndex in ToggleSwitchWidget.tsx).
   momentary?: boolean
 }
 
@@ -826,8 +927,24 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   // Labels anchored to the widget as a whole (e.g. a switch name/legend),
   // independent of each position's own labels (SwitchPosition.labels) —
   // same flat-list convention as Gauge/Adjuster/Encoder's own `labels`,
-  // rendered as absolutely-positioned overlays via renderWidgetLabels.
+  // rendered as absolutely-positioned overlays via renderWidgetLabels. Part
+  // of the same rotated group as everything else below — see rotateAngle's
+  // own comment.
   labels: WidgetLabel[]
+  // Spins the WHOLE widget — bezel, lever, guard, every position's own
+  // labels, AND the widget-level `labels` above — together in place around
+  // the widget's center; degrees, clockwise, 0 is unrotated. Same
+  // "everything rotates together" choice ButtonWidget/AdjusterWidget make,
+  // not RockerSwitchWidget/DialSwitchWidget's own (which keep their
+  // widget-level `labels` upright as a legend/title). 'drag' interactionMode's
+  // own movement math (useToggleSwitchDrag.ts) counter-rotates by this same
+  // angle so the lever still tracks the pointer directly instead of at an
+  // offset — see that hook's own comment.
+  rotateAngle?: number
+  // Overrides rotateAngle with a live expression (degrees, same convention)
+  // when set — e.g. tying the tilt to a variable instead of a fixed value.
+  // Falls back to rotateAngle if unset or unresolved.
+  rotateAngleExpr?: string
   // Root-level, alongside (not instead of) each position's own onSelect —
   // see RockerSwitchWidget.events' own comment for the full reasoning
   // (same convention here).
@@ -889,6 +1006,24 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   leverLength?: number
   leverBorderColor?: string
   leverBorderWidth?: number
+  // The half-width of the lever's own tip — the wide, rounded end sticking
+  // up out of the bezel (see LEVER_TIP_HALF_WIDTH, its default, in
+  // ToggleSwitchWidget.tsx). Also drives the size of the foreshortened
+  // ellipse cap drawn on top of that tip (see circleTopStyle above) and,
+  // via circleRadius's own default, the plain circle shown at an odd-count
+  // switch's middle position — same physical point of the switch in all
+  // three cases, so resizing it here keeps them in sync unless circleRadius
+  // is deliberately overridden. Previously the only way to make the tip
+  // read bigger was cranking up leverBorderWidth, which just thickens the
+  // outline rather than growing the shape itself.
+  leverTipRadius?: number
+  // The half-width of the lever's own base — the narrow end that tapers
+  // down into the pivot, like a post through a hole (see
+  // LEVER_BASE_HALF_WIDTH, its default, in ToggleSwitchWidget.tsx).
+  // Independent of leverTipRadius above — this is the OTHER end of the
+  // taper, not the same physical point viewed differently, so it isn't
+  // shared with any circle/ellipse default the way leverTipRadius is.
+  leverBaseRadius?: number
   // 'normal' (default): exactly today's look — a bare tapered lever for
   // top/bottom, a plain circle (see circleColor etc. below) at an odd-count
   // switch's middle position. 'bar': a configurable rectangle — barColor/
@@ -904,7 +1039,9 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   // different center rather than just "the lever pointing at itself". Color/
   // opacity default to `fill`'s own (so an existing dashboard's middle
   // position keeps its prior look until deliberately overridden); size
-  // defaults to CIRCLE_RADIUS, border to none (width 0) — all in
+  // defaults to the effective leverTipRadius above (itself defaulting to
+  // LEVER_TIP_HALF_WIDTH, so an existing dashboard that's never touched
+  // either field sees no change), border to none (width 0) — all in
   // ToggleSwitchWidget.tsx. leverShape 'bar' only (see its own comment
   // above) — unused (but left in place, not migrated away) once 'bar' is
   // picked.
@@ -913,6 +1050,17 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   circleRadius?: number
   circleBorderColor?: string
   circleBorderWidth?: number
+  // Shading applied across the circle's own fill, to read as a 3D cap
+  // rather than a flat disc — 'rounded' (default/unset): a full radial
+  // highlight offset toward the upper-left, like a sphere. 'flat': a thin
+  // light rim right at the edge over an otherwise flat face, like a
+  // cylinder cap catching a line of light — the tip's own outline
+  // foreshortens into an ellipse for this style too (see leverTipDomeRy in
+  // ToggleSwitchWidget.tsx), since unlike a sphere a flat disc's silhouette
+  // isn't angle-invariant. Purely cosmetic — doesn't affect circleColor/
+  // circleOpacity above, which still set the base color the shading is
+  // lightened/darkened from. See ToggleSwitchWidget.tsx.
+  circleTopStyle?: 'flat' | 'rounded'
   // leverShape 'bar' only — see its own comment above. Width/height in the
   // same 0-100 viewBox units as everything else here; color/opacity default
   // to `fill`'s own, same reasoning as the circle fields above; border
@@ -947,6 +1095,21 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   // here.
   guardWidth?: number
   guardHeight?: number
+  // Distance from the widget's own top edge to the CLOSED guard's own top
+  // edge — negative allowed, so it can extend up past the widget's own
+  // bounds entirely (e.g. to clear a lever poking out from under it once
+  // it's flipped). Unset centers it vertically within the widget instead —
+  // today's behavior, unchanged (see ToggleSwitchWidget.tsx's own
+  // guardTop computation).
+  guardTop?: number
+  // The OPEN hinge tab's own height/top — independent of guardHeight/
+  // guardTop above, since the flipped-open tab is a differently-shaped,
+  // differently-purposed element (a small strip meant to stay grabbable
+  // without covering the reveal, not the full cover) with its own natural
+  // default: a fixed 14px strip pinned to the widget's own top edge, same
+  // as before either of these existed.
+  guardOpenHeight?: number
+  guardOpenTop?: number
   // Drives open/closed from a Variable instead of local taps — same
   // "expression overrides local tap state" convention as
   // SwitchWidgetBase.activePositionExpr, e.g. tying the guard to the same
@@ -1006,8 +1169,12 @@ export interface DialShapeStyle {
   // marker (see indicatorShape/indicatorStyle) at the active angle — on the
   // shape's own top edge for 'square' (it's already rotated to point there),
   // on the shape's rim for 'circle' (which isn't rotated, so the marker
-  // itself moves to the active angle instead).
-  dialShape?: 'needle' | 'square' | 'circle'
+  // itself moves to the active angle instead). 'none' draws nothing at all —
+  // no shape, no indicator marker either (there's no shape left for one to
+  // sit on/point from) — for a widget whose position already reads clearly
+  // some other way, e.g. AdjusterWidget's knob, where the arc fill itself
+  // already shows the value, so a needle on top of it can be redundant.
+  dialShape?: 'needle' | 'square' | 'circle' | 'none'
   // Distance from the widget's true center to the dial shape's OWN center
   // (the square/circle knob graphic, not just its indicator marker), along
   // the same rotating axis as the active angle — same polarToCartesian
@@ -1088,8 +1255,24 @@ export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle {
   // Labels anchored to the widget as a whole (e.g. a switch name/legend),
   // independent of each position's own labels (SwitchPosition.labels) —
   // same flat-list convention as Gauge/Adjuster/Encoder's own `labels`,
-  // rendered as absolutely-positioned overlays via renderWidgetLabels.
+  // rendered as absolutely-positioned overlays via renderWidgetLabels. Part
+  // of the same rotated group as everything else — see rotateAngle's own
+  // comment.
   labels: WidgetLabel[]
+  // Spins the WHOLE widget — dial face, needle, every detent and its own
+  // label, AND the widget-level `labels` above — together in place around
+  // the widget's center; degrees, clockwise, 0 is unrotated. Same
+  // "everything rotates together" choice ButtonWidget/AdjusterWidget/
+  // ToggleSwitchWidget make, not RockerSwitchWidget's own (which keeps its
+  // widget-level `labels` upright as a legend/title). 'drag' interactionMode's
+  // own movement math (useDialSwitchDrag.ts) counter-rotates by this same
+  // angle so the needle still tracks the pointer directly instead of at an
+  // offset — see that hook's own comment.
+  rotateAngle?: number
+  // Overrides rotateAngle with a live expression (degrees, same convention)
+  // when set — e.g. tying the tilt to a variable instead of a fixed value.
+  // Falls back to rotateAngle if unset or unresolved.
+  rotateAngleExpr?: string
   // Root-level, alongside (not instead of) each position's own onSelect —
   // see RockerSwitchWidget.events' own comment for press/release/
   // positionChange. increment/decrement are DialSwitchWidget-only (the one
@@ -1657,6 +1840,13 @@ export type ClientToServer =
   // room.dashboard.eventSources (by id) instead of a widget — an
   // 'ocrRegion' source's config.region/config.displayId, specifically.
   | { type: 'event-source:pick-region'; sourceId: string; displayId: number }
+  // Sent by the desktop editor once the user confirms a dashboard:external-
+  // change notification (see ServerToClient's own comment on that) — re-reads
+  // the deck's dashboard.json from disk, replacing the in-memory copy, and
+  // broadcasts the result as a normal dashboard:sync to the whole room. Any
+  // unsaved local edits since the external change are lost, same as the
+  // confirm dialog itself warns.
+  | { type: 'dashboard:reload' }
 
 export type ServerToClient =
   | { type: 'dashboard:sync'; dashboard: Dashboard }
@@ -1734,6 +1924,16 @@ export type ServerToClient =
   // 'main-deck' doesn't apply here).
   | { type: 'subdeck:open-overlay'; subDeckId: string; edge: OverlayEdge; size: number; sizeUnit: OverlaySizeUnit }
   | { type: 'subdeck:close-overlay' }
+  // Pushed to edit-role clients in a room when that deck's dashboard.json
+  // changed on disk from something other than this app's own save (a
+  // hand-edit, a sync tool, a git checkout — see watchDeckFile in
+  // main/index.ts, which distinguishes this from the app's own writes by
+  // comparing actual file content, not just reacting to any fs.watch event).
+  // Carries no payload on purpose — the editor doesn't apply anything
+  // automatically, it just offers to reload (dashboard:reload) so an
+  // in-progress edit here isn't silently discarded, or silently allowed to
+  // clobber the external change on its next save either.
+  | { type: 'dashboard:external-change' }
 
 export const DEFAULT_DASHBOARD: Dashboard = {
   id: 'default',

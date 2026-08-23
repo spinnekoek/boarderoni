@@ -191,6 +191,13 @@ export function DialShapeGraphic({
   needleCenterRadius: number
 }): React.JSX.Element {
   const dialShape = style.dialShape ?? 'needle'
+  // Nothing to draw at all — no shape, no indicator marker either (there's
+  // no shape left for one to sit on/point from). Every branch below is
+  // already a literal equality check against 'needle'/'square'/'circle' with
+  // no wildcard fallback, so this early return is about intent/avoiding
+  // wasted work, not correctness — none of them would fire for 'none'
+  // anyway.
+  if (dialShape === 'none') return <></>
   // Distance from the widget's true center to the shape's OWN center — see
   // DialShapeStyle.dialDistance. Deliberately no clamp: negative flips the
   // shape to the opposite side of center.

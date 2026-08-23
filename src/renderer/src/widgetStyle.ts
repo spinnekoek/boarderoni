@@ -160,7 +160,25 @@ function extractGaugeStyle(widget: Extract<Widget, { type: 'gauge' }>) {
 
 function extractAdjusterStyle(widget: Extract<Widget, { type: 'adjuster' }>) {
   return {
-    ...pick(widget, ['style', 'orientation', 'startAngle', 'endAngle', 'fill', 'track', ...BOX_BORDER_KEYS] as const),
+    ...pick(widget, [
+      'style',
+      'orientation',
+      'startAngle',
+      'endAngle',
+      'fill',
+      'track',
+      ...BOX_BORDER_KEYS,
+      ...DIAL_SHAPE_KEYS,
+      'bezelRadius',
+      'bezelColor',
+      'bezelOpacity',
+      'bezelBorderWidth',
+      'innerBezelRadius',
+      'innerBezelColor',
+      'innerBezelOpacity',
+      'innerBezelBorderColor',
+      'innerBezelBorderWidth'
+    ] as const),
     labels: styleLabels(widget.labels)
   }
 }
@@ -214,11 +232,14 @@ function extractToggleStyle(widget: Extract<Widget, { type: 'switch-toggle' }>) 
       'leverLength',
       'leverBorderColor',
       'leverBorderWidth',
+      'leverTipRadius',
+      'leverBaseRadius',
       'circleColor',
       'circleOpacity',
       'circleRadius',
       'circleBorderColor',
       'circleBorderWidth',
+      'circleTopStyle',
       'innerBezelColor',
       'innerBezelOpacity',
       'innerBezelRadius',

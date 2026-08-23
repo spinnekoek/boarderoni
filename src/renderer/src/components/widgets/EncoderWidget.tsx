@@ -1,7 +1,9 @@
 import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
-import type { EncoderWidget } from '@shared/types'
+import type { EncoderTickSet, EncoderWidget } from '@shared/types'
+import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
+import { polarToCartesian } from './arcPath'
 import { DialShapeGraphic, SquareIndicatorOverlay } from './DialShapeGraphic'
 
 // The grip's needle length/tip when dialShape is left unset (the default,
@@ -9,6 +11,46 @@ import { DialShapeGraphic, SquareIndicatorOverlay } from './DialShapeGraphic'
 // DialShapeGraphic's own needleLength/needleHalfWidth/needleTipLength props.
 // DialSwitchWidget uses its own, shorter set (30/2/10) for the same reason.
 const GRIP_RADIUS = 34
+// Matches the dial face <circle r={...}> below — EncoderTickSet.distance's
+// own default (just outside it) is expressed relative to this, same
+// convention as GaugeWidget's own arcRadius + 4 default for its ticks.
+const DIAL_RADIUS = 45
+const DEFAULT_TICK_COUNT = 12
+const DEFAULT_TICK_COLOR = '#ffffff'
+
+// One EncoderTickSet's own marks, evenly spaced around the full 360° dial —
+// see that type's own comment in shared/types.ts for why this is a trimmed
+// sibling of GaugeWidget's gaugeTicks (marks only, no labels, no bounded
+// sweep to distribute across). Same rendering approach as gaugeTicks' own
+// marks: a small rect at each tick's own radial position, rotated to point
+// outward from center.
+function encoderTicks(tickSet: EncoderTickSet): React.ReactNode[] {
+  const count = Math.max(1, Math.round(tickSet.count ?? DEFAULT_TICK_COUNT))
+  const color = withOpacity(tickSet.color ?? DEFAULT_TICK_COLOR, tickSet.opacity ?? 1)
+  const size = tickSet.size ?? 6
+  const thickness = tickSet.thickness ?? 2
+  const distance = tickSet.distance ?? DIAL_RADIUS + 4
+  const marks: React.ReactNode[] = []
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * 360
+    const midR = distance + size / 2
+    const point = polarToCartesian(50, 50, midR, angle)
+    marks.push(
+      <rect
+        key={i}
+        x={point.x - thickness / 2}
+        y={point.y - size / 2}
+        width={thickness}
+        height={size}
+        fill={color}
+        stroke={tickSet.borderColor}
+        strokeWidth={tickSet.borderWidth ?? 0}
+        transform={`rotate(${angle} ${point.x} ${point.y})`}
+      />
+    )
+  }
+  return marks
+}
 
 // Shared between the editor preview (CanvasWidget, interactive=false, no
 // pointer props, dragSpinDegrees always undefined) and the deployed view
@@ -37,6 +79,7 @@ export function EncoderWidgetContent({
   onPointerMove?: (e: React.PointerEvent) => void
   onPointerUp?: (e: React.PointerEvent) => void
 }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
   const restSpin = widget.valueExpr ? (resolveNumericExpr(widget.valueExpr, variables) ?? 0) : 0
   const spin = dragSpinDegrees ?? restSpin
 
@@ -61,7 +104,13 @@ export function EncoderWidgetContent({
       onPointerCancel={interactive ? onPointerUp : undefined}
     >
       <svg className="deck-encoder__dial" viewBox="0 0 100 100">
-        <circle cx={50} cy={50} r={45} fill={trackColor} stroke={borderColor} strokeWidth={2} />
+        <circle cx={50} cy={50} r={DIAL_RADIUS} fill={trackColor} stroke={borderColor} strokeWidth={2} />
+        {/* Painted before the grip/needle below, same order GaugeArc uses for
+            its own tick marks — so the grip visually sweeps over them, like
+            a real knob's pointer covering the ticks it passes. */}
+        {(widget.tickSets ?? []).map((tickSet) => (
+          <g key={tickSet.id}>{encoderTicks(tickSet)}</g>
+        ))}
         <DialShapeGraphic
           style={widget}
           angle={spin}
@@ -74,7 +123,7 @@ export function EncoderWidgetContent({
         />
       </svg>
       <SquareIndicatorOverlay style={widget} angle={spin} shapeColor={shapeColor} w={widget.w} h={widget.h} />
-      {renderWidgetLabels(widget.labels, trackColor, variables)}
+      {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
     </div>
   )
 }

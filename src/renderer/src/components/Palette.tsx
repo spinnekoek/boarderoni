@@ -314,8 +314,9 @@ export function Palette(): React.JSX.Element {
       </p>
       <p className="palette__hint">
         Toggle switches are Rocker's physical-lever cousin — always 2 (Top/Bottom) or 3 (Top/Middle/Bottom) positions, names fixed.
-        Top/Bottom can be set Momentary (springs back to Middle on release). Interaction mode picks Tap (tap a position directly) or
-        Drag (press and drag toward a position, like Dial) — Momentary fires live in either mode, not just on release.
+        Top/Bottom can be set Momentary (springs back to Middle on release on a 3-position switch, or to the other position on a
+        2-position switch — only one of the two can be momentary there). Interaction mode picks Tap (tap a position directly) or Drag
+        (press and drag toward a position, like Dial) — Momentary fires live in either mode, not just on release.
       </p>
       <p className="palette__hint">
         Dropdowns show only the active position until pressed and held, then fan the rest out above/below (or left/right) it — drag to

@@ -4,6 +4,7 @@ import { resolveColor, type VariableMap } from '@shared/expr'
 import { actionTitle } from '@shared/actionTitle'
 import { effectiveBlockAppearance, effectiveBlockColor, isMorphSliderActive, morphSliderPointAtFraction, morphSliderPoints } from '@shared/morph'
 import type { MorphBlock, MorphButtonWidget, WidgetState } from '@shared/types'
+import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
 import { boxStyle } from './boxStyle'
 
@@ -67,6 +68,7 @@ export function MorphButtonWidgetContent({
   onSliderPointerMove?: (e: React.PointerEvent<SVGCircleElement>) => void
   onSliderPointerUp?: (e: React.PointerEvent<SVGCircleElement>) => void
 }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
   // Shared fallback used for the label layer (which isn't per-block) and by
   // any block that doesn't override its own color — see effectiveBlockColor.
   const backgroundColor = resolveColor(state, variables).color ?? DEFAULT_WIDGET_COLOR
@@ -155,7 +157,7 @@ export function MorphButtonWidgetContent({
     )
   })
 
-  const labelElements = renderWidgetLabels(state.labels, backgroundColor, variables)
+  const labelElements = renderWidgetLabels(state.labels, backgroundColor, variables, debugMode)
 
   const width = totalCols * widget.cellW
   const height = totalRows * widget.cellH

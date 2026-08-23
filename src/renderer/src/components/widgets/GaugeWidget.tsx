@@ -1,8 +1,10 @@
 import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
-import type { GaugeTickSet, GaugeWidget } from '@shared/types'
-import { renderWidgetLabel, renderWidgetLabels } from './labels'
-import { arcBoundsUnit, describeArc, needlePoints, polarToCartesian, viewBoxRectToPixel } from './arcPath'
+import type { GaugeWidget } from '@shared/types'
+import { useEditorSettings } from '../../settingsStore'
+import { renderWidgetLabels } from './labels'
+import { arcBoundsUnit, describeArc, needlePoints, polarToCartesian } from './arcPath'
+import { renderTickSet } from './tickSet'
 
 const DEFAULT_START_ANGLE = 135
 const DEFAULT_END_ANGLE = 405
@@ -41,91 +43,6 @@ function GaugeBar({
   )
 }
 
-// One tick set's own marks (SVG <rect>s, joining the arc's own <svg>) plus
-// its labels (plain HTML overlays, positioned via viewBoxRectToPixel against
-// that same <svg>'s dynamic viewBox) — same two-rendering-systems split
-// every other ring/dial widget's labels already use. Each mark is an
-// unrotated rect (top edge pointing "up", i.e. away from center) then
-// rotated to its own angle, exactly the same construction DialShapeGraphic's
-// 'tick' detent shape uses, so a gauge's ticks read as the same visual
-// vocabulary. `count` is clamped to at least 2 so a single-tick set can't
-// divide by zero placing it (both ends always get a tick; anything beyond 2
-// fills in evenly between them).
-function gaugeTicks({
-  tickSet,
-  startAngle,
-  endAngle,
-  min,
-  max,
-  arcRadius,
-  w,
-  h,
-  viewBoxRect,
-  trackColor,
-  variables
-}: {
-  tickSet: GaugeTickSet
-  startAngle: number
-  endAngle: number
-  min: number
-  max: number
-  arcRadius: number
-  w: number
-  h: number
-  viewBoxRect: { x: number; y: number; width: number; height: number }
-  trackColor: string
-  variables: VariableMap
-}): { marks: React.ReactNode[]; labels: React.ReactNode[] } {
-  const count = Math.max(2, tickSet.count ?? 5)
-  const color = withOpacity(tickSet.color ?? ARC_DEFAULT_TICK_COLOR, tickSet.opacity ?? 1)
-  const size = tickSet.size ?? 6
-  const thickness = tickSet.thickness ?? 2
-  const distance = tickSet.distance ?? arcRadius + 4
-  const marks: React.ReactNode[] = []
-  const labels: React.ReactNode[] = []
-  for (let i = 0; i < count; i++) {
-    const t = i / (count - 1)
-    const angle = startAngle + t * (endAngle - startAngle)
-    const value = min + t * (max - min)
-    const midR = distance + size / 2
-    const point = polarToCartesian(0, 0, midR, angle)
-    marks.push(
-      <rect
-        key={i}
-        x={point.x - thickness / 2}
-        y={point.y - size / 2}
-        width={thickness}
-        height={size}
-        fill={color}
-        stroke={tickSet.borderColor}
-        strokeWidth={tickSet.borderWidth ?? 0}
-        transform={`rotate(${angle} ${point.x} ${point.y})`}
-      />
-    )
-    if (tickSet.showLabels) {
-      const labelPoint = polarToCartesian(0, 0, distance + size + (tickSet.labelDistance ?? 6), angle)
-      const pixel = viewBoxRectToPixel(labelPoint.x, labelPoint.y, viewBoxRect, w, h)
-      labels.push(
-        <div key={i} className="deck-gauge__tick-label" style={{ left: pixel.x, top: pixel.y }}>
-          {renderWidgetLabel(
-            {
-              id: `${tickSet.id}-${i}`,
-              text: value.toFixed(tickSet.labelDecimals ?? 0),
-              textColor: tickSet.labelColor,
-              fontFamily: tickSet.labelFontFamily,
-              fontSize: tickSet.labelFontSize,
-              align: 'center',
-              verticalAlign: 'center'
-            },
-            trackColor,
-            variables
-          )}
-        </div>
-      )
-    }
-  }
-  return { marks, labels }
-}
 
 // Arc style's own SVG + tick label overlays. Unlike every other ring/dial
 // widget (always `viewBox="0 0 100 100"`, see viewBoxToPixel in arcPath.ts),
@@ -154,6 +71,7 @@ function GaugeArc({
   trackColor: string
   variables: VariableMap
 }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
   const startAngle = widget.startAngle ?? DEFAULT_START_ANGLE
   const endAngle = widget.endAngle ?? DEFAULT_END_ANGLE
   const bounds = arcBoundsUnit(startAngle, endAngle)
@@ -167,18 +85,20 @@ function GaugeArc({
   const tickSets = widget.tickSets ?? []
   const tickResults = tickSets.map((tickSet) => ({
     id: tickSet.id,
-    ...gaugeTicks({
+    ...renderTickSet({
       tickSet,
       startAngle,
       endAngle,
       min: widget.min,
       max: widget.max,
       arcRadius: ARC_RADIUS,
+      center: { x: 0, y: 0 },
+      viewBoxRect,
       w: widget.w,
       h: widget.h,
-      viewBoxRect,
       trackColor,
-      variables
+      variables,
+      debugMode
     })
   }))
 
@@ -274,6 +194,7 @@ function GaugeArc({
 // between the editor preview (CanvasWidget) and the deployed view client
 // (ViewCanvas).
 export function GaugeWidgetContent({ widget, variables }: { widget: GaugeWidget; variables: VariableMap }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
   const raw = resolveNumericExpr(widget.valueExpr, variables) ?? widget.min
   const span = widget.max - widget.min
   const fraction = span !== 0 ? Math.min(1, Math.max(0, (raw - widget.min) / span)) : 0
@@ -323,7 +244,7 @@ export function GaugeWidgetContent({ widget, variables }: { widget: GaugeWidget;
       ) : (
         <GaugeBar fraction={fraction} fillColor={fillColor} trackColor={trackColor} orientation={widget.orientation ?? 'horizontal'} />
       )}
-      {renderWidgetLabels(widget.labels, trackColor, variables)}
+      {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
     </div>
   )
 }

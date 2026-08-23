@@ -25,6 +25,8 @@ export function Toolbar(): React.JSX.Element {
   const settingsOpen = useEditorSettings((s) => s.settingsModalOpen)
   const openSettings = useEditorSettings((s) => s.openSettings)
   const closeSettings = useEditorSettings((s) => s.closeSettings)
+  const debugMode = useEditorSettings((s) => s.debugMode)
+  const setDebugMode = useEditorSettings((s) => s.setDebugMode)
 
   const devices = useDashboardStore((s) => s.devices)
 
@@ -77,6 +79,10 @@ export function Toolbar(): React.JSX.Element {
           onChange={(e) => setGridSize(Number(e.target.value))}
         />
         <span className="toolbar__unit">px</span>
+      </label>
+      <label className="toolbar__control" title="Shows editor-only layout aids, like each position label's own alignment box, on the canvas.">
+        <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />
+        Debug
       </label>
       <button type="button" className="toolbar__button" onClick={() => setMobileAppOpen(true)}>
         Mobile app

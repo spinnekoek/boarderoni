@@ -23,6 +23,7 @@ import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSetti
 import { registerCustomFonts, type CustomFont } from '@shared/fonts'
 import { getDeviceId, setLastDeckId, clearLastDeckId, nextId } from './id'
 import { syncCustomFontFaces } from './customFontFaces'
+import { useConfirmStore } from './confirmStore'
 
 // A slide-over sub-deck currently open on the view client — client-local,
 // never persisted/synced beyond the single subdeck:open-overlay message
@@ -637,6 +638,22 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // open to react to).
         syncCustomFontFaces(message.fonts)
         registerCustomFonts(message.fonts)
+      } else if (message.type === 'dashboard:external-change') {
+        // Only ever arrives in edit mode — the server only broadcasts this
+        // to edit-role sockets in the first place (see
+        // broadcastToEditClients in main/index.ts), so there's no need to
+        // gate on `mode` here too. Fire-and-forget: the confirm dialog is
+        // async, but nothing here needs to await its result — send() below
+        // is what actually asks the server to reload, once the user says so.
+        useConfirmStore
+          .getState()
+          .confirm('This dashboard changed on disk, outside the app. Reload it? Any unsaved changes here will be lost.', {
+            confirmLabel: 'Reload',
+            cancelLabel: 'Keep editing'
+          })
+          .then((ok) => {
+            if (ok) send({ type: 'dashboard:reload' })
+          })
       }
     })
 

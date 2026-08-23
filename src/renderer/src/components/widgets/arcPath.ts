@@ -146,25 +146,37 @@ export function roundedPolygonPath(points: { x: number; y: number }[], radius: n
 
 // Where a label sits, in the same viewBox coordinate space as its position's
 // own anchor point `dotVb` — the label's own labelAnchor (WidgetLabel field)
-// wins outright, fixed to that one side; unset means 'auto': radially
-// outward along THIS position's own angle, just past the ring/pole radius,
-// so it reads correctly regardless of which side of the widget it falls on.
-// `labelDistance` is this one label's own WidgetLabel.labelDistance (or a
-// caller-supplied default if unset) — only used by the 'auto' case; a fixed
-// side always offsets from `dotVb` by a plain `sideOffset`, since a side
-// anchor is about dodging something nearby, not about how far out the label
-// sits along the ring. Shared by DialSwitchWidget/ToggleSwitchWidget.
+// wins outright: unset means 'auto', radially outward along THIS position's
+// own angle, just past the ring/pole radius, so it reads correctly
+// regardless of which side of the widget it falls on. A fixed side
+// (top/bottom/left/right) instead anchors its OWN axis — the one the side
+// name refers to — to that one fixed point on the WIDGET's own geometry (the
+// ring's edge in that cardinal direction, extended by `labelDistance`), the
+// same point on that axis no matter which position's label uses it, unlike
+// 'auto' above (e.g. every 'right'-anchored label lines up on the same
+// vertical edge, rather than each landing wherever its own position's angle
+// happens to put it — for a position whose own angle already points
+// sideways, like a 3-way toggle's middle throw, 'auto' would send it further
+// sideways still). The CROSS axis still comes from `dotVb`, same as before —
+// only the side's own axis is fixed, so top/bottom-anchored labels still
+// fall at their own position's natural x, and left/right-anchored labels
+// still fall at their own position's natural y. `labelDistance` is this one
+// label's own WidgetLabel.labelDistance (or a caller-supplied default if
+// unset) — used by BOTH cases: for 'auto' it's the radial distance past the
+// ring, for a fixed side it's how far past the ring's edge, in that side's
+// own direction, the anchor point sits — increasing it pushes the label
+// further out along whichever direction labelAnchor already points, same
+// idea either way. Shared by DialSwitchWidget/ToggleSwitchWidget.
 export function labelAnchorPoint(
   dotVb: { x: number; y: number },
   angle: number,
   ringRadius: number,
   labelDistance: number,
-  anchor: WidgetLabel['labelAnchor'],
-  sideOffset: number
+  anchor: WidgetLabel['labelAnchor']
 ): { x: number; y: number } {
-  if (anchor === 'top') return { x: dotVb.x, y: dotVb.y - sideOffset }
-  if (anchor === 'bottom') return { x: dotVb.x, y: dotVb.y + sideOffset }
-  if (anchor === 'left') return { x: dotVb.x - sideOffset, y: dotVb.y }
-  if (anchor === 'right') return { x: dotVb.x + sideOffset, y: dotVb.y }
+  if (anchor === 'top') return { x: dotVb.x, y: 50 - ringRadius - labelDistance }
+  if (anchor === 'bottom') return { x: dotVb.x, y: 50 + ringRadius + labelDistance }
+  if (anchor === 'left') return { x: 50 - ringRadius - labelDistance, y: dotVb.y }
+  if (anchor === 'right') return { x: 50 + ringRadius + labelDistance, y: dotVb.y }
   return polarToCartesian(50, 50, ringRadius + labelDistance, angle)
 }

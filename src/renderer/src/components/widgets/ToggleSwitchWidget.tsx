@@ -1,19 +1,14 @@
-import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
-import { resolveBorderColor, resolveColor, type VariableMap } from '@shared/expr'
+import { DEFAULT_WIDGET_COLOR, darken, lighten, withOpacity } from '@shared/color'
+import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { SwitchPosition, ToggleSwitchWidget } from '@shared/types'
+import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabel, renderWidgetLabels } from './labels'
 import { labelAnchorPoint, polarToCartesian, viewBoxToPixel } from './arcPath'
 
 const BEZEL_RADIUS = 45 // default for widget.bezelRadius, same convention as DialSwitchWidget's dial-face radius
 const LEVER_LENGTH = 36 // default for widget.leverLength
-const LEVER_TIP_HALF_WIDTH = 9 // wide end — the visible grip, sticking up out of the bezel
+const LEVER_TIP_HALF_WIDTH = 9 // wide end — the visible grip, sticking up out of the bezel; default for widget.leverTipRadius
 const LEVER_BASE_HALF_WIDTH = 4 // narrow end — tapers down into the pivot, like a post through a hole
-// The exact middle position of an odd-length positions list (see
-// isMiddlePosition) is drawn as a plain circle instead of a tilted lever —
-// looking straight down the post's own round tip, so its default radius
-// matches LEVER_TIP_HALF_WIDTH exactly rather than an unrelated constant.
-// Overridable per-widget via widget.circleRadius.
-const CIRCLE_RADIUS = LEVER_TIP_HALF_WIDTH
 // Defaults for widget.barWidth/barHeight — leverShape 'bar' only, see its
 // own comment in shared/types.ts. Wider than tall, like a real toggle's
 // paddle/bat handle capping the post.
@@ -53,6 +48,113 @@ export function isMiddlePosition(index: number, count: number): boolean {
   return count % 2 === 1 && index === (count - 1) / 2
 }
 
+// The position a momentary Top/Bottom throw springs back to once released —
+// the middle for a 3-position switch (see SwitchPosition.momentary's own
+// comment), or, on a 2-position switch (no middle to spring back to),
+// whichever of Top/Bottom ISN'T the momentary one. The properties panel
+// enforces at most one momentary position on a 2-position switch (see
+// PropertiesPanel.tsx's Momentary section), so "the other one" is always
+// unambiguous — there's no case where both ends are momentary and neither
+// has anywhere non-momentary to land. -1 means "no such position," kept for
+// parity with isMiddlePosition returning false rather than throwing on an
+// unexpected count (toggle switches are always 2 or 3 positions in practice
+// — see Palette.tsx's own hint — but this stays total instead of assuming
+// that's enforced everywhere upstream). Exported for useToggleSwitchDrag.ts's
+// own drag-mode spring-back and ViewCanvas.tsx's tap-mode spring-back, same
+// reason isMiddlePosition above is exported for both.
+export function momentarySpringBackIndex(momentaryIndex: number, count: number): number {
+  if (count % 2 === 1) return (count - 1) / 2
+  if (count === 2) return momentaryIndex === 0 ? 1 : 0
+  return -1
+}
+
+// The shaded-cap look shared by the middle-position circle and the lever's
+// own tip ellipse (see circleTopStyle's own comment in shared/types.ts) —
+// one control for "what does the round top of the toggle look like,"
+// rendered as a full circle head-on (middle position) or a foreshortened
+// ellipse cap on the lever's tip (thrown positions), same physical point of
+// the switch either way.
+function topShadeStops(baseColor: string, alpha: number, style: 'flat' | 'rounded'): { offset: string; color: string }[] {
+  return style === 'rounded'
+    ? [
+        // Full radial highlight offset toward the upper-left, like light
+        // catching a sphere — darkest at that same spot's opposite corner
+        // (bottom-right), not the outer rim in every direction, so it
+        // doesn't read as a dimple/dent.
+        { offset: '0%', color: withOpacity(darken(baseColor, 0.35), alpha) },
+        { offset: '60%', color: withOpacity(baseColor, alpha) },
+        { offset: '100%', color: withOpacity(lighten(baseColor, 0.4), alpha) }
+      ]
+    : [
+        // A thin light rim right at the bottom edge over an otherwise flat
+        // face, plus a slightly darker top edge — reads as a flat cylinder
+        // cap catching a line of light, not a dome.
+        { offset: '0%', color: withOpacity(darken(baseColor, 0.25), alpha) },
+        { offset: '20%', color: withOpacity(baseColor, alpha) },
+        { offset: '86%', color: withOpacity(baseColor, alpha) },
+        { offset: '100%', color: withOpacity(lighten(baseColor, 0.45), alpha) }
+      ]
+}
+
+// The middle-position circle's own gradient — screen-fixed by construction
+// since (unlike the lever tip below) it never sits inside a rotated group,
+// so plain objectBoundingBox units (no explicit position/rotation math
+// needed) are enough. `id` must be unique per widget instance (suffixed
+// with widget.id below) since SVG <defs> ids are document-global, not
+// scoped to one widget's own <svg>.
+function renderCircleTopGradient(id: string, baseColor: string, alpha: number, style: 'flat' | 'rounded'): React.JSX.Element {
+  const stops = topShadeStops(baseColor, alpha, style).map((s) => <stop key={s.offset} offset={s.offset} stopColor={s.color} />)
+  return style === 'rounded' ? (
+    <radialGradient id={id} cx="35%" cy="30%" r="75%">
+      {stops}
+    </radialGradient>
+  ) : (
+    <linearGradient id={id} x1="0%" y1="0%" x2="0%" y2="100%">
+      {stops}
+    </linearGradient>
+  )
+}
+
+// The lever tip ellipse's own gradient — unlike the circle above, this
+// shape lives inside the lever's own `<g transform="rotate(leverAngle ...)>`
+// group, so a gradient defined in plain objectBoundingBox/default-axis terms
+// would spin along with the lever and light the tip from a different
+// direction depending on which way the switch is thrown (e.g. from the
+// pivot side when thrown down instead of always from screen-up). Explicit
+// userSpaceOnUse coordinates plus a `rotate(-leverAngle, ...)`
+// gradientTransform counter the ancestor rotation so the highlight direction
+// stays fixed on screen while the ellipse itself still rotates with the
+// lever.
+function renderLeverTipGradient(
+  id: string,
+  baseColor: string,
+  alpha: number,
+  style: 'flat' | 'rounded',
+  cy: number,
+  rx: number,
+  ry: number,
+  leverAngle: number
+): React.JSX.Element {
+  const stops = topShadeStops(baseColor, alpha, style).map((s) => <stop key={s.offset} offset={s.offset} stopColor={s.color} />)
+  const counterRotate = `rotate(${-leverAngle} 50 ${cy})`
+  return style === 'rounded' ? (
+    <radialGradient
+      id={id}
+      gradientUnits="userSpaceOnUse"
+      cx={50 - rx * 0.3}
+      cy={cy - ry * 0.3}
+      r={Math.max(rx, ry) * 1.4}
+      gradientTransform={counterRotate}
+    >
+      {stops}
+    </radialGradient>
+  ) : (
+    <linearGradient id={id} gradientUnits="userSpaceOnUse" x1={50} y1={cy - ry} x2={50} y2={cy + ry} gradientTransform={counterRotate}>
+      {stops}
+    </linearGradient>
+  )
+}
+
 // SVG path for the lever, unrotated, pivoting from (50,50) with its tip
 // pointing straight up — a tapered "post" outline (rounded dome at the wide
 // tip, narrowing straight down to a flat narrow cap at the base/pivot)
@@ -60,13 +162,19 @@ export function isMiddlePosition(index: number, count: number): boolean {
 // an upright, turned lever instead of a flat rocker segment. Only the tip
 // is rounded — it's the end you actually see face-on (see isMiddlePosition's
 // own circle, which is this same rounded tip viewed head-on); the base end
-// disappears into the pivot and is never visibly a flat corner.
-function leverPath(length: number, tipHalfWidth: number, baseHalfWidth: number): string {
+// disappears into the pivot and is never visibly a flat corner. `tipRy`
+// defaults to `tipHalfWidth` (a true semicircle) — pass a smaller value to
+// flatten the dome itself, for circleTopStyle 'flat' below: a sphere's
+// silhouette is a circle from any angle, but a flat disc's silhouette
+// foreshortens into an ellipse when viewed edge-on, so the tip's own
+// outline (not just its shading) needs to flatten to read as a flat cap
+// rather than a dome.
+function leverPath(length: number, tipHalfWidth: number, baseHalfWidth: number, tipRy: number = tipHalfWidth): string {
   const topY = 50 - length
   const baseY = 50
   return [
     `M ${50 - tipHalfWidth} ${topY}`,
-    `A ${tipHalfWidth} ${tipHalfWidth} 0 0 1 ${50 + tipHalfWidth} ${topY}`,
+    `A ${tipHalfWidth} ${tipRy} 0 0 1 ${50 + tipHalfWidth} ${topY}`,
     `L ${50 + baseHalfWidth} ${baseY}`,
     `L ${50 - baseHalfWidth} ${baseY}`,
     'Z'
@@ -165,10 +273,13 @@ export function ToggleSwitchWidgetContent({
   selectedPositionId?: string | null
   onPositionSelect?: (position: SwitchPosition) => void
 }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
   const resolvedTrack = resolveColor(widget.track, variables)
   const trackColor = withOpacity(resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1)
   const resolvedFill = resolveColor(widget.fill, variables)
-  const leverColor = withOpacity(resolvedFill.color ?? DEFAULT_WIDGET_COLOR, resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1)
+  const leverBaseColor = resolvedFill.color ?? DEFAULT_WIDGET_COLOR
+  const leverAlpha = resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1
+  const leverColor = withOpacity(leverBaseColor, leverAlpha)
   const resolvedBorder = resolveBorderColor(widget, variables)
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
   const borderWidth = widget.borderWidth ?? 2
@@ -177,13 +288,27 @@ export function ToggleSwitchWidgetContent({
   const leverLength = widget.leverLength ?? LEVER_LENGTH
   const leverBorderWidth = widget.leverBorderWidth ?? 0
   const leverBorderColor = withOpacity(widget.leverBorderColor ?? 'transparent', 1)
-  const circleColor = withOpacity(
-    widget.circleColor ?? resolvedFill.color ?? DEFAULT_WIDGET_COLOR,
-    widget.circleOpacity ?? resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1
-  )
-  const circleRadius = widget.circleRadius ?? CIRCLE_RADIUS
+  const leverTipRadius = widget.leverTipRadius ?? LEVER_TIP_HALF_WIDTH
+  const leverBaseRadius = widget.leverBaseRadius ?? LEVER_BASE_HALF_WIDTH
+  const circleTopStyle = widget.circleTopStyle ?? 'rounded'
+  // A sphere's silhouette is a circle from any angle, but a flat disc's
+  // silhouette foreshortens into an ellipse viewed edge-on — so the dome's
+  // own vertical radius (leverPath's tipRy, below) flattens for 'flat' but
+  // stays a full circle for 'rounded'. leverTipRx/Ry (the shading overlay's
+  // own size) follow the same split: 'flat' matches the dome's full extent
+  // exactly (no gap between outline and shading), 'rounded' keeps the
+  // smaller inset highlight that already reads correctly on a full dome.
+  const leverTipDomeRy = circleTopStyle === 'flat' ? leverTipRadius * 0.5 : leverTipRadius
+  const leverTipCy = 50 - leverLength - leverTipDomeRy * 0.55 + 1
+  const leverTipRx = circleTopStyle === 'flat' ? leverTipRadius : leverTipRadius * 0.85
+  const leverTipRy = circleTopStyle === 'flat' ? leverTipDomeRy : leverTipRadius * 0.5
+  const circleBaseColor = widget.circleColor ?? resolvedFill.color ?? DEFAULT_WIDGET_COLOR
+  const circleAlpha = widget.circleOpacity ?? resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1
+  const circleRadius = widget.circleRadius ?? leverTipRadius
   const circleBorderWidth = widget.circleBorderWidth ?? 0
   const circleBorderColor = withOpacity(widget.circleBorderColor ?? 'transparent', 1)
+  const circleTopGradientId = `toggle-circle-top-${widget.id}`
+  const leverTipGradientId = `toggle-lever-tip-${widget.id}`
   // Opacity deliberately does NOT inherit widget.track.backgroundOpacity the
   // way the color above inherits resolvedTrack.color — an invisible/
   // transparent bezel (track.backgroundOpacity: 0) is a common, intentional
@@ -211,12 +336,19 @@ export function ToggleSwitchWidgetContent({
   const guardColor = withOpacity(resolvedGuard.color ?? '#c0392b', resolvedGuard.opacity ?? widget.guard?.backgroundOpacity ?? 1)
   const resolvedGuardBorder = resolveBorderColor(widget.guard ?? {}, variables)
   const guardBorderColor = withOpacity(resolvedGuardBorder.color ?? 'transparent', resolvedGuardBorder.opacity ?? widget.guard?.borderOpacity ?? 1)
+  // Vertically centered by default (matches the pre-guardTop look exactly:
+  // a box guardHeight tall, centered in a widget widget.h tall) — see
+  // ToggleSwitchWidget.guardTop's own comment in shared/types.ts.
+  const guardTop = widget.guardTop ?? (widget.h - (widget.guardHeight ?? widget.h)) / 2
+  const guardOpenHeight = widget.guardOpenHeight ?? 14
+  const guardOpenTop = widget.guardOpenTop ?? 0
   const orientation = widget.orientation ?? 'vertical'
   const count = widget.positions?.length ?? 0
   const dragMode = widget.interactionMode === 'drag'
   const effectiveIndex = dragIndex ?? activeIndex
   const showCircle = isMiddlePosition(effectiveIndex, count)
   const leverAngle = angleForIndex(effectiveIndex, count, orientation)
+  const rotateAngle = widget.rotateAngleExpr ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle) : widget.rotateAngle
 
   return (
     <div
@@ -227,6 +359,11 @@ export function ToggleSwitchWidgetContent({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
+      {/* Everything — zones, position labels, widget-level labels,
+          bezel/lever, guard — rotates together as one unit, same "no
+          separate always-upright layer" choice ButtonWidget/AdjusterWidget's
+          own rotateAngle makes. */}
+      <div className="deck-toggle-switch__rotated" style={rotateAngle ? { transform: `rotate(${rotateAngle}deg)` } : undefined}>
       <div className="deck-toggle-switch__zones" style={{ flexDirection: orientation === 'vertical' ? 'column' : 'row' }}>
         {(widget.positions ?? []).map((position, index) => {
           const selected = !interactive && position.id === selectedPositionId
@@ -262,16 +399,16 @@ export function ToggleSwitchWidgetContent({
         const labelRingRadius = bezelRadius + LABEL_RING_OFFSET
         const dotVb = polarToCartesian(50, 50, labelRingRadius, angle)
         return (position.labels ?? []).map((label) => {
-          const labelVb = labelAnchorPoint(dotVb, angle, labelRingRadius, label.labelDistance ?? LABEL_OFFSET, label.labelAnchor, LABEL_OFFSET)
+          const labelVb = labelAnchorPoint(dotVb, angle, labelRingRadius, label.labelDistance ?? LABEL_OFFSET, label.labelAnchor)
           const labelPx = viewBoxToPixel(labelVb.x, labelVb.y, widget.w, widget.h)
           return (
             <div key={label.id} className="deck-toggle-switch__label" style={{ left: labelPx.x, top: labelPx.y }}>
-              {renderWidgetLabel(label, trackColor, variables)}
+              {renderWidgetLabel(label, trackColor, variables, debugMode)}
             </div>
           )
         })
       })}
-      {renderWidgetLabels(widget.labels, trackColor, variables)}
+      {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
       {/* Bezel+lever, painted AFTER every label above (rather than first,
           the more obvious order) so the lever/circle visually sits in front
           of a label that's been pulled in close via a negative labelDistance
@@ -282,6 +419,11 @@ export function ToggleSwitchWidgetContent({
           move doesn't change what the zones below actually receive clicks
           for — that was already independent of paint order. */}
       <svg className="deck-toggle-switch__bezel" viewBox="0 0 100 100">
+        <defs>
+          {renderCircleTopGradient(circleTopGradientId, circleBaseColor, circleAlpha, circleTopStyle)}
+          {leverShape !== 'bar' &&
+            renderLeverTipGradient(leverTipGradientId, leverBaseColor, leverAlpha, circleTopStyle, leverTipCy, leverTipRx, leverTipRy, leverAngle)}
+        </defs>
         {bezelShape === 'hexagon' ? (
           <g transform={`rotate(${widget.bezelRotation ?? 0} 50 50)`}>
             <polygon points={hexagonPoints(bezelRadius)} fill={trackColor} stroke={borderColor} strokeWidth={borderWidth} />
@@ -316,7 +458,7 @@ export function ToggleSwitchWidgetContent({
               cx={50}
               cy={50}
               r={circleRadius}
-              fill={circleColor}
+              fill={`url(#${circleTopGradientId})`}
               stroke={circleBorderWidth > 0 ? circleBorderColor : undefined}
               strokeWidth={circleBorderWidth > 0 ? circleBorderWidth : undefined}
             />
@@ -324,11 +466,22 @@ export function ToggleSwitchWidgetContent({
         ) : (
           <g transform={`rotate(${leverAngle} 50 50)`}>
             <path
-              d={leverPath(leverLength, LEVER_TIP_HALF_WIDTH, LEVER_BASE_HALF_WIDTH)}
+              d={leverPath(leverLength, leverTipRadius, leverBaseRadius, leverTipDomeRy)}
               fill={leverColor}
               stroke={leverBorderWidth > 0 ? leverBorderColor : undefined}
               strokeWidth={leverBorderWidth > 0 ? leverBorderWidth : undefined}
             />
+            {leverShape !== 'bar' && (
+              // The same round tip as the middle-position circle above,
+              // just viewed edge-on instead of head-on — foreshortened into
+              // an ellipse (flattened along the lever's own axis) sitting
+              // in the dome leverPath already outlines, scaled off the same
+              // leverTipRadius so growing/shrinking the tip resizes this
+              // along with it, shaded the same way via circleTopStyle.
+              // Skipped for leverShape 'bar', which caps the tip with its
+              // own flat rectangle instead.
+              <ellipse cx={50} cy={leverTipCy} rx={leverTipRx} ry={leverTipRy} fill={`url(#${leverTipGradientId})`} />
+            )}
             {leverShape === 'bar' && (
               <rect
                 x={50 - barWidth / 2}
@@ -357,6 +510,7 @@ export function ToggleSwitchWidgetContent({
         <div
           className="deck-toggle-switch__guard"
           style={{
+            top: guardTop,
             width: widget.guardWidth ?? widget.w,
             height: widget.guardHeight ?? widget.h,
             background: guardColor,
@@ -379,7 +533,9 @@ export function ToggleSwitchWidgetContent({
         <div
           className="deck-toggle-switch__guard-tab"
           style={{
+            top: guardOpenTop,
             width: widget.guardWidth ?? widget.w,
+            height: guardOpenHeight,
             background: guardColor,
             borderRadius: widget.guardRadius ?? 6,
             borderStyle: 'solid',
@@ -392,6 +548,7 @@ export function ToggleSwitchWidgetContent({
           onClick={interactive ? onGuardToggle : undefined}
         />
       )}
+      </div>
     </div>
   )
 }

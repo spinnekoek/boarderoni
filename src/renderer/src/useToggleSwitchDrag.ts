@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { isMiddlePosition } from './components/widgets/ToggleSwitchWidget'
+import { isMiddlePosition, momentarySpringBackIndex } from './components/widgets/ToggleSwitchWidget'
+import { resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { ToggleSwitchWidget } from '@shared/types'
 
 // Which position the drag currently resolves to — relative to wherever the
@@ -27,27 +28,36 @@ import type { ToggleSwitchWidget } from '@shared/types'
 // of where that press physically landed) shifts it from there — so a drag
 // from bottom always sweeps through middle on the way to top, wherever on
 // the widget you happened to grab it.
-function relativePositionIndex(
-  widget: ToggleSwitchWidget,
-  baselineIndex: number,
-  startCoord: number,
-  currentCoord: number,
-  axisLength: number
-): number {
+function relativePositionIndex(widget: ToggleSwitchWidget, baselineIndex: number, delta: number, axisLength: number): number {
   const count = widget.positions.length
   if (axisLength <= 0) return baselineIndex
   const baselineFraction = (baselineIndex + 0.5) / count
-  const fraction = baselineFraction + (currentCoord - startCoord) / axisLength
+  const fraction = baselineFraction + delta / axisLength
   return Math.min(count - 1, Math.max(0, Math.floor(fraction * count)))
 }
 
-// The middle position a momentary throw springs back to — only exists with
-// exactly 3 positions (see SwitchPosition.momentary's own comment); -1 means
-// "no such position" (a 2-position toggle never has momentary positions in
-// the first place, since the properties panel only offers that config with
-// a middle to spring back to).
-function middlePositionIndex(count: number): number {
-  return count % 2 === 1 ? (count - 1) / 2 : -1
+// How far the pointer has moved, in screen pixels, ALONG the widget's own
+// drag axis — vertical (down positive) or horizontal (right positive) —
+// after accounting for widget.rotateAngle. Without this, a rotated switch's
+// drag math kept measuring movement against true screen down/right while
+// the switch's own "down"/"right" had visually rotated away from it, so the
+// lever tracked the pointer at an offset instead of following it directly
+// (same bug, same fix, as AdjusterWidget's own rotateAngle got — see
+// useAdjusterDrag.ts's fractionFromEvent). The local axis direction —
+// (0,1)/down for vertical, (1,0)/right for horizontal, before any rotation
+// — gets rotated by rotateAngle using the same clockwise, Y-down convention
+// arcPath.ts's polarToCartesian already uses everywhere else in this app,
+// then the raw screen-space pointer delta (dx,dy) is projected onto that
+// rotated direction via a plain dot product.
+function projectedDelta(dx: number, dy: number, orientation: 'horizontal' | 'vertical', rotateAngle: number): number {
+  const rad = (rotateAngle * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const lx = orientation === 'horizontal' ? 1 : 0
+  const ly = orientation === 'horizontal' ? 0 : 1
+  const axisX = lx * cos - ly * sin
+  const axisY = lx * sin + ly * cos
+  return dx * axisX + dy * axisY
 }
 
 // Below this many pixels of straight-line movement from where the gesture
@@ -71,12 +81,15 @@ const DRAG_RANGE_MULTIPLIER = 1.75
 // onSelect live, the instant the drag resolves onto it, rather than waiting
 // for release — a momentary throw has nothing meaningful to "commit" later,
 // it's only ever active while you're actually pressing/dragging on it.
-// Dragging back off it (still held) or releasing on it both spring back to
-// the middle position immediately.
+// Dragging back off it (still held) or releasing on it both spring back
+// immediately — to the middle position on a 3-position switch, or to
+// whichever of Top/Bottom isn't the momentary one on a 2-position switch
+// (see momentarySpringBackIndex in ToggleSwitchWidget.tsx).
 export function useToggleSwitchDrag(
   widget: ToggleSwitchWidget,
   activeIndex: number,
-  select: (index: number) => void
+  select: (index: number) => void,
+  variables: VariableMap
 ): {
   dragIndex: number | undefined
   handlePointerDown: (e: React.PointerEvent) => void
@@ -85,6 +98,10 @@ export function useToggleSwitchDrag(
 } {
   const [dragIndex, setDragIndex] = useState<number | undefined>(undefined)
   const draggingRef = useRef(false)
+  // Same resolution ToggleSwitchWidgetContent itself uses to build the CSS
+  // transform — kept in sync here so the drag math counter-rotates by
+  // exactly what the widget is actually visually rotated by right now.
+  const rotateAngle = (widget.rotateAngleExpr ? resolveNumericExpr(widget.rotateAngleExpr, variables) : undefined) ?? widget.rotateAngle ?? 0
   // Set the instant the gesture crosses DRAG_DEADZONE_PX away from its own
   // start point — before that, this is a plain press sitting wherever it
   // landed on the widget (which, unlike a set of separately-tappable tap-mode
@@ -106,15 +123,17 @@ export function useToggleSwitchDrag(
   // position and back off it can tell "was that momentary throw already
   // fired" apart from "is this index just being previewed."
   const heldMomentaryIndexRef = useRef<number | null>(null)
-  const middleIndex = middlePositionIndex(widget.positions.length)
 
   function isMomentary(index: number): boolean {
     return !isMiddlePosition(index, widget.positions.length) && (widget.positions[index]?.momentary ?? false)
   }
 
   function springBackFromMomentary(): void {
+    const heldIndex = heldMomentaryIndexRef.current
     heldMomentaryIndexRef.current = null
-    if (middleIndex >= 0) select(middleIndex)
+    if (heldIndex === null) return
+    const target = momentarySpringBackIndex(heldIndex, widget.positions.length)
+    if (target >= 0) select(target)
   }
 
   function updateFromEvent(e: React.PointerEvent): number {
@@ -122,9 +141,8 @@ export function useToggleSwitchDrag(
     const start = startRef.current!
     const orientation = widget.orientation ?? 'vertical'
     const axisLength = (orientation === 'vertical' ? rect.height : rect.width) * DRAG_RANGE_MULTIPLIER
-    const startCoord = orientation === 'vertical' ? start.y : start.x
-    const currentCoord = orientation === 'vertical' ? e.clientY : e.clientX
-    const index = relativePositionIndex(widget, baselineIndexRef.current, startCoord, currentCoord, axisLength)
+    const delta = projectedDelta(e.clientX - start.x, e.clientY - start.y, orientation, rotateAngle)
+    const index = relativePositionIndex(widget, baselineIndexRef.current, delta, axisLength)
     setDragIndex(index)
     if (isMomentary(index)) {
       if (heldMomentaryIndexRef.current !== index) {

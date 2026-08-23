@@ -764,6 +764,62 @@ button.deck-button:focus-visible {
 	line-height: 0.9;
 }
 
+/* Editor-only debug aid (Toolbar's "Debug" checkbox, useEditorSettings.debugMode,
+   threaded through renderWidgetLabel/renderWidgetLabels in labels.tsx) —
+   outlines this label's own alignment box, the one align/verticalAlign/padding
+   above actually act within, so their effect is visible instead of inferred.
+   Applies uniformly everywhere a label renders: for a position-anchored label
+   (ToggleSwitchWidget/DialSwitchWidget/GaugeWidget's tick labels) this box is
+   overridden elsewhere to fill its own already-centered wrapper exactly, so
+   the outline still traces the real box either way. The dot marks this box's
+   exact center — for a position-anchored label that's the same point
+   labelAnchorPoint computed (that wrapper is centered on it via
+   translate(-50%,-50%)); for a label that fills its whole parent via inset:0,
+   it's that parent's own center. Low-opacity so it reads as an overlay, not a
+   solid box competing with the real widget. */
+.deck-button__label--debug {
+	outline: 1px solid rgba(255, 0, 0, 0.35);
+	/* Max z-index so this wins stacking against the rest of its own widget
+	   (e.g. ToggleSwitchWidget's bezel/lever, deliberately painted AFTER its
+	   labels in the DOM — see that component's own comment — would otherwise
+	   sit on top of a debug dot the same way it sits on top of the label
+	   itself) and against other widgets' own explicit zIndex. Only takes
+	   effect here when this element is itself the positioned one (the
+	   inset:0, "fills its whole parent" case, e.g. Button/Label/Rocker-
+	   segment/Dropdown-item/Adjuster/Encoder/Gauge widget-level labels) —
+	   z-index is a no-op on position:static, which is what this same class
+	   resolves to for a position-anchored label (see the ...__label--debug
+	   rule below for that case instead). */
+	z-index: 2147483647;
+}
+
+.deck-button__label--debug::after {
+	content: '';
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: rgba(255, 0, 0, 0.6);
+	transform: translate(-50%, -50%);
+}
+
+/* The position:static override (.deck-toggle-switch__label .deck-button__label
+   etc.) makes z-index on .deck-button__label--debug itself a no-op for a
+   position-anchored label — the OUTER wrapper is the one actually positioned
+   and participating in stacking there, so that's what needs bumping instead.
+   :has() keeps this scoped to only when debug mode actually put the modifier
+   class on a label inside, rather than always elevating these wrappers (which
+   would silently change normal, non-debug paint order — e.g. the toggle
+   switch's bezel/lever are deliberately painted after, and above, its own
+   labels; this must never win against that except while debugging). */
+.deck-toggle-switch__label:has(.deck-button__label--debug),
+.deck-dial-switch__detent-label:has(.deck-button__label--debug),
+.deck-gauge__tick-label:has(.deck-button__label--debug) {
+	z-index: 2147483647;
+}
+
 /* The single flex child inside .deck-button__label above — plain inline
    flow (not flex) so a ␤-driven <br> actually breaks the line and an icon
    sits inline with surrounding text; flex items ignore <br> and would just
@@ -950,6 +1006,15 @@ button.deck-button:focus-visible {
 	inset: 0;
 }
 
+/* Wraps the whole switch (see ToggleSwitchWidget.tsx's own comment) so
+   widget.rotateAngle can spin it in place — fills its parent exactly like
+   the un-wrapped children it replaces did, so nothing shifts when
+   rotateAngle is unset. */
+.deck-toggle-switch__rotated {
+	position: absolute;
+	inset: 0;
+}
+
 .deck-toggle-switch--static .deck-toggle-switch__zone {
 	cursor: default;
 }
@@ -1038,31 +1103,38 @@ button.deck-button:focus-visible {
 	box-sizing: border-box;
 }
 
-/* The optional flip-up cover (see ToggleSwitchWidget.guardEnabled) — sits
-   centered over the whole switch, on top of the bezel/lever/labels above.
-   Closed, it's a plain opaque box catching every tap itself, swapped for
+/* The optional flip-up cover (see ToggleSwitchWidget.guardEnabled) — over
+   the switch, on top of the bezel/lever/labels above. Closed, it's a plain
+   opaque box catching every tap itself, swapped for
    .deck-toggle-switch__guard-tab below once open (see
-   ToggleSwitchWidgetContent's own comment — never both at once). */
+   ToggleSwitchWidgetContent's own comment — never both at once).
+   Horizontally centered here (left/translateX); `top` is set inline per-
+   widget instead (ToggleSwitchWidget.tsx's own guardTop, defaulting to
+   vertically centered to match this rule's own old fixed top:50% look) —
+   unlike left/right, top needs to go negative sometimes (see guardTop's own
+   comment in shared/types.ts), which a CSS default here couldn't express
+   per-widget. */
 .deck-toggle-switch__guard {
 	position: absolute;
 	left: 50%;
-	top: 50%;
-	transform: translate(-50%, -50%);
+	transform: translateX(-50%);
 	box-sizing: border-box;
 	cursor: pointer;
 	-webkit-tap-highlight-color: transparent;
 }
 
 /* The guard's own hinge edge, left poking up out of the top once open — a
-   small, fixed-height strip (not the switch's own guardHeight) rather than
-   the full cover, so it stays out of the switch's own tap area while still
-   being something to grab and flip back down. */
+   small strip (not the switch's own guardHeight) rather than the full
+   cover, so it stays out of the switch's own tap area while still being
+   something to grab and flip back down. Same "top/height set inline, not
+   here" split as .deck-toggle-switch__guard above — see
+   ToggleSwitchWidget.tsx's own guardOpenHeight/guardOpenTop (default 14px
+   tall, pinned to the widget's own top edge, matching this rule's old fixed
+   values). */
 .deck-toggle-switch__guard-tab {
 	position: absolute;
 	left: 50%;
-	top: 0;
-	transform: translate(-50%, 0);
-	height: 14px;
+	transform: translateX(-50%);
 	box-sizing: border-box;
 	cursor: pointer;
 	-webkit-tap-highlight-color: transparent;
@@ -1074,6 +1146,15 @@ button.deck-button:focus-visible {
 }
 
 .deck-dial-switch {
+	position: absolute;
+	inset: 0;
+}
+
+/* Wraps the whole switch (see DialSwitchWidget.tsx's own comment) so
+   widget.rotateAngle can spin it in place — fills its parent exactly like
+   the un-wrapped children it replaces did, so nothing shifts when
+   rotateAngle is unset. */
+.deck-dial-switch__rotated {
 	position: absolute;
 	inset: 0;
 }

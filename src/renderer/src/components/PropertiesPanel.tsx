@@ -32,6 +32,7 @@ import type {
   DialShapeStyle,
   DialSwitchWidget,
   DropdownWidget,
+  EncoderTickSet,
   EncoderWidget,
   EventfulWidget,
   GaugeTickSet,
@@ -544,16 +545,15 @@ function LabelFields({
             Auto places this label just outside the dial, pointing away from center along its detent's own angle — usually the right
             choice. A fixed side pins just this label there instead, independent of every other label.
           </p>
-          {(label.labelAnchor ?? 'auto') === 'auto' && (
-            <label className="properties__field">
-              <span>Label distance</span>
-              <input type="number" value={label.labelDistance ?? 12} onChange={(e) => onChange({ labelDistance: Number(e.target.value) })} />
-            </label>
-          )}
+          <label className="properties__field">
+            <span>Label distance</span>
+            <input type="number" value={label.labelDistance ?? 12} onChange={(e) => onChange({ labelDistance: Number(e.target.value) })} />
+          </label>
           <p className="properties__hint">
-            Distance outward from the ring/pole along this detent&rsquo;s own angle — negative pulls the label in past the ring, toward
-            (and, if pushed far enough, through) center. Independent of Padding above, which only moves the label within its own small
-            box and clamps hard once it exceeds that box&rsquo;s size.
+            Distance outward from the ring/pole, along whichever direction Label anchor above already points — this detent&rsquo;s own
+            angle for Auto, or straight along that fixed side for Top/Bottom/Left/Right. Negative pulls the label in past the ring,
+            toward (and, if pushed far enough, through) center. Independent of Padding above, which only moves the label within its own
+            small box and clamps hard once it exceeds that box&rsquo;s size.
           </p>
         </>
       )}
@@ -781,6 +781,7 @@ function DialShapeFields({
             <option value="needle">Needle</option>
             <option value="square">Square</option>
             <option value="circle">Circle</option>
+            <option value="none">None</option>
           </select>
         </label>
 
@@ -3035,6 +3036,20 @@ export function PropertiesPanel(): React.JSX.Element {
                           onChange={(e) => patchTickSet(tickSet.id, { labelDistance: Number(e.target.value) })}
                         />
                       </label>
+                      <label className="properties__field">
+                        <span>Label expression (optional)</span>
+                        <textarea
+                          className="properties__code"
+                          rows={2}
+                          placeholder="return variables.$value.toFixed(1) + ' kt';"
+                          value={tickSet.labelTextExpr ?? ''}
+                          onChange={(e) => patchTickSet(tickSet.id, { labelTextExpr: e.target.value || undefined })}
+                        />
+                      </label>
+                      <p className="properties__hint">
+                        Overrides Label decimals — this tick's own already-computed value is available as variables.$value (its index in
+                        the set as variables.$index), alongside every real Variable.
+                      </p>
                     </>
                   )}
 
@@ -3225,6 +3240,21 @@ export function PropertiesPanel(): React.JSX.Element {
       if (ok) patchAdjuster({ labels: adjuster.labels.filter((l) => l.id !== labelId) })
     }
 
+    const tickSets = adjuster.tickSets ?? []
+
+    function patchTickSet(tickSetId: string, fields: Partial<GaugeTickSet>): void {
+      patchAdjuster({ tickSets: tickSets.map((t) => (t.id === tickSetId ? { ...t, ...fields } : t)) })
+    }
+
+    function addTickSet(): void {
+      patchAdjuster({ tickSets: [...tickSets, { id: nextId(), count: 5, showLabels: true }] })
+    }
+
+    async function confirmRemoveTickSet(tickSetId: string): Promise<void> {
+      const ok = await confirm('Remove this tick set? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchAdjuster({ tickSets: tickSets.filter((t) => t.id !== tickSetId) })
+    }
+
     async function handleDeleteAdjuster(): Promise<void> {
       const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
       if (ok) {
@@ -3305,6 +3335,55 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
+        <PropertiesSection title="Rotation">
+          <label className="properties__field">
+            <span>Rotate angle</span>
+            <div className="properties__file-row">
+              {adjuster.rotateAngleExpr !== undefined ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input type="number" value={adjuster.rotateAngle ?? 0} onChange={(e) => patchAdjuster({ rotateAngle: Number(e.target.value) })} />
+              )}
+              {adjuster.rotateAngleExpr !== undefined ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed angle instead"
+                  onClick={() => patchAdjuster({ rotateAngleExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the angle with an expression"
+                  onClick={() => patchAdjuster({ rotateAngleExpr: '' })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {adjuster.rotateAngleExpr !== undefined && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={2}
+                placeholder="return variables.my_variable;"
+                value={adjuster.rotateAngleExpr ?? ''}
+                onChange={(e) => patchAdjuster({ rotateAngleExpr: e.target.value })}
+              />
+            </label>
+          )}
+          <p className="properties__hint">
+            Spins the whole widget in place — the knob/slider AND every one of its own labels together, unlike RockerSwitchWidget/
+            DialSwitchWidget's own rotation, which keeps their widget-level labels upright. Falls back to the fixed angle if the
+            expression is unset or fails to evaluate.
+          </p>
+        </PropertiesSection>
+
         <PropertiesSection title="Colors">
           <div className="properties__field">
             <span>Fill color</span>
@@ -3336,23 +3415,108 @@ export function PropertiesPanel(): React.JSX.Element {
             />
           </div>
 
-          {adjuster.style === 'slider' && (
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={adjuster.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={adjuster.borderColorExpr ?? ''}
+              onExprChange={(code) => patchAdjuster({ borderColorExpr: code })}
+              onEnterExpr={() => patchAdjuster({ borderColorExpr: adjuster.borderColorExpr ?? '' })}
+              onClearExpr={() => patchAdjuster({ borderColorExpr: undefined })}
+              opacity={adjuster.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchAdjuster({ borderOpacity: v })}
+            />
+          </div>
+        </PropertiesSection>
+
+        {adjuster.style === 'knob' && (
+          <PropertiesSection title="Base circle">
+            <p className="properties__hint">The dial face behind the arc/indicator — border reuses Border color above.</p>
+            <label className="properties__field">
+              <span>Base circle size</span>
+              <input
+                type="number"
+                min={1}
+                value={adjuster.bezelRadius ?? 32}
+                onChange={(e) => patchAdjuster({ bezelRadius: Math.max(1, Number(e.target.value)) })}
+              />
+            </label>
             <div className="properties__field">
-              <span>Border color</span>
+              <span>Base circle color</span>
               <ColorPickerButton
-                value={adjuster.borderColor ?? DEFAULT_WIDGET_COLOR}
-                onChange={(color) => patchAdjuster({ borderColor: color, borderColorExpr: undefined })}
-                isExpr={isBorderExpr}
-                exprValue={adjuster.borderColorExpr ?? ''}
-                onExprChange={(code) => patchAdjuster({ borderColorExpr: code })}
-                onEnterExpr={() => patchAdjuster({ borderColorExpr: adjuster.borderColorExpr ?? '' })}
-                onClearExpr={() => patchAdjuster({ borderColorExpr: undefined })}
-                opacity={adjuster.borderOpacity ?? 1}
-                onOpacityChange={(v) => patchAdjuster({ borderOpacity: v })}
+                value={adjuster.bezelColor ?? adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => patchAdjuster({ bezelColor: color })}
+                auto={adjuster.bezelColor === undefined}
+                onAuto={() => patchAdjuster({ bezelColor: undefined })}
+                opacity={adjuster.bezelOpacity ?? 1}
+                onOpacityChange={(v) => patchAdjuster({ bezelOpacity: v })}
               />
             </div>
-          )}
-        </PropertiesSection>
+            <label className="properties__field">
+              <span>Base circle border width</span>
+              <input
+                type="number"
+                min={0}
+                value={adjuster.bezelBorderWidth ?? 0}
+                onChange={(e) => patchAdjuster({ bezelBorderWidth: Math.max(0, Number(e.target.value)) })}
+              />
+            </label>
+          </PropertiesSection>
+        )}
+
+        {adjuster.style === 'knob' && (
+          <PropertiesSection title="Inner circle">
+            <label className="properties__field">
+              <span>Inner circle size</span>
+              <input
+                type="number"
+                min={0}
+                value={adjuster.innerBezelRadius ?? 0}
+                onChange={(e) => patchAdjuster({ innerBezelRadius: Math.max(0, Number(e.target.value)) })}
+              />
+            </label>
+            <p className="properties__hint">A second circle drawn on top of the base circle. 0 hides it entirely.</p>
+            <div className="properties__field">
+              <span>Inner circle color</span>
+              <ColorPickerButton
+                value={adjuster.innerBezelColor ?? adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => patchAdjuster({ innerBezelColor: color })}
+                auto={adjuster.innerBezelColor === undefined}
+                onAuto={() => patchAdjuster({ innerBezelColor: undefined })}
+                opacity={adjuster.innerBezelOpacity ?? 1}
+                onOpacityChange={(v) => patchAdjuster({ innerBezelOpacity: v })}
+              />
+            </div>
+            <label className="properties__field">
+              <span>Inner circle border width</span>
+              <input
+                type="number"
+                min={0}
+                value={adjuster.innerBezelBorderWidth ?? 0}
+                onChange={(e) => patchAdjuster({ innerBezelBorderWidth: Math.max(0, Number(e.target.value)) })}
+              />
+            </label>
+            <div className="properties__field">
+              <span>Inner circle border color</span>
+              <ColorPickerButton
+                value={adjuster.innerBezelBorderColor ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => patchAdjuster({ innerBezelBorderColor: color })}
+              />
+            </div>
+          </PropertiesSection>
+        )}
+
+        {adjuster.style === 'knob' && (
+          <DialShapeFields
+            value={adjuster}
+            onChange={patchAdjuster}
+            fill={adjuster.fill}
+            onFillChange={(fill) => patchAdjuster({ fill })}
+            needleColorLabel="Needle color"
+          />
+        )}
 
         <PropertiesSection title="Border shape">
           {adjuster.style === 'slider' ? (
@@ -3379,6 +3543,163 @@ export function PropertiesPanel(): React.JSX.Element {
             <p className="properties__hint">Border radius/thickness/color only apply to the Slider style.</p>
           )}
         </PropertiesSection>
+
+        {adjuster.style === 'knob' && (
+          <PropertiesSection title="Ticks" badge={tickSets.length}>
+            {tickSets.map((tickSet, i) => (
+              <PropertiesSection key={tickSet.id} title={`Tick set ${i + 1}`} sectionKey={tickSet.id}>
+                <div className="properties__grid2">
+                  <label className="properties__field">
+                    <span>Count</span>
+                    <input
+                      type="number"
+                      min={2}
+                      value={tickSet.count ?? 5}
+                      onChange={(e) => patchTickSet(tickSet.id, { count: Math.max(2, Math.round(Number(e.target.value))) })}
+                    />
+                  </label>
+                  <label className="properties__field">
+                    <span>Distance from center</span>
+                    <input
+                      type="number"
+                      value={tickSet.distance ?? 46}
+                      onChange={(e) => patchTickSet(tickSet.id, { distance: Number(e.target.value) })}
+                    />
+                  </label>
+                  <label className="properties__field">
+                    <span>Size</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tickSet.size ?? 6}
+                      onChange={(e) => patchTickSet(tickSet.id, { size: Math.max(0, Number(e.target.value)) })}
+                    />
+                  </label>
+                  <label className="properties__field">
+                    <span>Thickness</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tickSet.thickness ?? 2}
+                      onChange={(e) => patchTickSet(tickSet.id, { thickness: Math.max(0, Number(e.target.value)) })}
+                    />
+                  </label>
+                </div>
+
+                <div className="properties__field">
+                  <span>Color</span>
+                  <ColorPickerButton
+                    value={tickSet.color ?? '#ffffff'}
+                    onChange={(color) => patchTickSet(tickSet.id, { color })}
+                    opacity={tickSet.opacity ?? 1}
+                    onOpacityChange={(v) => patchTickSet(tickSet.id, { opacity: v })}
+                  />
+                </div>
+
+                <div className="properties__grid2">
+                  <div className="properties__field">
+                    <span>Border color</span>
+                    <ColorPickerButton value={tickSet.borderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => patchTickSet(tickSet.id, { borderColor: color })} />
+                  </div>
+                  <label className="properties__field">
+                    <span>Border width</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tickSet.borderWidth ?? 0}
+                      onChange={(e) => patchTickSet(tickSet.id, { borderWidth: Math.max(0, Number(e.target.value)) })}
+                    />
+                  </label>
+                </div>
+
+                <label className="properties__checkbox">
+                  <input
+                    type="checkbox"
+                    checked={tickSet.showLabels ?? false}
+                    onChange={(e) => patchTickSet(tickSet.id, { showLabels: e.target.checked })}
+                  />
+                  Show value labels
+                </label>
+
+                {tickSet.showLabels && (
+                  <>
+                    <label className="properties__field">
+                      <span>Label font</span>
+                      <select
+                        value={resolveFont(tickSet.labelFontFamily).id}
+                        onChange={(e) => patchTickSet(tickSet.id, { labelFontFamily: e.target.value })}
+                        style={{ fontFamily: resolveFont(tickSet.labelFontFamily).cssFamily }}
+                      >
+                        {fontOptions.map((f) => (
+                          <option key={f.id} value={f.id} style={{ fontFamily: f.cssFamily }}>
+                            {f.label}
+                            {f.monospace ? ' (mono)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="properties__grid2">
+                      <label className="properties__field">
+                        <span>Label font size</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={tickSet.labelFontSize ?? DEFAULT_WIDGET_FONT_SIZE}
+                          onChange={(e) => patchTickSet(tickSet.id, { labelFontSize: Math.max(1, Number(e.target.value)) })}
+                        />
+                      </label>
+                      <label className="properties__field">
+                        <span>Label decimals</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={tickSet.labelDecimals ?? 0}
+                          onChange={(e) => patchTickSet(tickSet.id, { labelDecimals: Math.max(0, Math.round(Number(e.target.value))) })}
+                        />
+                      </label>
+                    </div>
+                    <div className="properties__field">
+                      <span>Label color</span>
+                      <ColorPickerButton
+                        value={tickSet.labelColor ?? pickLegibleTextColor(adjuster.track.color ?? DEFAULT_WIDGET_COLOR)}
+                        onChange={(color) => patchTickSet(tickSet.id, { labelColor: color })}
+                      />
+                    </div>
+                    <label className="properties__field">
+                      <span>Label distance</span>
+                      <input
+                        type="number"
+                        value={tickSet.labelDistance ?? 6}
+                        onChange={(e) => patchTickSet(tickSet.id, { labelDistance: Number(e.target.value) })}
+                      />
+                    </label>
+                    <label className="properties__field">
+                      <span>Label expression (optional)</span>
+                      <textarea
+                        className="properties__code"
+                        rows={2}
+                        placeholder="return variables.$value.toFixed(1) + ' kt';"
+                        value={tickSet.labelTextExpr ?? ''}
+                        onChange={(e) => patchTickSet(tickSet.id, { labelTextExpr: e.target.value || undefined })}
+                      />
+                    </label>
+                    <p className="properties__hint">
+                      Overrides Label decimals — this tick's own already-computed value is available as variables.$value (its index in
+                      the set as variables.$index), alongside every real Variable.
+                    </p>
+                  </>
+                )}
+
+                <button type="button" className="properties__file-remove" onClick={() => confirmRemoveTickSet(tickSet.id)}>
+                  Remove tick set
+                </button>
+              </PropertiesSection>
+            ))}
+            <button type="button" className="properties__file-button" onClick={addTickSet}>
+              + Add tick set
+            </button>
+          </PropertiesSection>
+        )}
 
         <PropertiesSection title="Actions" badge={3}>
           <EventSequenceEditor
@@ -3480,6 +3801,21 @@ export function PropertiesPanel(): React.JSX.Element {
       if (ok) patchEncoder({ labels: encoder.labels.filter((l) => l.id !== labelId) })
     }
 
+    const tickSets = encoder.tickSets ?? []
+
+    function patchTickSet(tickSetId: string, fields: Partial<EncoderTickSet>): void {
+      patchEncoder({ tickSets: tickSets.map((t) => (t.id === tickSetId ? { ...t, ...fields } : t)) })
+    }
+
+    function addTickSet(): void {
+      patchEncoder({ tickSets: [...tickSets, { id: nextId(), count: 12 }] })
+    }
+
+    async function confirmRemoveTickSet(tickSetId: string): Promise<void> {
+      const ok = await confirm('Remove this tick set? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchEncoder({ tickSets: tickSets.filter((t) => t.id !== tickSetId) })
+    }
+
     async function handleDeleteEncoder(): Promise<void> {
       const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
       if (ok) {
@@ -3573,6 +3909,87 @@ export function PropertiesPanel(): React.JSX.Element {
               onOpacityChange={(v) => patchEncoder({ borderOpacity: v })}
             />
           </div>
+        </PropertiesSection>
+
+        <PropertiesSection title="Ticks" badge={tickSets.length}>
+          <p className="properties__hint">
+            Decorative marks around the full dial, evenly spaced — this widget has no fixed range (see Step above) to interpolate a
+            value from, so unlike a Gauge's ticks these have no labels.
+          </p>
+          {tickSets.map((tickSet, i) => (
+            <PropertiesSection key={tickSet.id} title={`Tick set ${i + 1}`} sectionKey={tickSet.id}>
+              <div className="properties__grid2">
+                <label className="properties__field">
+                  <span>Count</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={tickSet.count ?? 12}
+                    onChange={(e) => patchTickSet(tickSet.id, { count: Math.max(1, Math.round(Number(e.target.value))) })}
+                  />
+                </label>
+                <label className="properties__field">
+                  <span>Distance from center</span>
+                  <input
+                    type="number"
+                    value={tickSet.distance ?? 49}
+                    onChange={(e) => patchTickSet(tickSet.id, { distance: Number(e.target.value) })}
+                  />
+                </label>
+                <label className="properties__field">
+                  <span>Size</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={tickSet.size ?? 6}
+                    onChange={(e) => patchTickSet(tickSet.id, { size: Math.max(0, Number(e.target.value)) })}
+                  />
+                </label>
+                <label className="properties__field">
+                  <span>Thickness</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={tickSet.thickness ?? 2}
+                    onChange={(e) => patchTickSet(tickSet.id, { thickness: Math.max(0, Number(e.target.value)) })}
+                  />
+                </label>
+              </div>
+
+              <div className="properties__field">
+                <span>Color</span>
+                <ColorPickerButton
+                  value={tickSet.color ?? '#ffffff'}
+                  onChange={(color) => patchTickSet(tickSet.id, { color })}
+                  opacity={tickSet.opacity ?? 1}
+                  onOpacityChange={(v) => patchTickSet(tickSet.id, { opacity: v })}
+                />
+              </div>
+
+              <div className="properties__grid2">
+                <div className="properties__field">
+                  <span>Border color</span>
+                  <ColorPickerButton value={tickSet.borderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => patchTickSet(tickSet.id, { borderColor: color })} />
+                </div>
+                <label className="properties__field">
+                  <span>Border width</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={tickSet.borderWidth ?? 0}
+                    onChange={(e) => patchTickSet(tickSet.id, { borderWidth: Math.max(0, Number(e.target.value)) })}
+                  />
+                </label>
+              </div>
+
+              <button type="button" className="properties__file-remove" onClick={() => confirmRemoveTickSet(tickSet.id)}>
+                Remove tick set
+              </button>
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addTickSet}>
+            + Add tick set
+          </button>
         </PropertiesSection>
 
         <PropertiesSection title="Actions" badge={4}>
@@ -4019,11 +4436,61 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        {sw.positions.length === 3 && (
+        <PropertiesSection title="Rotation">
+          <label className="properties__field">
+            <span>Rotate angle</span>
+            <div className="properties__file-row">
+              {sw.rotateAngleExpr !== undefined ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input type="number" value={sw.rotateAngle ?? 0} onChange={(e) => patchSwitch({ rotateAngle: Number(e.target.value) })} />
+              )}
+              {sw.rotateAngleExpr !== undefined ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed angle instead"
+                  onClick={() => patchSwitch({ rotateAngleExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the angle with an expression"
+                  onClick={() => patchSwitch({ rotateAngleExpr: '' })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {sw.rotateAngleExpr !== undefined && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={2}
+                placeholder="return variables.my_variable;"
+                value={sw.rotateAngleExpr ?? ''}
+                onChange={(e) => patchSwitch({ rotateAngleExpr: e.target.value })}
+              />
+            </label>
+          )}
+          <p className="properties__hint">
+            Spins the whole switch — bezel/lever/guard, each position&rsquo;s own labels, AND the widget&rsquo;s own Labels below —
+            together. Falls back to the fixed angle if the expression is unset or fails to evaluate. Drag mode's own movement math
+            accounts for this automatically, so the lever still tracks the pointer directly regardless of rotation.
+          </p>
+        </PropertiesSection>
+
+        {(sw.positions.length === 2 || sw.positions.length === 3) && (
           <PropertiesSection title="Momentary">
             <p className="properties__hint">
-              A momentary Top/Bottom position only stays selected while pressed (or dragged onto, in drag mode) — release it and it
-              springs back to Middle, firing Middle's own action too.
+              {sw.positions.length === 3
+                ? "A momentary Top/Bottom position only stays selected while pressed (or dragged onto, in drag mode) — release it and it springs back to Middle, firing Middle's own action too."
+                : "A momentary Top/Bottom position only stays selected while pressed (or dragged onto, in drag mode) — release it and it springs back to the other position, firing that position's own action too. Only one of the two can be momentary at a time — there's no Middle for both to spring back to here, so the other one has to be the resting position that catches it."}
             </p>
             {sw.positions.map((position, index) => {
               if (isMiddleTogglePosition(index, sw.positions.length)) return null
@@ -4033,7 +4500,18 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="checkbox"
                     checked={position.momentary ?? false}
                     onChange={(e) =>
-                      patchSwitch({ positions: sw.positions.map((p, i) => (i === index ? { ...p, momentary: e.target.checked } : p)) })
+                      patchSwitch({
+                        positions: sw.positions.map((p, i) => {
+                          if (i === index) return { ...p, momentary: e.target.checked }
+                          // 2-position only — a 3-position switch's two ends
+                          // both spring back to the same Middle, so they're
+                          // independent; a 2-position switch has nowhere
+                          // else for a second momentary end to spring back
+                          // to, so checking one always clears the other.
+                          if (sw.positions.length === 2 && e.target.checked) return { ...p, momentary: false }
+                          return p
+                        })
+                      })
                     }
                   />
                   {position.name}
@@ -4165,6 +4643,43 @@ export function PropertiesPanel(): React.JSX.Element {
             />
           </label>
           <label className="properties__field">
+            <span>Lever tip size</span>
+            <input
+              type="number"
+              min={1}
+              value={sw.leverTipRadius ?? 9}
+              onChange={(e) => patchSwitch({ leverTipRadius: Math.max(1, Number(e.target.value)) })}
+            />
+          </label>
+          <p className="properties__hint">
+            Also sizes the shaded tip ellipse (see Circle top style below) and, unless Circle size is set separately, the
+            middle-position circle on a 3-position switch — the same physical tip, just viewed from a different angle.
+          </p>
+          <label className="properties__field">
+            <span>Circle top style</span>
+            <select
+              value={sw.circleTopStyle ?? 'rounded'}
+              onChange={(e) => patchSwitch({ circleTopStyle: e.target.value === 'rounded' ? undefined : (e.target.value as ToggleSwitchWidget['circleTopStyle']) })}
+            >
+              <option value="flat">Flat</option>
+              <option value="rounded">Rounded</option>
+            </select>
+          </label>
+          <p className="properties__hint">
+            Shading on the tip ellipse for top/bottom positions (both position counts) and, on a 3-position switch, the middle-position
+            circle too — same physical tip, same shading either way.
+          </p>
+          <label className="properties__field">
+            <span>Lever base size</span>
+            <input
+              type="number"
+              min={1}
+              value={sw.leverBaseRadius ?? 4}
+              onChange={(e) => patchSwitch({ leverBaseRadius: Math.max(1, Number(e.target.value)) })}
+            />
+          </label>
+          <p className="properties__hint">The narrow end, where the lever tapers down into the pivot.</p>
+          <label className="properties__field">
             <span>Lever border width</span>
             <input
               type="number"
@@ -4252,10 +4767,11 @@ export function PropertiesPanel(): React.JSX.Element {
               <input
                 type="number"
                 min={1}
-                value={sw.circleRadius ?? 9}
+                value={sw.circleRadius ?? sw.leverTipRadius ?? 9}
                 onChange={(e) => patchSwitch({ circleRadius: Math.max(1, Number(e.target.value)) })}
               />
             </label>
+            <p className="properties__hint">Defaults to the Lever tip size above (see Lever section) until set separately here.</p>
             <div className="properties__field">
               <span>Circle color</span>
               <ColorPickerButton
@@ -4371,6 +4887,43 @@ export function PropertiesPanel(): React.JSX.Element {
                     placeholder={String(sw.h)}
                     value={sw.guardHeight ?? ''}
                     onChange={(e) => patchSwitch({ guardHeight: e.target.value === '' ? undefined : Math.max(1, Number(e.target.value)) })}
+                  />
+                </label>
+              </div>
+              <label className="properties__field">
+                <span>Position from top</span>
+                <input
+                  type="number"
+                  placeholder={String((sw.h - (sw.guardHeight ?? sw.h)) / 2)}
+                  value={sw.guardTop ?? ''}
+                  onChange={(e) => patchSwitch({ guardTop: e.target.value === '' ? undefined : Number(e.target.value) })}
+                />
+              </label>
+              <p className="properties__hint">Can go negative, to extend past the switch's own top edge. Blank keeps it centered.</p>
+
+              <div className="properties__divider" />
+
+              <span className="properties__section-label">Open tab</span>
+              <p className="properties__hint">
+                The small hinge edge left grabbable once flipped open — same cover color/border/radius/width above, just its own
+                height and position.
+              </p>
+              <div className="properties__grid2">
+                <label className="properties__field">
+                  <span>Height</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={sw.guardOpenHeight ?? 14}
+                    onChange={(e) => patchSwitch({ guardOpenHeight: Math.max(1, Number(e.target.value)) })}
+                  />
+                </label>
+                <label className="properties__field">
+                  <span>Position from top</span>
+                  <input
+                    type="number"
+                    value={sw.guardOpenTop ?? 0}
+                    onChange={(e) => patchSwitch({ guardOpenTop: Number(e.target.value) })}
                   />
                 </label>
               </div>
@@ -4607,6 +5160,55 @@ export function PropertiesPanel(): React.JSX.Element {
             onFillChange={(fill) => patchSwitch({ fill })}
             needleColorLabel="Needle color"
           />
+        </PropertiesSection>
+
+        <PropertiesSection title="Rotation">
+          <label className="properties__field">
+            <span>Rotate angle</span>
+            <div className="properties__file-row">
+              {sw.rotateAngleExpr !== undefined ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input type="number" value={sw.rotateAngle ?? 0} onChange={(e) => patchSwitch({ rotateAngle: Number(e.target.value) })} />
+              )}
+              {sw.rotateAngleExpr !== undefined ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed angle instead"
+                  onClick={() => patchSwitch({ rotateAngleExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the angle with an expression"
+                  onClick={() => patchSwitch({ rotateAngleExpr: '' })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {sw.rotateAngleExpr !== undefined && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={2}
+                placeholder="return variables.my_variable;"
+                value={sw.rotateAngleExpr ?? ''}
+                onChange={(e) => patchSwitch({ rotateAngleExpr: e.target.value })}
+              />
+            </label>
+          )}
+          <p className="properties__hint">
+            Spins the whole dial — face/needle, every detent and its own label, AND the widget&rsquo;s own Labels below — together.
+            Falls back to the fixed angle if the expression is unset or fails to evaluate. Drag mode's own movement math accounts for
+            this automatically, so the needle still tracks the pointer directly regardless of rotation.
+          </p>
         </PropertiesSection>
 
         <PropertiesSection title="Colors">

@@ -28,11 +28,18 @@ interface EditorSettings {
   // instead of just telling the user where to look.
   settingsModalOpen: boolean
   settingsFocusKind: string | null
+  // Shows editor-only layout aids (currently: each position label's own
+  // alignment box, red-outlined — see .deck-toggle-switch__label / .debug-mode
+  // in styles.css) that are otherwise invisible, to make align/anchor
+  // settings' actual effect easier to reason about. Never affects the
+  // deployed view client, only the editor canvas.
+  debugMode: boolean
   setSnapToGrid: (value: boolean) => void
   setPropertiesWidth: (value: number) => void
   setSelectedDeviceId: (id: string) => void
   openSettings: (focusKind?: string) => void
   closeSettings: () => void
+  setDebugMode: (value: boolean) => void
 }
 
 // Editor-only preferences (not part of the synced dashboard data), persisted
@@ -46,12 +53,14 @@ export const useEditorSettings = create<EditorSettings>()(
       selectedDeviceId: DEVICE_PRESETS[0].id,
       settingsModalOpen: false,
       settingsFocusKind: null,
+      debugMode: false,
       setSnapToGrid: (value) => set({ snapToGrid: value }),
       setPropertiesWidth: (value) =>
         set({ propertiesWidth: Math.min(MAX_PROPERTIES_WIDTH, Math.max(MIN_PROPERTIES_WIDTH, Math.round(value))) }),
       setSelectedDeviceId: (id) => set({ selectedDeviceId: id }),
       openSettings: (focusKind) => set({ settingsModalOpen: true, settingsFocusKind: focusKind ?? null }),
-      closeSettings: () => set({ settingsModalOpen: false, settingsFocusKind: null })
+      closeSettings: () => set({ settingsModalOpen: false, settingsFocusKind: null }),
+      setDebugMode: (value) => set({ debugMode: value })
     }),
     {
       name: 'boarderoni-editor-settings',

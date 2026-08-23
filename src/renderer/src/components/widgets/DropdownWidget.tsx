@@ -2,6 +2,7 @@ import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, withOpacity } from '@shared/
 import { dropdownAxis, dropdownSign } from '@shared/dropdownLayout'
 import { resolveBorderColor, resolveColor, type VariableMap } from '@shared/expr'
 import type { DropdownWidget } from '@shared/types'
+import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
 
 // Fixed regardless of how many positions there are — the expanded stack's
@@ -49,6 +50,7 @@ export function DropdownWidgetContent({
   onPointerMove?: (e: React.PointerEvent) => void
   onPointerUp?: (e: React.PointerEvent) => void
 }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
   const resolvedTrack = resolveColor(widget.track, variables)
   const trackColor = withOpacity(resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1)
   const resolvedBorder = resolveBorderColor(widget, variables)
@@ -108,7 +110,7 @@ export function DropdownWidgetContent({
               borderColor
             }}
           >
-            {renderWidgetLabels(position.labels, itemColor, variables)}
+            {renderWidgetLabels(position.labels, itemColor, variables, debugMode)}
           </div>
         )
       })}

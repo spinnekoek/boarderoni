@@ -10,7 +10,9 @@ import {
   readdirSync,
   rmSync,
   copyFileSync,
-  statSync
+  statSync,
+  watch,
+  type FSWatcher
 } from 'node:fs'
 import { join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -411,7 +413,14 @@ function loadDeckDashboard(deckId: string): Dashboard | null {
 
 function saveDeckDashboard(room: DeckRoom): void {
   mkdirSync(deckDir(room.id), { recursive: true })
-  writeFileSync(deckDashboardFile(room.id), JSON.stringify(room.dashboard, null, 2), 'utf-8')
+  const json = JSON.stringify(room.dashboard, null, 2)
+  // Recorded BEFORE the write, not after — watchDeckFile compares an
+  // incoming fs.watch event's actual file content against this to tell our
+  // own save apart from a genuine external edit. Setting it first means even
+  // a watch event that fires (on some platforms, watchers can react to a
+  // write in progress) mid-write still finds this already in place.
+  room.lastWrittenJson = json
+  writeFileSync(deckDashboardFile(room.id), json, 'utf-8')
 }
 
 const DASHBOARD_SAVE_DEBOUNCE_MS = 500
@@ -689,6 +698,15 @@ interface DeckRoom {
   // source ticks (as often as once a second) go through this instead of
   // saving synchronously on every tick.
   dashboardSaveTimeout: NodeJS.Timeout | null
+  // The exact JSON string this app itself last wrote (or, on first load,
+  // read) for this room's dashboard.json — see watchDeckFile, which compares
+  // an incoming fs.watch event's actual file content against this to tell
+  // apart the app's own save from a genuine external edit.
+  lastWrittenJson: string
+  // fs.watch handle on this room's dashboard.json — see watchDeckFile. Closed
+  // in the deck-delete handler; otherwise lives as long as the room does
+  // (rooms are never evicted, see the comment on `rooms` below).
+  fileWatcher: FSWatcher | null
 }
 // Keyed by deck id, lazily populated on first connection/reference (see
 // getOrLoadRoom) and never evicted — same always-resident philosophy the old
@@ -727,16 +745,32 @@ function getOrLoadRoom(deckId: string): DeckRoom | null {
   if (!isValidDeckId(deckId)) return null
   const dashboard = loadDeckDashboard(deckId)
   if (!dashboard) return null
+  // The RAW file content, not JSON.stringify(dashboard, null, 2) — loadDeckDashboard
+  // normalizes the parsed object (migrateWidget, defaulting `variables`/
+  // `eventSources`, etc.), which can differ from what's still literally on
+  // disk until the next save. Baselining off the re-serialized normalized
+  // object here would make watchDeckFile see that difference as a false
+  // "changed externally" the very first time the file watcher fires, even
+  // with zero real external edits.
+  let lastWrittenJson: string
+  try {
+    lastWrittenJson = readFileSync(deckDashboardFile(deckId), 'utf-8')
+  } catch {
+    lastWrittenJson = ''
+  }
   const room: DeckRoom = {
     id: deckId,
     dashboard,
     devices: new Map(),
     sockets: new Set(),
     eventSourceStops: new Map(),
-    dashboardSaveTimeout: null
+    dashboardSaveTimeout: null,
+    lastWrittenJson,
+    fileWatcher: null
   }
   rooms.set(deckId, room)
   syncEventSources(room)
+  watchDeckFile(room)
   return room
 }
 
@@ -1035,6 +1069,13 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
     if (room) {
       for (const socket of room.sockets) socket.close(DECK_CLOSE_CODE_UNKNOWN, 'Deck deleted')
       for (const { stop } of room.eventSourceStops.values()) stop()
+      // Also load-bearing, same reasoning as cancelScheduledSave below — an
+      // fs.watch callback firing on the file this delete is about to remove
+      // would otherwise try to readFileSync a file that's either gone or
+      // (worse) about to be recreated by something else, and either way
+      // there's no room left for broadcastToEditClients to notify by the
+      // time its debounce timer would fire.
+      room.fileWatcher?.close()
       // Load-bearing, not decorative: a pending debounced save from an
       // active event source firing ~500ms after this point would recreate
       // deckDir(deckId) via saveDeckDashboard's mkdirSync, silently
@@ -1179,6 +1220,68 @@ function broadcastToRoom(room: DeckRoom, message: ServerToClient, exclude?: WebS
     if (client.readyState === WebSocket.OPEN && client !== exclude) {
       client.send(payload)
     }
+  }
+}
+
+// Same as broadcastToRoom, but only to this room's edit-role sockets (the
+// desktop editor(s) currently on this deck) — used for dashboard:external-
+// change, which is purely an editor concept a deployed 'view' device has no
+// use for and shouldn't be bothered with.
+function broadcastToEditClients(room: DeckRoom, message: ServerToClient): void {
+  const payload = JSON.stringify(message)
+  for (const client of room.sockets) {
+    const ctx = socketContext.get(client)
+    if (client.readyState === WebSocket.OPEN && ctx?.role === 'edit') {
+      client.send(payload)
+    }
+  }
+}
+
+// How long to wait, after an fs.watch 'change' fires, before actually
+// re-reading the file and comparing it — a single external save can trigger
+// several rapid-fire 'change' events on some platforms/editors (temp-file-
+// then-rename patterns in particular), so this collapses a burst into one
+// check instead of racing readFileSync against a write still in progress.
+const DECK_FILE_WATCH_DEBOUNCE_MS = 300
+
+// Watches a room's dashboard.json for changes made OUTSIDE this app (a
+// hand-edit, a sync tool, a git checkout — anything that isn't
+// saveDeckDashboard) while the room is loaded, notifying edit-role clients
+// so the desktop editor can offer to reload instead of either silently
+// working against a now-stale in-memory copy, or silently clobbering the
+// external change on its own next save. fs.watch's 'change' event fires for
+// OUR OWN writes too, so a debounce alone can't tell the difference — this
+// re-reads the file and compares its actual content against
+// room.lastWrittenJson (set by saveDeckDashboard, and seeded from the raw
+// file content at load time — see getOrLoadRoom) to be sure before
+// notifying anyone. Left running for the room's whole lifetime (rooms are
+// never evicted short of deck deletion, which closes this — see the
+// idMatch/DELETE handler).
+function watchDeckFile(room: DeckRoom): void {
+  const file = deckDashboardFile(room.id)
+  let debounceTimer: NodeJS.Timeout | null = null
+  try {
+    room.fileWatcher = watch(file, () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null
+        let content: string
+        try {
+          content = readFileSync(file, 'utf-8')
+        } catch {
+          // Deleted/renamed mid-write, or a transient race with some other
+          // process — not this feature's concern either way (a real deck
+          // deletion is handled by the DELETE route, which closes this
+          // watcher itself before the file is gone).
+          return
+        }
+        if (content === room.lastWrittenJson) return
+        console.log(`[boarderoni] dashboard.json changed externally for deck ${room.id}, notifying edit clients`)
+        broadcastToEditClients(room, { type: 'dashboard:external-change' })
+      }, DECK_FILE_WATCH_DEBOUNCE_MS)
+    })
+  } catch (err) {
+    console.error(`[boarderoni] failed to watch deck file for ${room.id}`, err)
   }
 }
 
@@ -1815,6 +1918,27 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard }, ws)
         syncEventSources(activeRoom)
         break
+      case 'dashboard:reload': {
+        if (!activeRoom) break
+        if (ctx.role !== 'edit') break
+        const fresh = loadDeckDashboard(activeRoom.id)
+        if (!fresh) break
+        activeRoom.dashboard = fresh
+        // Baseline for the next external-change comparison — read the raw
+        // file fresh rather than re-deriving from `fresh` (which
+        // loadDeckDashboard has already normalized), same reasoning as
+        // getOrLoadRoom's own lastWrittenJson seed.
+        try {
+          activeRoom.lastWrittenJson = readFileSync(deckDashboardFile(activeRoom.id), 'utf-8')
+        } catch {
+          // Vanishingly unlikely (loadDeckDashboard just read this same file
+          // successfully above) — if it somehow fails, the next real save
+          // still re-seeds this via saveDeckDashboard.
+        }
+        broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
+        syncEventSources(activeRoom)
+        break
+      }
       case 'action:trigger':
         if (!activeRoom) break
         await triggerAction(activeRoom, message.widgetId, message.event, ws, message.value, message.final ?? true)

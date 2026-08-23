@@ -15,19 +15,44 @@ const DEFAULT_END_ANGLE = 405
 
 // Maps a pointer event to a 0..1 fraction along the widget's drag axis
 // (slider: position along the track; knob: angle around the center),
-// clamped to the configured range.
-function fractionFromEvent(widget: AdjusterWidget, e: React.PointerEvent, rect: DOMRect): number {
+// clamped to the configured range. `rotateAngle` is the widget's own
+// resolved rotateAngle/rotateAngleExpr (see AdjusterWidget.tsx) — the CSS
+// transform that spins the whole widget (see this hook's own bug report:
+// without this, the drag math kept measuring the pointer against true
+// screen-up while the knob's own "up" had visually rotated away from it, so
+// the handle tracked the mouse at an offset instead of following it
+// directly). getBoundingClientRect() still correctly centers on the
+// widget's true center even when rotated (rotation is around the element's
+// own center by default, so the enlarged rotated bounding box stays
+// centered on the same point) — only the ANGLE needs correcting, not cx/cy.
+function fractionFromEvent(widget: AdjusterWidget, e: React.PointerEvent, rect: DOMRect, rotateAngle: number): number {
   if (widget.style === 'knob') {
     const cx = rect.left + rect.width / 2
     const cy = rect.top + rect.height / 2
     // Inverse of arcPath.ts's polarToCartesian: 0deg = up, increasing
-    // clockwise, matching startAngle/endAngle's "clock position" reading.
-    const angleDeg = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI + 90
+    // clockwise, matching startAngle/endAngle's "clock position" reading —
+    // then counter-rotated back into the widget's own unrotated frame, since
+    // startAngle/endAngle are themselves defined in that frame.
+    const angleDeg = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI + 90 - rotateAngle
     const startAngle = widget.startAngle ?? DEFAULT_START_ANGLE
     const endAngle = widget.endAngle ?? DEFAULT_END_ANGLE
+    // Bisect the dead zone (the gap NOT covered by the sweep, between
+    // endAngle and startAngle+360) at its own midpoint, rather than
+    // wrapping the raw angle up from startAngle directly. That old approach
+    // dumped the ENTIRE dead zone onto the max end — any angle just short of
+    // startAngle (on the wrong side of it) got pushed a full 360° past
+    // endAngle instead of clamping to the min end it's actually closest to,
+    // so dragging slightly past the min stop popped the handle to max
+    // instead of clamping at min (see this fix's own bug report). Centering
+    // the wraparound seam on the dead zone's own midpoint instead makes
+    // "which side of the gap this angle is on" fall out of the same
+    // modular-arithmetic trick for free, since the whole sweep then sits
+    // comfortably in the middle of the normalized window with room to spare
+    // on both sides.
+    const deadZoneMid = endAngle + (360 - (endAngle - startAngle)) / 2
     let normalized = angleDeg
-    while (normalized < startAngle) normalized += 360
-    while (normalized > startAngle + 360) normalized -= 360
+    while (normalized < deadZoneMid - 360) normalized += 360
+    while (normalized >= deadZoneMid) normalized -= 360
     const raw = (normalized - startAngle) / (endAngle - startAngle)
     return Math.min(1, Math.max(0, raw))
   }
@@ -74,6 +99,10 @@ export function useAdjusterDrag(
   // reconcile against in the first place).
   const dragValueRef = useRef<number | null>(null)
   const draggingRef = useRef(false)
+  // Same resolution AdjusterWidgetContent itself uses to build the CSS
+  // transform — kept in sync here so the drag math counter-rotates by
+  // exactly what the widget is actually visually rotated by right now.
+  const rotateAngle = (widget.rotateAngleExpr ? resolveNumericExpr(widget.rotateAngleExpr, variables) : undefined) ?? widget.rotateAngle ?? 0
 
   function valueFor(fraction: number): number {
     return widget.min + fraction * (widget.max - widget.min)
@@ -130,7 +159,7 @@ export function useAdjusterDrag(
     } catch {
       // best-effort, see CanvasWidget's handleResizePointerDown
     }
-    const fraction = fractionFromEvent(widget, e, rect)
+    const fraction = fractionFromEvent(widget, e, rect, rotateAngle)
     setDragFraction(fraction)
     // Fires once, immediately — a new, explicit 'press' event ahead of the
     // throttled 'move' ticks below. Preserves "fires on first touch" legacy
@@ -143,7 +172,7 @@ export function useAdjusterDrag(
   function handlePointerMove(e: React.PointerEvent): void {
     const rect = dragRectRef.current
     if (!rect) return
-    const fraction = fractionFromEvent(widget, e, rect)
+    const fraction = fractionFromEvent(widget, e, rect, rotateAngle)
     setDragFraction(fraction)
     scheduleSend(fraction)
   }
@@ -157,7 +186,7 @@ export function useAdjusterDrag(
     } catch {
       // best-effort
     }
-    const fraction = fractionFromEvent(widget, e, rect)
+    const fraction = fractionFromEvent(widget, e, rect, rotateAngle)
     setDragFraction(fraction)
     // Final, unthrottled 'move' send — guarantees the last position commits
     // even if a scheduled rAF tick from scheduleSend was still pending. Also

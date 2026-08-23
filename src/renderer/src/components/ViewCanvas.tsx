@@ -37,7 +37,7 @@ import { useSwitchPosition } from '../useSwitchPosition'
 import { useSwitchGuard } from '../useSwitchGuard'
 import { useDialSwitchDrag } from '../useDialSwitchDrag'
 import { useToggleSwitchDrag } from '../useToggleSwitchDrag'
-import { isMiddlePosition as isMiddleTogglePosition } from './widgets/ToggleSwitchWidget'
+import { isMiddlePosition as isMiddleTogglePosition, momentarySpringBackIndex } from './widgets/ToggleSwitchWidget'
 import { useDropdownDrag } from '../useDropdownDrag'
 import { DeviceSettingsModal } from './DeviceSettingsModal'
 import { ToastStack } from './ToastStack'
@@ -112,21 +112,26 @@ function RockerSwitchView({ widget, variables }: { widget: RockerSwitchWidget; v
 // Same two-interaction-mode split as DialSwitchView below, plus momentary
 // handling (see SwitchPosition.momentary) in both: a momentary position
 // (only ever the first/last, never the middle) selects immediately on
-// press, and springs back to the middle position the instant you release —
-// tap mode does that itself here (onZonePointerDown/onZonePointerUp);
-// drag mode's own spring-back lives inside useToggleSwitchDrag.ts, since it
-// also has to fire mid-drag, not just on release.
+// press, and springs back — to the middle on a 3-position switch, or
+// whichever of Top/Bottom isn't the momentary one on a 2-position switch
+// (see momentarySpringBackIndex) — the instant you release. Tap mode does
+// that itself here (onZonePointerDown/onZonePointerUp); drag mode's own
+// spring-back lives inside useToggleSwitchDrag.ts, since it also has to fire
+// mid-drag, not just on release.
 function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; variables: VariableMap }): React.JSX.Element {
   // ToggleSwitchWidget has no settleToInactive of its own (RockerSwitchWidget
   // only — see useSwitchPosition.ts) so this is never actually null; the `?? 0`
   // just satisfies the hook's shared, nullable-for-Rocker return type.
   const { activeIndex: rawActiveIndex, select } = useSwitchPosition(widget, variables)
   const activeIndex = rawActiveIndex ?? 0
-  const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useToggleSwitchDrag(widget, activeIndex, select)
+  const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useToggleSwitchDrag(widget, activeIndex, select, variables)
   const { open: guardOpen, toggle: guardToggle } = useSwitchGuard(widget, variables)
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   const count = widget.positions.length
-  const middleIndex = count % 2 === 1 ? (count - 1) / 2 : -1
+  // The properties panel enforces at most one momentary position on a
+  // 2-position switch — see PropertiesPanel.tsx's Momentary section — so
+  // this is really "is there a momentary position at all," not "which one."
+  const hasMomentary = widget.positions.some((p) => p.momentary ?? false)
 
   const content =
     widget.interactionMode === 'drag' ? (
@@ -148,17 +153,26 @@ function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; v
         variables={variables}
         interactive
         activeIndex={activeIndex}
-        // A 2-position toggle has no "direction" tapping it should have to
-        // respect — it's just on/off, so any zone flips it regardless of
-        // which one was actually pressed (unlike 3 positions, where each
-        // zone still has to pick its own specific position — you can't
-        // "toggle" onto a specific middle throw). See this behavior's own
-        // bug report: pressing the zone opposite the current position used
-        // to be the only way to flip it; the same-side zone did nothing.
-        onZonePointerDown={count === 2 ? () => select(activeIndex === 0 ? 1 : 0) : select}
+        // A 2-position toggle with no momentary position has no "direction"
+        // tapping it should have to respect — it's just on/off, so any zone
+        // flips it regardless of which one was actually pressed (unlike 3
+        // positions, where each zone still has to pick its own specific
+        // position — you can't "toggle" onto a specific middle throw). See
+        // this behavior's own bug report: pressing the zone opposite the
+        // current position used to be the only way to flip it; the same-side
+        // zone did nothing. Momentary needs the opposite of that: pressing a
+        // SPECIFIC zone has to select that exact position (so the momentary
+        // one only ever fires while its own zone is actually held, not
+        // whichever one happens to not be active), so this flip-either-zone
+        // convenience only applies once there's no momentary position to
+        // respect.
+        onZonePointerDown={count === 2 && !hasMomentary ? () => select(activeIndex === 0 ? 1 : 0) : select}
         onZonePointerUp={(index) => {
           const isMomentary = !isMiddleTogglePosition(index, count) && (widget.positions[index]?.momentary ?? false)
-          if (isMomentary && middleIndex >= 0) select(middleIndex)
+          if (isMomentary) {
+            const target = momentarySpringBackIndex(index, count)
+            if (target >= 0) select(target)
+          }
         }}
         guardOpen={guardOpen}
         onGuardToggle={guardToggle}
@@ -192,7 +206,7 @@ function DialSwitchView({ widget, variables }: { widget: DialSwitchWidget; varia
   // just satisfies the hook's shared, nullable-for-Rocker return type.
   const { activeIndex: rawActiveIndex, select } = useSwitchPosition(widget, variables)
   const activeIndex = rawActiveIndex ?? 0
-  const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useDialSwitchDrag(widget, select)
+  const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useDialSwitchDrag(widget, select, variables)
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
 
   const content =

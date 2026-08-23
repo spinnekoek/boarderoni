@@ -2,6 +2,7 @@ import { DEFAULT_WIDGET_COLOR, pickAutoBorderColor, withOpacity } from '@shared/
 import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { ButtonWidget, WidgetState } from '@shared/types'
 import { actionTitle } from '@shared/actionTitle'
+import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
 import { boxStyle } from './boxStyle'
 
@@ -26,6 +27,7 @@ export function ButtonWidgetContent({
   // double-trigger.
   onKeyboardActivate?: () => void
 }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
   const resolvedColor = resolveColor(state, variables)
   const backgroundColor = resolvedColor.color ?? DEFAULT_WIDGET_COLOR
   const resolvedBorderColor = resolveBorderColor(state, variables)
@@ -44,7 +46,7 @@ export function ButtonWidgetContent({
     transform: rotateAngle ? `rotate(${rotateAngle}deg)` : undefined
   }
 
-  const labelElements = renderWidgetLabels(state.labels, backgroundColor, variables)
+  const labelElements = renderWidgetLabels(state.labels, backgroundColor, variables, debugMode)
 
   if (interactive) {
     return (

@@ -1,8 +1,11 @@
 import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { AdjusterWidget } from '@shared/types'
+import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
-import { describeArc, polarToCartesian } from './arcPath'
+import { describeArc } from './arcPath'
+import { renderTickSet } from './tickSet'
+import { DialShapeGraphic, SquareIndicatorOverlay } from './DialShapeGraphic'
 
 const DEFAULT_START_ANGLE = 135
 const DEFAULT_END_ANGLE = 405
@@ -39,33 +42,108 @@ function AdjusterBar({
   )
 }
 
-// The knob's handle is drawn as an SVG <circle> in the same 0-100 viewBox
-// coordinate space as the arc paths (rather than a separately-positioned
-// HTML element) — that's what keeps it pixel-aligned with the arc under the
-// SVG's own aspect-ratio letterboxing when the widget's box isn't square,
-// which a percentage-positioned sibling div couldn't guarantee.
+// The knob's handle indicator is drawn via the same DialShapeGraphic every
+// other dial widget (EncoderWidget, DialSwitchWidget) uses, in the same
+// 0-100 viewBox coordinate space as the arc paths (rather than a
+// separately-positioned HTML element) — that's what keeps it pixel-aligned
+// with the arc under the SVG's own aspect-ratio letterboxing when the
+// widget's box isn't square, which a percentage-positioned sibling div
+// couldn't guarantee. Ticks (widget.tickSets) reuse the exact same
+// renderTickSet GaugeWidget's arc style does — this knob has the same
+// bounded startAngle..endAngle/min..max shape an arc gauge does, just without
+// its own per-render viewBox (see renderTickSet's own comment for why
+// center/viewBoxRect differ between the two callers).
 function AdjusterKnob({
+  widget,
   fraction,
   fillColor,
   trackColor,
-  startAngle,
-  endAngle
+  trackBaseColor,
+  borderColor,
+  variables,
+  debugMode
 }: {
+  widget: AdjusterWidget
   fraction: number
   fillColor: string
   trackColor: string
-  startAngle: number
-  endAngle: number
+  // The raw, pre-opacity `track.color` (or DEFAULT_WIDGET_COLOR) — what
+  // bezelColor/innerBezelColor fall back to when unset, same "resolve a
+  // fresh hex through withOpacity with THIS field's own opacity, not the
+  // already-composited trackColor string" convention ToggleSwitchWidget's
+  // own innerBezelColor follows (see its own resolvedTrack.color fallback).
+  trackBaseColor: string
+  borderColor: string
+  variables: VariableMap
+  debugMode: boolean
 }): React.JSX.Element {
+  const startAngle = widget.startAngle ?? DEFAULT_START_ANGLE
+  const endAngle = widget.endAngle ?? DEFAULT_END_ANGLE
   const handleAngle = startAngle + fraction * (endAngle - startAngle)
-  const handlePos = polarToCartesian(50, 50, ARC_RADIUS, handleAngle)
+  const shapeColor = (widget.dialShape ?? 'needle') === 'square' ? (widget.squareColor ?? fillColor) : (widget.circleColor ?? fillColor)
+  const bezelRadius = widget.bezelRadius ?? ARC_RADIUS - ARC_STROKE_WIDTH
+  const bezelColor = withOpacity(widget.bezelColor ?? trackBaseColor, widget.bezelOpacity ?? 1)
+  const bezelBorderWidth = widget.bezelBorderWidth ?? 0
+  const innerBezelColor = withOpacity(widget.innerBezelColor ?? trackBaseColor, widget.innerBezelOpacity ?? 1)
+  const innerBezelRadius = widget.innerBezelRadius ?? 0
+  const innerBezelBorderWidth = widget.innerBezelBorderWidth ?? 0
+  const innerBezelBorderColor = withOpacity(widget.innerBezelBorderColor ?? 'transparent', 1)
+
+  const tickSets = widget.tickSets ?? []
+  const tickResults = tickSets.map((tickSet) => ({
+    id: tickSet.id,
+    ...renderTickSet({
+      tickSet,
+      startAngle,
+      endAngle,
+      min: widget.min,
+      max: widget.max,
+      arcRadius: ARC_RADIUS,
+      center: { x: 50, y: 50 },
+      viewBoxRect: { x: 0, y: 0, width: 100, height: 100 },
+      w: widget.w,
+      h: widget.h,
+      trackColor,
+      variables,
+      debugMode
+    })
+  }))
 
   return (
-    <svg className="deck-gauge__arc" viewBox="0 0 100 100">
-      <path d={describeArc(50, 50, ARC_RADIUS, startAngle, endAngle)} stroke={trackColor} strokeWidth={ARC_STROKE_WIDTH} fill="none" strokeLinecap="round" />
-      <path d={describeArc(50, 50, ARC_RADIUS, startAngle, handleAngle)} stroke={fillColor} strokeWidth={ARC_STROKE_WIDTH} fill="none" strokeLinecap="round" />
-      <circle cx={handlePos.x} cy={handlePos.y} r={7} fill={fillColor} stroke="#14161b" strokeWidth={1} />
-    </svg>
+    <>
+      {tickResults.map((r) => (
+        <div key={r.id}>{r.labels}</div>
+      ))}
+      <svg className="deck-gauge__arc" viewBox="0 0 100 100">
+        <circle cx={50} cy={50} r={bezelRadius} fill={bezelColor} stroke={borderColor} strokeWidth={bezelBorderWidth} />
+        {innerBezelRadius > 0 && (
+          <circle
+            cx={50}
+            cy={50}
+            r={innerBezelRadius}
+            fill={innerBezelColor}
+            stroke={innerBezelBorderWidth > 0 ? innerBezelBorderColor : undefined}
+            strokeWidth={innerBezelBorderWidth > 0 ? innerBezelBorderWidth : undefined}
+          />
+        )}
+        <path d={describeArc(50, 50, ARC_RADIUS, startAngle, endAngle)} stroke={trackColor} strokeWidth={ARC_STROKE_WIDTH} fill="none" strokeLinecap="round" />
+        <path d={describeArc(50, 50, ARC_RADIUS, startAngle, handleAngle)} stroke={fillColor} strokeWidth={ARC_STROKE_WIDTH} fill="none" strokeLinecap="round" />
+        {tickResults.map((r) => (
+          <g key={r.id}>{r.marks}</g>
+        ))}
+        <DialShapeGraphic
+          style={widget}
+          angle={handleAngle}
+          fillColor={fillColor}
+          trackColor={trackColor}
+          needleLength={ARC_RADIUS}
+          needleHalfWidth={3}
+          needleTipLength={12}
+          needleCenterRadius={5}
+        />
+      </svg>
+      <SquareIndicatorOverlay style={widget} angle={handleAngle} shapeColor={shapeColor} w={widget.w} h={widget.h} />
+    </>
   )
 }
 
@@ -91,6 +169,7 @@ export function AdjusterWidgetContent({
   onPointerMove?: (e: React.PointerEvent) => void
   onPointerUp?: (e: React.PointerEvent) => void
 }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
   const restValue = widget.valueExpr ? (resolveNumericExpr(widget.valueExpr, variables) ?? widget.min) : widget.min
   const span = widget.max - widget.min
   const restFraction = span !== 0 ? Math.min(1, Math.max(0, (restValue - widget.min) / span)) : 0
@@ -102,6 +181,7 @@ export function AdjusterWidgetContent({
   const trackColor = withOpacity(resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1)
   const resolvedBorder = resolveBorderColor(widget, variables)
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
+  const rotateAngle = widget.rotateAngleExpr ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle) : widget.rotateAngle
 
   // Box border/radius only make sense for the 'slider' style — a knob has no
   // rectangular box to round or border, same reasoning as GaugeWidgetContent.
@@ -115,7 +195,8 @@ export function AdjusterWidgetContent({
       borderLeftWidth: widget.borderWidthLeft ?? 1,
       borderColor
     }),
-    ...(widget.zIndex !== undefined && { zIndex: widget.zIndex })
+    ...(widget.zIndex !== undefined && { zIndex: widget.zIndex }),
+    transform: rotateAngle ? `rotate(${rotateAngle}deg)` : undefined
   }
 
   return (
@@ -128,11 +209,20 @@ export function AdjusterWidgetContent({
       onPointerCancel={interactive ? onPointerUp : undefined}
     >
       {widget.style === 'knob' ? (
-        <AdjusterKnob fraction={fraction} fillColor={fillColor} trackColor={trackColor} startAngle={widget.startAngle ?? DEFAULT_START_ANGLE} endAngle={widget.endAngle ?? DEFAULT_END_ANGLE} />
+        <AdjusterKnob
+          widget={widget}
+          fraction={fraction}
+          fillColor={fillColor}
+          trackColor={trackColor}
+          trackBaseColor={resolvedTrack.color ?? DEFAULT_WIDGET_COLOR}
+          borderColor={borderColor}
+          variables={variables}
+          debugMode={debugMode}
+        />
       ) : (
         <AdjusterBar fraction={fraction} fillColor={fillColor} trackColor={trackColor} orientation={widget.orientation ?? 'vertical'} />
       )}
-      {renderWidgetLabels(widget.labels, trackColor, variables)}
+      {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
     </div>
   )
 }
