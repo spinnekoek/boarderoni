@@ -1316,10 +1316,27 @@ function coerceVariableValue(value: unknown): VariableValue {
 // debounces instead — see scheduleDebouncedSave.
 function applyVariableUpdates(room: DeckRoom, updates: Record<string, unknown>, options: { immediate: boolean }): void {
   const existing = room.dashboard.variables ?? []
-  const existingNames = new Set(existing.map((v) => v.name))
-  const variables: Variable[] = existing.map((v) => (v.name in updates ? { ...v, value: coerceVariableValue(updates[v.name]) } : v))
-  for (const [name, value] of Object.entries(updates)) {
-    if (!existingNames.has(name)) variables.push({ id: randomUUID(), name, value: coerceVariableValue(value) })
+  const existingByName = new Map(existing.map((v) => [v.name, v]))
+  const coercedUpdates = new Map(Object.entries(updates).map(([name, value]) => [name, coerceVariableValue(value)]))
+
+  // Most event-source ticks (a DCS-BIOS field, a REST poll, ...) report the
+  // same value again rather than something new — skip rebuilding (and
+  // broadcasting/saving) unless at least one value actually differs from
+  // what's already there, or every tick would replace `variables` with a
+  // new-but-equal array, forcing every connected client to re-render and
+  // re-evaluate every fx expression for nothing.
+  let hasChange = false
+  for (const [name, value] of coercedUpdates) {
+    if (existingByName.get(name)?.value !== value) {
+      hasChange = true
+      break
+    }
+  }
+  if (!hasChange) return
+
+  const variables: Variable[] = existing.map((v) => (coercedUpdates.has(v.name) ? { ...v, value: coercedUpdates.get(v.name)! } : v))
+  for (const [name, value] of coercedUpdates) {
+    if (!existingByName.has(name)) variables.push({ id: randomUUID(), name, value })
   }
 
   room.dashboard = { ...room.dashboard, variables }

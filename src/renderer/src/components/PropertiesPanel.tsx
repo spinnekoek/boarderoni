@@ -2470,6 +2470,11 @@ export function PropertiesPanel(): React.JSX.Element {
   const [activePositionIndex, setActivePositionIndex] = useState(0)
   const dragPositionIndex = useRef<number | null>(null)
   const [activePositionExprExpanded, setActivePositionExprExpanded] = useState(false)
+  // AdjusterWidget.valueExpr's own expand button — declared unconditionally
+  // here (not inside the 'adjuster' branch below) for the same reason as
+  // activePositionExprExpanded above: its hook order can't change across a
+  // selection change to/from an adjuster.
+  const [adjusterValueExprExpanded, setAdjusterValueExprExpanded] = useState(false)
 
   const widget = selectedWidgetIds.length === 1 ? widgets.find((w) => w.id === selectedWidgetIds[0]) ?? null : null
 
@@ -3489,14 +3494,31 @@ export function PropertiesPanel(): React.JSX.Element {
 
           <label className="properties__field">
             <span>Rest value (optional)</span>
-            <textarea
-              className="properties__code"
-              rows={2}
-              placeholder="return variables.my_variable;"
-              value={adjuster.valueExpr ?? ''}
-              onChange={(e) => patchAdjuster({ valueExpr: e.target.value || undefined })}
-            />
+            <div className="color-picker-button__expr-editor-wrap">
+              <CodeEditor
+                value={adjuster.valueExpr ?? ''}
+                onChange={(code) => patchAdjuster({ valueExpr: code || undefined })}
+                placeholder="return variables.my_variable;"
+                minimal
+              />
+              <button
+                type="button"
+                className="color-picker-button__expand"
+                title="Expand"
+                onClick={() => setAdjusterValueExprExpanded(true)}
+              >
+                ⤢
+              </button>
+            </div>
           </label>
+          {adjusterValueExprExpanded && (
+            <ExpressionEditorModal
+              value={adjuster.valueExpr ?? ''}
+              onChange={(code) => patchAdjuster({ valueExpr: code || undefined })}
+              placeholder="return variables.my_variable;"
+              onClose={() => setAdjusterValueExprExpanded(false)}
+            />
+          )}
           <p className="properties__hint">
             Where the handle sits while not being dragged — e.g. reflect a variable back into the visual. Falls back to Min if unset.
           </p>

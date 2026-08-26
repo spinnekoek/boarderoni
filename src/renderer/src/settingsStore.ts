@@ -49,6 +49,14 @@ interface EditorSettings {
   // a new widget under the currently-visible corner rather than the board's
   // origin) can read it too.
   camera: Camera
+  // The Events modal's own last-active source tab (an EventSource.id) —
+  // lives here, not the modal's local state, since the modal fully unmounts
+  // on close (see Toolbar.tsx's `{eventsOpen && <EventsModal .../>}`), which
+  // would otherwise discard it every time. A stale id (source deleted, or
+  // this dashboard has none) is already handled by EventsModal's own
+  // fallback-to-first-source effect, so persisting it across dashboards/
+  // restarts is harmless even though it's only really meaningful within one.
+  eventsModalActiveSourceId: string | null
   setSnapToGrid: (value: boolean) => void
   setPropertiesWidth: (value: number) => void
   setSelectedDeviceId: (id: string) => void
@@ -56,6 +64,7 @@ interface EditorSettings {
   closeSettings: () => void
   setDebugMode: (value: boolean) => void
   setCamera: (updater: Camera | ((camera: Camera) => Camera)) => void
+  setEventsModalActiveSourceId: (id: string | null) => void
 }
 
 // Editor-only preferences (not part of the synced dashboard data), persisted
@@ -71,6 +80,7 @@ export const useEditorSettings = create<EditorSettings>()(
       settingsFocusKind: null,
       debugMode: false,
       camera: INITIAL_CAMERA,
+      eventsModalActiveSourceId: null,
       setSnapToGrid: (value) => set({ snapToGrid: value }),
       setPropertiesWidth: (value) =>
         set({ propertiesWidth: Math.min(MAX_PROPERTIES_WIDTH, Math.max(MIN_PROPERTIES_WIDTH, Math.round(value))) }),
@@ -78,7 +88,8 @@ export const useEditorSettings = create<EditorSettings>()(
       openSettings: (focusKind) => set({ settingsModalOpen: true, settingsFocusKind: focusKind ?? null }),
       closeSettings: () => set({ settingsModalOpen: false, settingsFocusKind: null }),
       setDebugMode: (value) => set({ debugMode: value }),
-      setCamera: (updater) => set((s) => ({ camera: typeof updater === 'function' ? updater(s.camera) : updater }))
+      setCamera: (updater) => set((s) => ({ camera: typeof updater === 'function' ? updater(s.camera) : updater })),
+      setEventsModalActiveSourceId: (id) => set({ eventsModalActiveSourceId: id })
     }),
     {
       name: 'boarderoni-editor-settings',

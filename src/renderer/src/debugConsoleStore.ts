@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import { setExpressionConsoleSink } from '@shared/expr'
 
 export interface DebugLogEntry {
@@ -16,6 +17,10 @@ export interface DebugLogEntry {
 // console's own scrollback limit.
 const MAX_LOG_ENTRIES = 500
 
+const MIN_PANEL_HEIGHT = 100
+const MAX_PANEL_HEIGHT = 640
+const DEFAULT_PANEL_HEIGHT = 220
+
 interface DebugConsoleState {
   open: boolean
   logs: DebugLogEntry[]
@@ -25,10 +30,15 @@ interface DebugConsoleState {
   // turning it off only affects new entries going forward, it doesn't
   // retroactively split already-grouped ones back apart.
   groupSimilar: boolean
+  // Drag-resized via the panel's own top-edge handle — persisted (unlike
+  // `open`/`logs` below) since it's a size preference, same as
+  // settingsStore's propertiesWidth.
+  height: number
   setOpen: (open: boolean) => void
   toggleOpen: () => void
   clearLogs: () => void
   toggleGroupSimilar: () => void
+  setHeight: (value: number) => void
 }
 
 let nextLogId = 0
@@ -43,15 +53,31 @@ function formatArg(arg: unknown): string {
   }
 }
 
-export const useDebugConsoleStore = create<DebugConsoleState>((set) => ({
-  open: false,
-  logs: [],
-  groupSimilar: true,
-  setOpen: (open) => set({ open }),
-  toggleOpen: () => set((s) => ({ open: !s.open })),
-  clearLogs: () => set({ logs: [] }),
-  toggleGroupSimilar: () => set((s) => ({ groupSimilar: !s.groupSimilar }))
-}))
+export const useDebugConsoleStore = create<DebugConsoleState>()(
+  persist(
+    (set) => ({
+      open: false,
+      logs: [],
+      groupSimilar: true,
+      height: DEFAULT_PANEL_HEIGHT,
+      setOpen: (open) => set({ open }),
+      toggleOpen: () => set((s) => ({ open: !s.open })),
+      clearLogs: () => set({ logs: [] }),
+      toggleGroupSimilar: () => set((s) => ({ groupSimilar: !s.groupSimilar })),
+      setHeight: (value) => set({ height: Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, Math.round(value))) })
+    }),
+    {
+      name: 'boarderoni-debug-console',
+      // Transient — reopening the app with the panel already open (or full
+      // of last session's logs) would be a surprise, not a convenience, same
+      // reasoning as settingsStore's own settingsModalOpen/camera exclusions.
+      partialize: (state) => {
+        const { open: _open, logs: _logs, ...rest } = state
+        return rest
+      }
+    }
+  )
+)
 
 // Registered once at module load — always wired up, but the sink itself
 // checks `open` (see useDebugConsoleStore.getState() below) so a

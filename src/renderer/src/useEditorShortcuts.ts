@@ -67,6 +67,13 @@ export function useEditorShortcuts(): void {
 
       const key = e.key.toLowerCase()
       if (key === 'c') {
+        // A real, non-empty text selection (e.g. log lines picked in the
+        // debug console panel) means Ctrl+C should do the browser's own
+        // native copy, not this shortcut's widget-copy — isTextInputElement
+        // above only catches an actual input/textarea/contentEditable
+        // focused, not plain selectable text sitting in a <span>/<div>.
+        const selection = window.getSelection()
+        if (selection && !selection.isCollapsed && selection.toString().length > 0) return
         const { selectedWidgetIds, dashboard, editingSubDeckId } = useDashboardStore.getState()
         if (selectedWidgetIds.length === 0) return
         e.preventDefault()

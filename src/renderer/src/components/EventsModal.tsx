@@ -418,7 +418,10 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
   const updateDashboardMeta = useDashboardStore((s) => s.updateDashboardMeta)
   const [addPickerOpen, setAddPickerOpen] = useState(false)
   const [browserOpenForSourceId, setBrowserOpenForSourceId] = useState<string | null>(null)
-  const [activeSourceId, setActiveSourceId] = useState<string | null>(null)
+  // Lives in useEditorSettings, not local state — see that field's own
+  // comment for why (this modal fully unmounts on close).
+  const activeSourceId = useEditorSettings((s) => s.eventsModalActiveSourceId)
+  const setActiveSourceId = useEditorSettings((s) => s.setEventsModalActiveSourceId)
   useEscapeToClose(onClose)
 
   // Falls back to the first remaining source if the active tab's source was
