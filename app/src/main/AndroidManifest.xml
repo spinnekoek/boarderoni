@@ -6,6 +6,14 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- As of Android 13 (API 33), NsdManager discovery/resolve is gated
+         behind this runtime permission — without it, discoverServices()
+         silently finds nothing on a targetSdk 34 app. neverForLocation is
+         safe here since this app only uses NSD for service discovery, never
+         to derive physical location from Wi-Fi scan results. -->
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
 
     <application
         android:allowBackup="false"

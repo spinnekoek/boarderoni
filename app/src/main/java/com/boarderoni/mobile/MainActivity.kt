@@ -1,7 +1,9 @@
 package com.boarderoni.mobile
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.Network
@@ -10,6 +12,7 @@ import android.net.NetworkRequest
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -25,8 +28,10 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.addCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -70,6 +75,15 @@ class MainActivity : AppCompatActivity() {
     // "host:port" of whatever's currently loaded, so a redundant onServiceFound
     // for the same instance doesn't reload a perfectly fine WebView.
     private var currentTarget: String? = null
+
+    // Must be registered unconditionally before STARTED (a property
+    // initializer runs during construction, ahead of onCreate) — the
+    // Activity Result API throws if you try to register once the activity
+    // is already started.
+    private val nearbyWifiPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) startDiscovery()
+        }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -196,7 +210,24 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         acquireMulticastLock()
         registerNetworkCallback()
-        startDiscovery()
+        ensureNearbyWifiPermissionThenDiscover()
+    }
+
+    // NsdManager discovery/resolve throws SecurityException without
+    // NEARBY_WIFI_DEVICES on API 33+ (targetSdk 34 here) — see the manifest
+    // entry for why. Below 33 the permission doesn't exist, so treat it as
+    // implicitly granted.
+    private fun hasNearbyWifiPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun ensureNearbyWifiPermissionThenDiscover() {
+        if (hasNearbyWifiPermission()) {
+            startDiscovery()
+        } else {
+            nearbyWifiPermissionLauncher.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
     }
 
     override fun onStop() {
@@ -343,7 +374,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun restartDiscovery() {
         stopDiscovery()
-        mainHandler.postDelayed({ startDiscovery() }, 300)
+        // Guard rather than re-prompt: this runs unattended from the
+        // watchdog every DISCOVERY_WATCHDOG_MS, and calling startDiscovery()
+        // without the permission throws. If it's still ungranted, onStart's
+        // ensureNearbyWifiPermissionThenDiscover() is the only place that
+        // should be asking the user for it.
+        if (hasNearbyWifiPermission()) {
+            mainHandler.postDelayed({ startDiscovery() }, 300)
+        }
     }
 
     private fun resolveService(service: NsdServiceInfo) {
