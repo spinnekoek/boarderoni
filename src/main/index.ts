@@ -254,24 +254,26 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
 
   if (widget.type === 'switch-rocker') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
 
-  // Morph/gauge/adjuster/encoder/screen-capture/label widgets never existed
-  // in any of the legacy shapes below — they're always created with their
-  // current shape from the start (morph with states[]/blocks[], the rest
-  // with no states[] at all, screen-capture with no labels concept at all).
-  // label is the important one to keep out of the block below: its own
-  // `label: WidgetLabel` (singular — see LabelWidget's own comment in
-  // shared/types.ts for why, deliberately not the flat `labels[]` every
-  // other type carries) has nothing to do with the legacy flat-field
-  // `label?: string` the block below expects — falling through to it would
-  // destructure `label` off as if it were that legacy string, discard it via
-  // `...rest`, and leave the widget with no `label` at all.
+  // Morph/gauge/adjuster/encoder/screen-capture/label/line widgets never
+  // existed in any of the legacy shapes below — they're always created with
+  // their current shape from the start (morph with states[]/blocks[], the
+  // rest with no states[] at all, screen-capture with no labels concept at
+  // all, line with no labels/events concept at all). label is the important
+  // one to keep out of the block below: its own `label: WidgetLabel`
+  // (singular — see LabelWidget's own comment in shared/types.ts for why,
+  // deliberately not the flat `labels[]` every other type carries) has
+  // nothing to do with the legacy flat-field `label?: string` the block
+  // below expects — falling through to it would destructure `label` off as
+  // if it were that legacy string, discard it via `...rest`, and leave the
+  // widget with no `label` at all.
   if (
     widget.type === 'morph' ||
     widget.type === 'gauge' ||
     widget.type === 'adjuster' ||
     widget.type === 'encoder' ||
     widget.type === 'screen-capture' ||
-    widget.type === 'label'
+    widget.type === 'label' ||
+    widget.type === 'line'
   ) {
     return widget
   }
@@ -2334,7 +2336,17 @@ ipcMain.handle('open-external', (_event, url: string) => {
 // Lets the Android app find this machine via NsdManager instead of a
 // manually-typed IP — see MDNS_SERVICE_TYPE in shared/constants.ts for the
 // TXT record contract.
-const bonjour = new Bonjour()
+//
+// Without an errorCallback, bonjour-service's Server defaults to
+// `(err) => { throw err }` for any failure responding to an mDNS query
+// (see node_modules/bonjour-service/dist/lib/mdns-server.js) — e.g. an
+// EHOSTUNREACH send on some network interface with no multicast route
+// (a VPN/virtual adapter, or one that just dropped). That throw happens
+// inside dgram's own async send callback, so it becomes an uncaught
+// exception that crashes the main process instead of a caught error. Same
+// "best-effort, auto-discovery is optional" reasoning as the try/catch
+// around .publish() below — log and move on instead of crashing.
+const bonjour = new Bonjour({}, (err) => console.error('[boarderoni] mDNS error', err))
 const webPort = devServerUrl ? Number(new URL(devServerUrl).port) : SERVER_PORT
 let mdnsService: Service | undefined
 try {
@@ -2342,6 +2354,12 @@ try {
     name: `Boarderoni (${hostname()})`,
     type: MDNS_SERVICE_TYPE,
     port: SERVER_PORT,
+    // Android's NsdManager can non-deterministically resolve to an
+    // advertised AAAA record over the A record, and a link-local IPv6
+    // address (fe80::...) has no reachable route without a zone/scope id
+    // — the phone silently fails to connect even though discovery
+    // succeeded. Desktop-side LAN discovery has no need for IPv6 here.
+    disableIPv6: true,
     txt: {
       webPort: String(webPort),
       dev: devServerUrl ? '1' : '0'

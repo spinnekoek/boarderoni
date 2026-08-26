@@ -34,7 +34,7 @@ function cloneWidget(widget: Widget, offset: number): Widget {
   }
 
   // No nested labels/positions/states to regenerate ids for at all.
-  if (widget.type === 'screen-capture') {
+  if (widget.type === 'screen-capture' || widget.type === 'line') {
     return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset }
   }
 

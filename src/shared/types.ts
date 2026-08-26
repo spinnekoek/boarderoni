@@ -268,6 +268,12 @@ export interface WidgetLabel {
   // affects automatic (radial) placement, i.e. labelAnchor unset — a label
   // pinned to a fixed side ignores this. Unset uses the fixed LABEL_OFFSET.
   labelDistance?: number
+  // Nudges this label's box by a fixed pixel amount, independent of
+  // align/verticalAlign/padding above — negative moves left/up. Applied on
+  // top of whatever those already produce, including DialSwitchWidget's own
+  // radial/fixed-side placement.
+  offsetX?: number
+  offsetY?: number
 }
 
 // Purely geometric per-side appearance shared by anything rendered as a
@@ -1457,6 +1463,37 @@ export interface LabelWidget {
   zIndex?: number
 }
 
+// A straight decorative bar — w is its length, h its bounding-box height
+// (drag/select hit target, and the ceiling lineWidth can't exceed). The
+// editor's resize handle only ever drags length (see CanvasWidget.tsx), not
+// h — for anything but perfectly horizontal, use rotateAngle rather than
+// fighting with a 2D resize to get an angled line, same convention as
+// ButtonWidget/RockerSwitchWidget's own rotateAngle (degrees, clockwise, 0
+// unrotated). No labels/events of its own — if you need those, use a Label
+// or Button widget instead; this is purely a visual divider/rule.
+export interface LineWidget {
+  id: string
+  type: 'line'
+  x: number
+  y: number
+  w: number
+  h: number
+  color?: string
+  colorExpr?: string
+  // The actual drawn thickness of the bar, vertically centered within h —
+  // deliberately separate from h so h can stay a comfortably large
+  // drag/click target (and rotation pivot box) while the visible line
+  // itself is thin. Falls back to h (i.e. the bar fills its own box, same
+  // as before this field existed) when unset.
+  lineWidth?: number
+  rotateAngle?: number
+  // Overrides rotateAngle with a live expression (degrees, same convention)
+  // when set — e.g. tying the tilt to a variable instead of a fixed value.
+  // Falls back to rotateAngle if unset or unresolved.
+  rotateAngleExpr?: string
+  zIndex?: number
+}
+
 export type Widget =
   | ButtonWidget
   | MorphButtonWidget
@@ -1469,6 +1506,7 @@ export type Widget =
   | DropdownWidget
   | ScreenCaptureWidget
   | LabelWidget
+  | LineWidget
 
 // A plain draggable/resizable x/y/w/h rectangle in the editor (unlike
 // MorphButtonWidget's cellW/cellH+blocks shape) — shared prop type for
@@ -1484,6 +1522,7 @@ export type BoxWidget =
   | DropdownWidget
   | ScreenCaptureWidget
   | LabelWidget
+  | LineWidget
 
 // Widgets driven by the WidgetState/statesEnabled/activeStateExpr machinery
 // — used to narrow getEffectiveStates now that Widget includes types
@@ -1673,6 +1712,23 @@ export interface SubDeck {
   // just be a different arbitrary guess. Unset falls back to
   // DEFAULT_GRID_SIZE (shared/constants.ts), same as Dashboard.gridSize.
   gridSize?: number
+  // The reference resolution this screen's widgets were positioned against —
+  // read by the deployed view client (see ViewCanvas.tsx), NOT the editor
+  // (which uses its own live selectedDeviceId preview instead — see
+  // Canvas.tsx). Unlike gridSize, this DOES matter to the deployed client:
+  // every widget's x/y/w/h is a literal, unscaled CSS pixel value, and the
+  // background image's own background-size:cover crops to fill whatever
+  // container it's actually shown in — so without a fixed reference size to
+  // scale/letterbox the whole screen against, a client whose real viewport
+  // doesn't happen to match this exactly sees the background crop
+  // differently than the (unscaled) widgets expect, drifting the two apart
+  // (see the dashboard-vs-background-image bug this was added to fix).
+  // Same "own value per screen, not inherited from the parent Dashboard"
+  // reasoning as gridSize above — a sub-deck is often a genuinely different
+  // physical screen. Unset falls back to DEFAULT_CANVAS_WIDTH/HEIGHT
+  // (shared/constants.ts), same convention as gridSize's own default.
+  canvasWidth?: number
+  canvasHeight?: number
 }
 
 export interface Dashboard {
@@ -1712,6 +1768,10 @@ export interface Dashboard {
   // deck (it used to be a single editor-wide preference, not even
   // deck-scoped, before this was added).
   gridSize?: number
+  // The main view's own reference resolution — see SubDeck.canvasWidth's own
+  // comment for what this is for and why it's per-screen.
+  canvasWidth?: number
+  canvasHeight?: number
 }
 
 export interface DeviceInfo {

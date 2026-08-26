@@ -59,11 +59,11 @@ export function renderWidgetLabel(
   // either axis has no edge to push past, so it stays a no-op there — same
   // as positive padding already was at center).
   const overflow = Math.min(padding, 0)
-  const dx = align === 'left' ? overflow : align === 'right' ? -overflow : 0
-  const dy = verticalAlign === 'top' ? overflow : verticalAlign === 'bottom' ? -overflow : 0
+  const dx = (align === 'left' ? overflow : align === 'right' ? -overflow : 0) + (label.offsetX ?? 0)
+  const dy = (verticalAlign === 'top' ? overflow : verticalAlign === 'bottom' ? -overflow : 0) + (label.offsetY ?? 0)
   const rotation = label.rotation ?? 0
   const transformParts: string[] = []
-  if (overflow !== 0) transformParts.push(`translate(${dx}px, ${dy}px)`)
+  if (dx !== 0 || dy !== 0) transformParts.push(`translate(${dx}px, ${dy}px)`)
   if (rotation !== 0) transformParts.push(`rotate(${rotation}deg)`)
   const font = resolveFont(label.fontFamily)
   const labelStyle: React.CSSProperties = {

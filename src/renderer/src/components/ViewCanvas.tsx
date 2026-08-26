@@ -6,7 +6,7 @@ import { getKeepScreenOnPreference } from '../id'
 import { getEffectiveStates } from '@shared/states'
 import { morphFootprint } from '@shared/morph'
 import { resolveColor, resolveNumericExpr, toVariableMap, type VariableMap } from '@shared/expr'
-import { findSubDeck, getSubDeckWidgets } from '@shared/subDecks'
+import { findSubDeck, getSubDeckCanvasSize, getSubDeckWidgets } from '@shared/subDecks'
 import type {
   AdjusterWidget,
   DialSwitchWidget,
@@ -19,6 +19,7 @@ import type {
   Widget
 } from '@shared/types'
 import { OverlayPanel } from './OverlayPanel'
+import { LetterboxedCanvas } from './LetterboxedCanvas'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
 import { GaugeWidgetContent } from './widgets/GaugeWidget'
@@ -30,6 +31,7 @@ import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
 import { ToggleSwitchWidgetContent } from './widgets/ToggleSwitchWidget'
 import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { LabelWidgetContent } from './widgets/LabelWidget'
+import { LineWidgetContent } from './widgets/LineWidget'
 import { useAdjusterDrag } from '../useAdjusterDrag'
 import { useMorphSliderDrag } from '../useMorphSliderDrag'
 import { useEncoderDrag } from '../useEncoderDrag'
@@ -410,34 +412,89 @@ function MorphView({ widget, variables, error }: { widget: MorphButtonWidget; va
   )
 }
 
+// Which variable names a widget's own expr fields (colorExpr, textExpr,
+// valueExpr, tick-set labelTextExpr, per-position/per-state exprs, ...)
+// could possibly read — computed by regex-scanning the widget's own JSON
+// rather than enumerating every expr field on every widget type by hand, so
+// a newly added expr field is covered automatically instead of silently
+// falling through some hardcoded list (which would understate dependencies
+// and go stale, a much worse failure than over-rendering). Cached per
+// widget OBJECT (not per id) via WeakMap — cheap to recompute only when the
+// widget itself actually changes (reconcileWidgetList in shared/subDecks.ts
+// already preserves identity for unchanged widgets), not on every
+// variables:sync tick. Returns null ("depends on everything, don't try to
+// scope it") whenever the scan finds a `variables` reference it can't
+// resolve to a literal name — e.g. a computed `variables[someExpr]` lookup
+// — so an unusual case fails safe (always re-renders) instead of silently
+// missing a real dependency.
+const widgetVariableDepsCache = new WeakMap<Widget, Set<string> | null>()
+const VARIABLE_REF_RE = /variables(?:\.(\w+)|\[\\*["'](\w+)\\*["']\])/g
+
+function widgetVariableDependencies(widget: Widget): Set<string> | null {
+  const cached = widgetVariableDepsCache.get(widget)
+  if (cached !== undefined) return cached
+  const json = JSON.stringify(widget)
+  const deps = new Set<string>()
+  let match: RegExpExecArray | null
+  VARIABLE_REF_RE.lastIndex = 0
+  while ((match = VARIABLE_REF_RE.exec(json))) deps.add((match[1] ?? match[2])!)
+  const result = json.replace(VARIABLE_REF_RE, '').includes('variables') ? null : deps
+  widgetVariableDepsCache.set(widget, result)
+  return result
+}
+
+interface ViewWidgetProps {
+  widget: Widget
+  variables: VariableMap
+  deckId: string | null
+  error?: string
+}
+
+// Only re-render if a variable this SPECIFIC widget's own expressions
+// actually reference changed value — not just because `variables` got a
+// fresh object reference, which happens on every variables:sync regardless
+// of which single variable actually moved (see toVariableMap in
+// shared/expr.ts). Without this, a dashboard with one variable ticking once
+// a second (e.g. a datetime event source, or steady DCS-BIOS traffic)
+// re-renders EVERY widget on screen every tick — default React.memo (plain
+// Object.is per prop) can't tell "variables changed" from "a variable this
+// widget doesn't even use changed" apart, which was exactly the cause of a
+// reported adjuster-drag stutter recurring on a steady ~1s cadence.
+function viewWidgetPropsEqual(prev: ViewWidgetProps, next: ViewWidgetProps): boolean {
+  if (prev.widget !== next.widget || prev.deckId !== next.deckId || prev.error !== next.error) return false
+  if (prev.variables === next.variables) return true
+  const deps = widgetVariableDependencies(next.widget)
+  if (deps === null) return false
+  for (const name of deps) {
+    if (prev.variables[name] !== next.variables[name]) return false
+  }
+  return true
+}
+
 // Dispatches on widget.type before any type-specific hooks run — Gauge is
 // passive (no action, no pointer handling at all), and Adjuster/Encoder/Morph
 // each own their own drag hook (AdjusterView/EncoderView/MorphView above),
 // none of which fits TriggerableViewWidget's plain press/release +
 // getEffectiveStates model on their own.
-// memo'd because every widget on a screen otherwise re-renders on every
-// single dashboard:sync, even one caused by someone else dragging a single
-// unrelated widget elsewhere in the deck — see reconcileDashboard's own
-// comment in shared/subDecks.ts, which is what makes this memo effective:
-// it preserves `widget`'s object identity across syncs whenever this
-// specific widget's content didn't change, so React.memo's default shallow
-// prop comparison (Object.is per prop) can actually skip re-rendering it.
-// `variables`/`deckId` are the same object/value for every widget on a
-// given render, so a real variable change still re-renders every widget
-// that depends on it, same as before this existed.
+// memo'd (with a custom comparator, viewWidgetPropsEqual above, not the
+// default shallow-props one) because every widget on a screen otherwise
+// re-renders on every single dashboard:sync OR variables:sync, even one
+// caused by someone else dragging a single unrelated widget, or a single
+// unrelated variable ticking, elsewhere in the deck — see
+// reconcileDashboard's own comment in shared/subDecks.ts, which is what
+// makes the widget-identity half of this effective (`widget` keeps its old
+// reference across a sync whenever THIS widget's own content didn't
+// change); viewWidgetPropsEqual's per-widget variable-dependency scoping is
+// what makes the variables half of it effective too.
 const ViewWidget = memo(function ViewWidget({
   widget,
   variables,
   deckId,
   error
-}: {
-  widget: Widget
-  variables: VariableMap
-  deckId: string | null
-  error?: string
-}): React.JSX.Element {
+}: ViewWidgetProps): React.JSX.Element {
   if (widget.type === 'gauge') return <GaugeWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'label') return <LabelWidgetContent widget={widget} variables={variables} />
+  if (widget.type === 'line') return <LineWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'screen-capture') return <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />
   if (widget.type === 'adjuster') return <AdjusterView widget={widget} variables={variables} />
   if (widget.type === 'encoder') return <EncoderView widget={widget} variables={variables} />
@@ -447,7 +504,7 @@ const ViewWidget = memo(function ViewWidget({
   if (widget.type === 'switch-toggle') return <ToggleSwitchView widget={widget} variables={variables} />
   if (widget.type === 'dropdown') return <DropdownView widget={widget} variables={variables} />
   return <TriggerableViewWidget widget={widget} variables={variables} error={error} />
-})
+}, viewWidgetPropsEqual)
 
 // One deck view's worth of widgets, absolutely positioned within whatever
 // positioned box contains this — the fullscreen root canvas below, or an
@@ -495,6 +552,12 @@ export function ViewCanvas(): React.JSX.Element {
   const widgets = useMemo(
     () => getSubDeckWidgets({ widgets: rootWidgets, subDecks }, activeSubDeckId),
     [rootWidgets, subDecks, activeSubDeckId]
+  )
+  const rootCanvasWidth = useDashboardStore((s) => s.dashboard.canvasWidth)
+  const rootCanvasHeight = useDashboardStore((s) => s.dashboard.canvasHeight)
+  const canvasSize = useMemo(
+    () => getSubDeckCanvasSize({ canvasWidth: rootCanvasWidth, canvasHeight: rootCanvasHeight, subDecks }, activeSubDeckId),
+    [rootCanvasWidth, rootCanvasHeight, subDecks, activeSubDeckId]
   )
   // Guards against a stale reference — the sub-deck an open overlay names
   // may have been deleted (from the editor) while it was showing.
@@ -559,16 +622,18 @@ export function ViewCanvas(): React.JSX.Element {
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
     >
-      {backgroundImageVersion && deckId && (
-        <div
-          className="dashboard-wallpaper"
-          style={{
-            backgroundImage: `url(${backgroundImageUrl(deckId, backgroundImageVersion)})`,
-            ...backgroundImageStyle(backgroundFit ?? 'cover', backgroundAnchor ?? 'center')
-          }}
-        />
-      )}
-      <ScreenWidgetsLayer widgets={widgets} variables={variableMap} deckId={deckId} errors={errors} />
+      <LetterboxedCanvas canvasWidth={canvasSize.width} canvasHeight={canvasSize.height}>
+        {backgroundImageVersion && deckId && (
+          <div
+            className="dashboard-wallpaper"
+            style={{
+              backgroundImage: `url(${backgroundImageUrl(deckId, backgroundImageVersion)})`,
+              ...backgroundImageStyle(backgroundFit ?? 'cover', backgroundAnchor ?? 'center')
+            }}
+          />
+        )}
+        <ScreenWidgetsLayer widgets={widgets} variables={variableMap} deckId={deckId} errors={errors} />
+      </LetterboxedCanvas>
       {activeOverlay && overlaySubDeck && (
         <OverlayPanel
           subDeck={overlaySubDeck}

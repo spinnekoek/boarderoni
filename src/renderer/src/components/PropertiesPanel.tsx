@@ -40,6 +40,7 @@ import type {
   HorizontalAlign,
   KeypressAction,
   LabelWidget,
+  LineWidget,
   MorphBlock,
   MorphBlockStateOverride,
   NavigateSubDeckAction,
@@ -84,7 +85,8 @@ const WIDGET_TYPE_LABELS: Record<Widget['type'], string> = {
   'switch-toggle': 'Toggle switch',
   dropdown: 'Dropdown',
   'screen-capture': 'Screen capture',
-  label: 'Label'
+  label: 'Label',
+  line: 'Line'
 }
 
 // One 3x3 grid replaces the old separate horizontal/vertical button rows —
@@ -440,6 +442,16 @@ function LabelFields({
       <label className="properties__field">
         <span>Padding</span>
         <input type="number" value={label.padding ?? DEFAULT_WIDGET_PADDING} onChange={(e) => onChange({ padding: Number(e.target.value) })} />
+      </label>
+
+      <label className="properties__field">
+        <span>Offset X</span>
+        <input type="number" value={label.offsetX ?? 0} onChange={(e) => onChange({ offsetX: Number(e.target.value) })} />
+      </label>
+
+      <label className="properties__field">
+        <span>Offset Y</span>
+        <input type="number" value={label.offsetY ?? 0} onChange={(e) => onChange({ offsetY: Number(e.target.value) })} />
       </label>
 
       <label className="properties__field">
@@ -2691,6 +2703,161 @@ export function PropertiesPanel(): React.JSX.Element {
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteLabel}>
+          Delete widget
+        </button>
+      </aside>
+    )
+  }
+
+  if (widget.type === 'line') {
+    const line = widget
+    const minSize = snapToGrid ? gridSize : 1
+    const isColorExpr = line.colorExpr !== undefined
+
+    function patchLine(fields: Partial<LineWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === line.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    async function handleDeleteLine(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(line.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[line.type]}</p>
+
+        <PropertiesSection title="Appearance">
+          <div className="properties__field">
+            <span>Color</span>
+            <ColorPickerButton
+              value={line.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchLine({ color, colorExpr: undefined })}
+              isExpr={isColorExpr}
+              exprValue={line.colorExpr ?? ''}
+              onExprChange={(code) => patchLine({ colorExpr: code })}
+              onEnterExpr={() => patchLine({ colorExpr: line.colorExpr ?? '' })}
+              onClearExpr={() => patchLine({ colorExpr: undefined })}
+            />
+          </div>
+          <label className="properties__field">
+            <span>Line width</span>
+            <input
+              type="number"
+              min={1}
+              max={line.h}
+              value={line.lineWidth ?? line.h}
+              onChange={(e) => patchLine({ lineWidth: Math.max(1, Number(e.target.value)) })}
+            />
+          </label>
+          <p className="properties__hint">
+            The actual drawn thickness, centered within the box's own H (Advanced section below) — keep H taller than this for a
+            roomier drag/click target on a thin line.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Rotation">
+          <label className="properties__field">
+            <span>Rotate angle</span>
+            <div className="properties__file-row">
+              {line.rotateAngleExpr !== undefined ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input type="number" value={line.rotateAngle ?? 0} onChange={(e) => patchLine({ rotateAngle: Number(e.target.value) })} />
+              )}
+              {line.rotateAngleExpr !== undefined ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed angle instead"
+                  onClick={() => patchLine({ rotateAngleExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the angle with an expression"
+                  onClick={() => patchLine({ rotateAngleExpr: '' })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {line.rotateAngleExpr !== undefined && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={2}
+                placeholder="return variables.my_variable;"
+                value={line.rotateAngleExpr ?? ''}
+                onChange={(e) => patchLine({ rotateAngleExpr: e.target.value })}
+              />
+            </label>
+          )}
+          <p className="properties__hint">
+            The resize handle only ever changes length (W) — angle it away from horizontal with rotation instead of resizing H.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Advanced">
+          <span className="properties__section-label">Position & Size</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={line.x} onChange={(e) => patchLine({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={line.y} onChange={(e) => patchLine({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Length (W)</span>
+              <input
+                type="number"
+                min={minSize}
+                value={line.w}
+                onChange={(e) => patchLine({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Box height (H)</span>
+              <input
+                type="number"
+                min={minSize}
+                value={line.h}
+                onChange={(e) => patchLine({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={line.zIndex ?? 0} onChange={(e) => patchLine({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteLine}>
           Delete widget
         </button>
       </aside>

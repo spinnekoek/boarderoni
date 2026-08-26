@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useDashboardStore, useGridSize } from '../store'
-import { useEditorSettings } from '../settingsStore'
+import { useEditorSettings, INITIAL_CAMERA } from '../settingsStore'
 import { useEditorShortcuts } from '../useEditorShortcuts'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { morphFootprint } from '@shared/morph'
@@ -12,15 +12,8 @@ import { ContextMenu } from './ContextMenu'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
 
-interface Camera {
-  x: number
-  y: number
-  zoom: number
-}
-
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 5
-const INITIAL_CAMERA: Camera = { x: 80, y: 80, zoom: 1 }
 const PAN_THRESHOLD = 3
 
 interface PanState {
@@ -80,7 +73,8 @@ export function Canvas(): React.JSX.Element {
   const resolvedBackgroundColor =
     resolveColor({ color: backgroundColor, colorExpr: backgroundColorExpr }, variableMap).color ?? backgroundColor
 
-  const [camera, setCamera] = useState<Camera>(INITIAL_CAMERA)
+  const camera = useEditorSettings((s) => s.camera)
+  const setCamera = useEditorSettings((s) => s.setCamera)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [marquee, setMarquee] = useState<MarqueeState | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)

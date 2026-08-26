@@ -43,3 +43,12 @@ export const AUTO_CLICKED_LIGHTEN = 0.18
 // own comment in shared/types.ts). Matches the single global value every
 // screen used to share.
 export const DEFAULT_GRID_SIZE = 8
+
+// Fallback for Dashboard.canvasWidth/Height and SubDeck.canvasWidth/Height
+// when unset — a screen saved before per-screen canvas size existed. Matches
+// DEVICE_PRESETS[0] (renderer/src/devicePresets.ts), the editor's own
+// default preview size, so an old dashboard's deployed-view letterboxing
+// (see ViewCanvas.tsx) starts from the same reference size the editor was
+// already showing it at, rather than some unrelated guess.
+export const DEFAULT_CANVAS_WIDTH = 1920
+export const DEFAULT_CANVAS_HEIGHT = 1080

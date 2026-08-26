@@ -9,6 +9,7 @@ import { Toolbar } from './components/Toolbar'
 import { ConfirmModal } from './components/ConfirmModal'
 import { DeckPicker } from './components/DeckPicker'
 import { DeviceApprovalBanner } from './components/DeviceApprovalBanner'
+import { DebugPanel } from './components/DebugPanel'
 
 function readMode(): 'edit' | 'view' {
   const params = new URLSearchParams(window.location.search)
@@ -99,6 +100,7 @@ export function App(): React.JSX.Element {
         <Canvas />
         <PropertiesPanel />
       </div>
+      <DebugPanel />
       <ConfirmModal />
       <DeviceApprovalBanner />
     </div>

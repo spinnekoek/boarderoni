@@ -9,6 +9,14 @@ const MIN_PROPERTIES_WIDTH = 200
 // user can drag to, not a forced size.
 const MAX_PROPERTIES_WIDTH = 900
 
+export interface Camera {
+  x: number
+  y: number
+  zoom: number
+}
+
+export const INITIAL_CAMERA: Camera = { x: 80, y: 80, zoom: 1 }
+
 interface EditorSettings {
   snapToGrid: boolean
   // gridSize itself moved onto Dashboard/SubDeck (see store.ts's setGridSize
@@ -34,12 +42,20 @@ interface EditorSettings {
   // settings' actual effect easier to reason about. Never affects the
   // deployed view client, only the editor canvas.
   debugMode: boolean
+  // Canvas pan/zoom — not persisted (see partialize below), same as
+  // settingsModalOpen: reopening the app centered on wherever the camera
+  // last was would be a surprise, not a convenience. Lives here rather than
+  // as Canvas's own local state so other components (e.g. Palette, to spawn
+  // a new widget under the currently-visible corner rather than the board's
+  // origin) can read it too.
+  camera: Camera
   setSnapToGrid: (value: boolean) => void
   setPropertiesWidth: (value: number) => void
   setSelectedDeviceId: (id: string) => void
   openSettings: (focusKind?: string) => void
   closeSettings: () => void
   setDebugMode: (value: boolean) => void
+  setCamera: (updater: Camera | ((camera: Camera) => Camera)) => void
 }
 
 // Editor-only preferences (not part of the synced dashboard data), persisted
@@ -54,22 +70,25 @@ export const useEditorSettings = create<EditorSettings>()(
       settingsModalOpen: false,
       settingsFocusKind: null,
       debugMode: false,
+      camera: INITIAL_CAMERA,
       setSnapToGrid: (value) => set({ snapToGrid: value }),
       setPropertiesWidth: (value) =>
         set({ propertiesWidth: Math.min(MAX_PROPERTIES_WIDTH, Math.max(MIN_PROPERTIES_WIDTH, Math.round(value))) }),
       setSelectedDeviceId: (id) => set({ selectedDeviceId: id }),
       openSettings: (focusKind) => set({ settingsModalOpen: true, settingsFocusKind: focusKind ?? null }),
       closeSettings: () => set({ settingsModalOpen: false, settingsFocusKind: null }),
-      setDebugMode: (value) => set({ debugMode: value })
+      setDebugMode: (value) => set({ debugMode: value }),
+      setCamera: (updater) => set((s) => ({ camera: typeof updater === 'function' ? updater(s.camera) : updater }))
     }),
     {
       name: 'boarderoni-editor-settings',
       // Transient UI state — reopening the app with the settings modal
-      // already open (or focused on whatever kind it last was) would be a
-      // surprise, not a convenience, so these two are excluded from the
+      // already open (or focused on whatever kind it last was), or centered
+      // on wherever the canvas was last panned/zoomed to, would be a
+      // surprise, not a convenience, so these are excluded from the
       // persisted snapshot.
       partialize: (state) => {
-        const { settingsModalOpen: _open, settingsFocusKind: _focus, ...rest } = state
+        const { settingsModalOpen: _open, settingsFocusKind: _focus, camera: _camera, ...rest } = state
         return rest
       }
     }

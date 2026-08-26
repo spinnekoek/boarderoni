@@ -1,4 +1,4 @@
-import { DEFAULT_GRID_SIZE } from './constants'
+import { DEFAULT_GRID_SIZE, DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT } from './constants'
 import type { Dashboard, SubDeck, Widget } from './types'
 
 export function findSubDeck(source: Pick<Dashboard, 'subDecks'>, subDeckId: string): SubDeck | undefined {
@@ -52,6 +52,28 @@ export function setSubDeckGridSize(dashboard: Dashboard, subDeckId: string | nul
   }
 }
 
+// Read/write-side pair for a view's own reference canvas size — same
+// "main deck vs. named sub-deck" split as getSubDeckGridSize/
+// setSubDeckGridSize above. Falls back to DEFAULT_CANVAS_WIDTH/HEIGHT, never
+// undefined, so ViewCanvas.tsx's letterboxing math can use the result
+// directly with no `??` of its own.
+export function getSubDeckCanvasSize(
+  source: Pick<Dashboard, 'canvasWidth' | 'canvasHeight' | 'subDecks'>,
+  subDeckId: string | null | undefined
+): { width: number; height: number } {
+  const target = subDeckId ? findSubDeck(source, subDeckId) : source
+  return { width: target?.canvasWidth ?? DEFAULT_CANVAS_WIDTH, height: target?.canvasHeight ?? DEFAULT_CANVAS_HEIGHT }
+}
+
+export function setSubDeckCanvasSize(dashboard: Dashboard, subDeckId: string | null | undefined, width: number, height: number): Dashboard {
+  if (!subDeckId) return { ...dashboard, canvasWidth: width, canvasHeight: height }
+  if (!findSubDeck(dashboard, subDeckId)) return dashboard
+  return {
+    ...dashboard,
+    subDecks: (dashboard.subDecks ?? []).map((sd) => (sd.id === subDeckId ? { ...sd, canvasWidth: width, canvasHeight: height } : sd))
+  }
+}
+
 function widgetsEqual(a: Widget, b: Widget): boolean {
   return a === b || JSON.stringify(a) === JSON.stringify(b)
 }
@@ -88,11 +110,12 @@ export function reconcileDashboard(oldDashboard: Dashboard, newDashboard: Dashbo
   let subDecksChanged = (oldDashboard.subDecks?.length ?? 0) !== (newDashboard.subDecks?.length ?? 0)
   const subDecks = (newDashboard.subDecks ?? []).map((sd) => {
     const old = oldSubDecksById.get(sd.id)
-    // gridSize checked alongside name — same reasoning: both are plain
-    // fields on the sub-deck object itself (not inside `widgets`), so a
-    // change to either has to force a fresh object through, or the old one
-    // would keep getting returned below and the update would silently drop.
-    if (!old || old.name !== sd.name || old.gridSize !== sd.gridSize) {
+    // gridSize/canvasWidth/canvasHeight checked alongside name — same
+    // reasoning: all plain fields on the sub-deck object itself (not inside
+    // `widgets`), so a change to any of them has to force a fresh object
+    // through, or the old one would keep getting returned below and the
+    // update would silently drop.
+    if (!old || old.name !== sd.name || old.gridSize !== sd.gridSize || old.canvasWidth !== sd.canvasWidth || old.canvasHeight !== sd.canvasHeight) {
       subDecksChanged = true
       return sd
     }

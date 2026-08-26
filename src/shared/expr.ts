@@ -11,17 +11,39 @@ export function toVariableMap(variables: Variable[]): VariableMap {
 
 export type ExpressionResult = { ok: true; value: unknown } | { ok: false; error: string }
 
+// Lets a host (the desktop editor's debug console panel) receive whatever an
+// expression's own `console.log(...)` calls pass, without this shared module
+// depending on any renderer-only store — the host just calls
+// setExpressionConsoleSink once, e.g. wiring it up (or tearing it down) as
+// its own debug panel opens/closes. Unset (the default, and always the case
+// in the main process and the deployed view client, neither of which has a
+// panel to show it in) makes every call below a no-op.
+export type ExpressionConsoleSink = (args: unknown[]) => void
+let consoleSink: ExpressionConsoleSink | null = null
+export function setExpressionConsoleSink(sink: ExpressionConsoleSink | null): void {
+  consoleSink = sink
+}
+
+// Shadows the real global `console` inside evaluated expression code (see
+// the extra 'console' parameter below) — an expression's console.log never
+// reaches this process's own devtools/stdout, only wherever the current sink
+// forwards it.
+const exprConsole = {
+  log: (...args: unknown[]) => consoleSink?.(args)
+}
+
 // Evaluates a bindable expression's code as a function body with `variables`
-// in scope. Plain `new Function` — no Node/Electron/DOM APIs assumed by the
-// mechanism itself — so this behaves identically wherever it runs: the main
-// process (evaluating an update-state action) and every renderer (desktop
-// editor preview + deployed Android WebView) resolving a colorExpr/textExpr
-// binding. A thrown error (syntax error, bad reference, whatever the code
-// does) is caught here rather than left to crash whatever's evaluating it.
+// (and `console`, see exprConsole above) in scope. Plain `new Function` — no
+// Node/Electron/DOM APIs assumed by the mechanism itself — so this behaves
+// identically wherever it runs: the main process (evaluating an update-state
+// action) and every renderer (desktop editor preview + deployed Android
+// WebView) resolving a colorExpr/textExpr binding. A thrown error (syntax
+// error, bad reference, whatever the code does) is caught here rather than
+// left to crash whatever's evaluating it.
 export function tryEvaluateExpression(code: string, variables: VariableMap): ExpressionResult {
   try {
-    const fn = new Function('variables', code) as (variables: VariableMap) => unknown
-    return { ok: true, value: fn(variables) }
+    const fn = new Function('variables', 'console', code) as (variables: VariableMap, console: typeof exprConsole) => unknown
+    return { ok: true, value: fn(variables, exprConsole) }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }

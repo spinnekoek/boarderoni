@@ -1,4 +1,5 @@
 import { useDashboardStore } from '../store'
+import { useEditorSettings } from '../settingsStore'
 import { DEFAULT_FONT_ID } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR } from '@shared/color'
 import { nextId } from '../id'
@@ -10,6 +11,7 @@ import type {
   EncoderWidget,
   GaugeWidget,
   LabelWidget,
+  LineWidget,
   MorphButtonWidget,
   RockerSwitchWidget,
   ScreenCaptureWidget,
@@ -19,13 +21,25 @@ import type {
 export function Palette(): React.JSX.Element {
   const addWidget = useDashboardStore((s) => s.addWidget)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
+  const camera = useEditorSettings((s) => s.camera)
+
+  // Where a newly-added widget lands: just inside the canvas corner that's
+  // currently visible, rather than a fixed board-origin spot that could be
+  // panned/zoomed far off-screen. -camera.x/y is the world coordinate under
+  // the viewport's own top-left corner (inverse of the canvas-layer's
+  // translate+scale — see Canvas.tsx's screenToWorld for the same math), and
+  // the +40 keeps it off the very edge, matching the old fixed inset.
+  function spawnPosition(): { x: number; y: number } {
+    return { x: -camera.x / camera.zoom + 40, y: -camera.y / camera.zoom + 40 }
+  }
 
   function handleAddButton(): void {
+    const pos = spawnPosition()
     const widget: ButtonWidget = {
       id: nextId(),
       type: 'button',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       w: 160,
       h: 80,
       events: { press: [], release: [] },
@@ -43,11 +57,12 @@ export function Palette(): React.JSX.Element {
   }
 
   function handleAddMorph(): void {
+    const pos = spawnPosition()
     const widget: MorphButtonWidget = {
       id: nextId(),
       type: 'morph',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       cellW: 160,
       cellH: 80,
       blocks: [{ id: nextId(), col: 0, row: 0, perState: {} }],
@@ -66,11 +81,12 @@ export function Palette(): React.JSX.Element {
   }
 
   function handleAddGauge(): void {
+    const pos = spawnPosition()
     const widget: GaugeWidget = {
       id: nextId(),
       type: 'gauge',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       w: 160,
       h: 40,
       valueExpr: 'return variables.my_variable ?? 0;',
@@ -93,11 +109,12 @@ export function Palette(): React.JSX.Element {
   }
 
   function handleAddAdjuster(): void {
+    const pos = spawnPosition()
     const widget: AdjusterWidget = {
       id: nextId(),
       type: 'adjuster',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       w: 60,
       h: 160,
       style: 'slider',
@@ -114,11 +131,12 @@ export function Palette(): React.JSX.Element {
   }
 
   function handleAddEncoder(): void {
+    const pos = spawnPosition()
     const widget: EncoderWidget = {
       id: nextId(),
       type: 'encoder',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       w: 80,
       h: 80,
       stepDegrees: 15,
@@ -149,11 +167,12 @@ export function Palette(): React.JSX.Element {
   }
 
   function handleAddRockerSwitch(): void {
+    const pos = spawnPosition()
     const widget: RockerSwitchWidget = {
       id: nextId(),
       type: 'switch-rocker',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       w: 60,
       h: 160,
       orientation: 'vertical',
@@ -167,11 +186,12 @@ export function Palette(): React.JSX.Element {
   }
 
   function handleAddDialSwitch(): void {
+    const pos = spawnPosition()
     const widget: DialSwitchWidget = {
       id: nextId(),
       type: 'switch-dial',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       w: 120,
       h: 120,
       positions: defaultPositions(),
@@ -197,11 +217,12 @@ export function Palette(): React.JSX.Element {
   }
 
   function handleAddToggleSwitch(): void {
+    const pos = spawnPosition()
     const widget: ToggleSwitchWidget = {
       id: nextId(),
       type: 'switch-toggle',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       w: 70,
       h: 130,
       orientation: 'vertical',
@@ -216,11 +237,12 @@ export function Palette(): React.JSX.Element {
   }
 
   function handleAddDropdown(): void {
+    const pos = spawnPosition()
     const widget: DropdownWidget = {
       id: nextId(),
       type: 'dropdown',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       w: 120,
       h: 36,
       orientation: 'top-to-bottom',
@@ -233,11 +255,12 @@ export function Palette(): React.JSX.Element {
   }
 
   function handleAddLabel(): void {
+    const pos = spawnPosition()
     const widget: LabelWidget = {
       id: nextId(),
       type: 'label',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       w: 160,
       h: 40,
       label: { id: nextId(), text: 'Label', fontFamily: DEFAULT_FONT_ID, align: 'center', verticalAlign: 'center' }
@@ -246,12 +269,29 @@ export function Palette(): React.JSX.Element {
     selectWidget(widget.id)
   }
 
+  function handleAddLine(): void {
+    const pos = spawnPosition()
+    const widget: LineWidget = {
+      id: nextId(),
+      type: 'line',
+      x: pos.x,
+      y: pos.y,
+      w: 160,
+      h: 4,
+      lineWidth: 1,
+      color: '#ffffff'
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
   function handleAddScreenCapture(): void {
+    const pos = spawnPosition()
     const widget: ScreenCaptureWidget = {
       id: nextId(),
       type: 'screen-capture',
-      x: 40,
-      y: 40,
+      x: pos.x,
+      y: pos.y,
       w: 240,
       h: 160,
       streamMode: 'poll',
@@ -270,6 +310,9 @@ export function Palette(): React.JSX.Element {
       </button>
       <button className="palette__item" onClick={handleAddLabel}>
         + Label
+      </button>
+      <button className="palette__item" onClick={handleAddLine}>
+        + Line
       </button>
       <button className="palette__item" onClick={handleAddMorph}>
         + Morph button
@@ -302,6 +345,10 @@ export function Palette(): React.JSX.Element {
       <p className="palette__hint">
         Morph buttons: select one, then use the + handles on its edges to extend it into other base blocks — connected blocks act as
         one button. Hold Ctrl to remove instead.
+      </p>
+      <p className="palette__hint">
+        Lines are a plain decorative bar — drag the handle to resize length (thickness is set in Properties), and use Rotation to angle
+        it away from horizontal.
       </p>
       <p className="palette__hint">
         Gauges display a variable; Adjusters (slider/knob) drag to set one — see its Actions section in Properties for Press/Release/Move.

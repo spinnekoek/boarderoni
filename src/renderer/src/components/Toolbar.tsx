@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useEditorSettings } from '../settingsStore'
-import { useDashboardStore, useGridSize } from '../store'
+import { useDebugConsoleStore } from '../debugConsoleStore'
+import { useDashboardStore, useGridSize, useCanvasSize } from '../store'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
 import { VariablesModal } from './VariablesModal'
@@ -17,6 +18,8 @@ export function Toolbar(): React.JSX.Element {
   const gridSize = useGridSize()
   const setSnapToGrid = useEditorSettings((s) => s.setSnapToGrid)
   const setGridSize = useDashboardStore((s) => s.setGridSize)
+  const canvasSize = useCanvasSize()
+  const setCanvasSize = useDashboardStore((s) => s.setCanvasSize)
   const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
   const setSelectedDeviceId = useEditorSettings((s) => s.setSelectedDeviceId)
   // Reads/writes the store, not local useState, so components other than
@@ -27,6 +30,8 @@ export function Toolbar(): React.JSX.Element {
   const closeSettings = useEditorSettings((s) => s.closeSettings)
   const debugMode = useEditorSettings((s) => s.debugMode)
   const setDebugMode = useEditorSettings((s) => s.setDebugMode)
+  const consoleOpen = useDebugConsoleStore((s) => s.open)
+  const toggleConsoleOpen = useDebugConsoleStore((s) => s.toggleOpen)
 
   const devices = useDashboardStore((s) => s.devices)
 
@@ -80,10 +85,38 @@ export function Toolbar(): React.JSX.Element {
         />
         <span className="toolbar__unit">px</span>
       </label>
+      <label
+        className="toolbar__control"
+        title="The reference resolution this screen's widgets are positioned against. Deployed clients (Chrome, tablet) scale/letterbox to this size rather than stretching to their own actual viewport — its own value per screen, same as grid size above."
+      >
+        <span>Canvas size</span>
+        <input
+          type="number"
+          min={1}
+          value={canvasSize.width}
+          onChange={(e) => setCanvasSize(Number(e.target.value), canvasSize.height)}
+        />
+        <span className="toolbar__unit">×</span>
+        <input
+          type="number"
+          min={1}
+          value={canvasSize.height}
+          onChange={(e) => setCanvasSize(canvasSize.width, Number(e.target.value))}
+        />
+        <span className="toolbar__unit">px</span>
+      </label>
       <label className="toolbar__control" title="Shows editor-only layout aids, like each position label's own alignment box, on the canvas.">
         <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />
         Debug
       </label>
+      <button
+        type="button"
+        className={`toolbar__button${consoleOpen ? ' toolbar__button--active' : ''}`}
+        title="Shows a bottom panel that console.log from any fx expression prints to, while this panel is open."
+        onClick={toggleConsoleOpen}
+      >
+        Console
+      </button>
       <button type="button" className="toolbar__button" onClick={() => setMobileAppOpen(true)}>
         Mobile app
       </button>

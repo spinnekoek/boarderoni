@@ -13,8 +13,9 @@ import { ToggleSwitchWidgetContent } from './widgets/ToggleSwitchWidget'
 import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { ScreenCaptureWidgetContent } from './widgets/ScreenCaptureWidget'
 import { LabelWidgetContent } from './widgets/LabelWidget'
+import { LineWidgetContent } from './widgets/LineWidget'
 import { resolveActivePositionIndex } from '@shared/switchPosition'
-import type { VariableMap } from '@shared/expr'
+import { resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { BoxWidget } from '@shared/types'
 
 interface ResizeState {
@@ -22,6 +23,8 @@ interface ResizeState {
   startY: number
   origW: number
   origH: number
+  origX: number
+  origY: number
 }
 
 export function CanvasWidget({
@@ -65,6 +68,22 @@ export function CanvasWidget({
   const resizeState = useRef<ResizeState | null>(null)
   const [resizing, setResizing] = useState(false)
 
+  // A line's own selection/resize box rotates to match its visual angle
+  // (see LineWidgetContent's applyRotation prop) instead of staying
+  // axis-aligned — every other rotatable widget type is roughly as wide as
+  // it is tall, so an unrotated bounding box around a rotated one is a
+  // minor visual mismatch; a line is extremely oblong (long and thin), so
+  // the same mismatch would leave a "wide" selection box around a visually
+  // "tall" line at 90°. handleResizePointerMove below counter-rotates the
+  // pointer delta to match, same projection technique as
+  // useToggleSwitchDrag.ts's own projectedDelta.
+  const lineRotateAngle =
+    widget.type === 'line'
+      ? widget.rotateAngleExpr
+        ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle)
+        : widget.rotateAngle
+      : undefined
+
   function snap(value: number): number {
     return snapToGrid ? Math.round(value / gridSize) * gridSize : Math.round(value)
   }
@@ -79,7 +98,7 @@ export function CanvasWidget({
 
   function handleResizePointerDown(e: React.PointerEvent): void {
     e.stopPropagation()
-    resizeState.current = { startX: e.clientX, startY: e.clientY, origW: widget.w, origH: widget.h }
+    resizeState.current = { startX: e.clientX, startY: e.clientY, origW: widget.w, origH: widget.h, origX: widget.x, origY: widget.y }
     setResizing(true)
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
@@ -92,17 +111,46 @@ export function CanvasWidget({
     e.stopPropagation()
     const resize = resizeState.current
     if (!resize) return
-    const dx = (e.clientX - resize.startX) / zoom
-    const dy = (e.clientY - resize.startY) / zoom
+    const rawDx = (e.clientX - resize.startX) / zoom
+    const rawDy = (e.clientY - resize.startY) / zoom
 
     // Not tied to label content — text is allowed to overflow a widget
     // that's smaller than it needs (see .deck-button__label). The floor here
     // is purely about the grid: snapped widgets shouldn't shrink below one
     // grid cell, but with snapping off there's no such constraint.
     const minSize = snapToGrid ? gridSize : 1
-    const w = Math.max(minSize, snap(resize.origW + dx))
-    const h = Math.max(minSize, snap(resize.origH + dy))
 
+    // Line widgets only ever drag their own length — h is a fixed thickness
+    // set in the properties panel, not something the resize handle touches
+    // (see the handle's own --horizontal CSS variant below). Use rotateAngle
+    // to point it anywhere other than horizontal instead of a 2D resize.
+    // Since the whole box is now visually rotated to match (lineRotateAngle
+    // above), the raw screen-space pointer delta no longer IS the length
+    // delta once rotated — project it onto the box's own rotated axis first,
+    // same rotation-matrix technique useToggleSwitchDrag.ts's own
+    // projectedDelta uses for the identical reason.
+    if (widget.type === 'line') {
+      const rad = ((lineRotateAngle ?? 0) * Math.PI) / 180
+      const dx = rawDx * Math.cos(rad) + rawDy * Math.sin(rad)
+      const w = Math.max(minSize, snap(resize.origW + dx))
+
+      // Growing w always extends the box rightward in its own unrotated
+      // layout — left/top/width/height are laid out BEFORE the rotate()
+      // transform is applied, so at any angle other than 0, "rightward in
+      // local space" is a diagonal shift on screen, not an extension along
+      // the visually rotated line. Shifting x/y by half the actual (post
+      // snap/clamp) length change, projected the same rotated-axis way, re-
+      // anchors the OTHER end (the one not being dragged) back to where it
+      // started — see this function's own investigation for the derivation.
+      const halfDelta = (w - resize.origW) / 2
+      const x = resize.origX + halfDelta * (Math.cos(rad) - 1)
+      const y = resize.origY + halfDelta * Math.sin(rad)
+      patch({ w, x, y })
+      return
+    }
+
+    const w = Math.max(minSize, snap(resize.origW + rawDx))
+    const h = Math.max(minSize, snap(resize.origH + rawDy))
     patch({ w, h })
   }
 
@@ -115,7 +163,13 @@ export function CanvasWidget({
   return (
     <div
       className={`canvas-widget${selected ? ' canvas-widget--selected' : ''}`}
-      style={{ left: widget.x, top: widget.y, width: widget.w, height: widget.h }}
+      style={{
+        left: widget.x,
+        top: widget.y,
+        width: widget.w,
+        height: widget.h,
+        transform: lineRotateAngle ? `rotate(${lineRotateAngle}deg)` : undefined
+      }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -126,6 +180,7 @@ export function CanvasWidget({
       )}
       {widget.type === 'gauge' && <GaugeWidgetContent widget={widget} variables={variables} />}
       {widget.type === 'label' && <LabelWidgetContent widget={widget} variables={variables} />}
+      {widget.type === 'line' && <LineWidgetContent widget={widget} variables={variables} applyRotation={false} />}
       {widget.type === 'screen-capture' && <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />}
       {widget.type === 'adjuster' && <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} />}
       {widget.type === 'encoder' && <EncoderWidgetContent widget={widget} variables={variables} interactive={false} />}
@@ -182,13 +237,20 @@ export function CanvasWidget({
         />
       )}
       {resizing && (
-        <div className="canvas-widget__size-label" style={{ transform: `scale(${1 / zoom})` }}>
+        <div
+          className="canvas-widget__size-label"
+          // Counter-rotates back upright against the outer box's own
+          // lineRotateAngle (see its comment above) — inherited rotation
+          // would otherwise turn this sideways/upside-down right along with
+          // the box at anything but 0deg.
+          style={{ transform: `scale(${1 / zoom}) rotate(${-(lineRotateAngle ?? 0)}deg)` }}
+        >
           {Math.round(widget.w)} × {Math.round(widget.h)}
         </div>
       )}
       {selected && selectedWidgetIds.length === 1 && (
         <div
-          className="canvas-widget__resize-handle"
+          className={`canvas-widget__resize-handle${widget.type === 'line' ? ' canvas-widget__resize-handle--horizontal' : ''}`}
           // Counter-scales against the canvas's own zoom (see
           // .canvas-widget__size-label's identical trick above) so the
           // handle stays a constant screen size instead of ballooning when

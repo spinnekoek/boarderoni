@@ -18,7 +18,16 @@ import {
   type Widget,
   type WidgetEventKind
 } from '@shared/types'
-import { getSubDeckWidgets, setSubDeckWidgets, getSubDeckGridSize, setSubDeckGridSize, findWidgetAnywhere, reconcileDashboard } from '@shared/subDecks'
+import {
+  getSubDeckWidgets,
+  setSubDeckWidgets,
+  getSubDeckGridSize,
+  setSubDeckGridSize,
+  getSubDeckCanvasSize,
+  setSubDeckCanvasSize,
+  findWidgetAnywhere,
+  reconcileDashboard
+} from '@shared/subDecks'
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSettings, DcsBiosStatus, DcsBiosWorkerStats } from '@shared/dcsBiosTypes'
 import { registerCustomFonts, type CustomFont } from '@shared/fonts'
 import { getDeviceId, setLastDeckId, clearLastDeckId, nextId } from './id'
@@ -229,6 +238,12 @@ interface DashboardStore {
   // dashboard.gridSize/subDecks + editingSubDeckId, not its own piece of
   // state to keep in sync by hand.
   setGridSize: (value: number) => void
+  // Same per-screen patching as setGridSize above, but for the reference
+  // canvas size used by the deployed view's letterboxing (see
+  // ViewCanvas.tsx and SubDeck.canvasWidth's own comment in shared/types.ts).
+  // Read the current value via useCanvasSize() below, same reasoning as
+  // useGridSize().
+  setCanvasSize: (width: number, height: number) => void
   // Edit mode's toolbar screen switcher. Also resets selection state — a
   // selection made on one deck view has no meaning on another, same as
   // selectWidget(null) already does on every other selection-invalidating
@@ -762,6 +777,12 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     send({ type: 'dashboard:update', dashboard })
   },
 
+  setCanvasSize: (width, height) => {
+    const dashboard = setSubDeckCanvasSize(get().dashboard, get().editingSubDeckId, Math.max(1, Math.round(width)), Math.max(1, Math.round(height)))
+    set({ dashboard })
+    send({ type: 'dashboard:update', dashboard })
+  },
+
   addWidget: (widget) => {
     get().updateWidgets([...getSubDeckWidgets(get().dashboard, get().editingSubDeckId), widget])
   },
@@ -928,4 +949,15 @@ export function useGridSize(): number {
   const subDecks = useDashboardStore((s) => s.dashboard.subDecks)
   const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
   return getSubDeckGridSize({ gridSize, subDecks }, editingSubDeckId)
+}
+
+// The currently-editing screen's own reference canvas size — same pattern as
+// useGridSize() above, for the deployed view's letterboxing (see
+// getSubDeckCanvasSize in shared/subDecks.ts).
+export function useCanvasSize(): { width: number; height: number } {
+  const canvasWidth = useDashboardStore((s) => s.dashboard.canvasWidth)
+  const canvasHeight = useDashboardStore((s) => s.dashboard.canvasHeight)
+  const subDecks = useDashboardStore((s) => s.dashboard.subDecks)
+  const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
+  return getSubDeckCanvasSize({ canvasWidth, canvasHeight, subDecks }, editingSubDeckId)
 }
