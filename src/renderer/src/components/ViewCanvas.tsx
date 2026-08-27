@@ -16,7 +16,8 @@ import type {
   RockerSwitchWidget,
   StatefulWidget,
   ToggleSwitchWidget,
-  Widget
+  Widget,
+  WidgetState
 } from '@shared/types'
 import { OverlayPanel } from './OverlayPanel'
 import { LetterboxedCanvas } from './LetterboxedCanvas'
@@ -314,6 +315,65 @@ function usePressRelease(widgetId: string): { pressed: boolean; press: () => voi
   return { pressed, press, release }
 }
 
+// How long useTriggerableState (below) ignores an activeStateExpr-driven
+// flip back to Clicked after this button's own release() already ended the
+// local optimistic press — generous relative to a normal DCS-BIOS round trip
+// (command out, sim state changes, next export tick, variables:sync back,
+// see useSwitchPosition.ts's PENDING_CONFIRM_TIMEOUT_MS for the same
+// reasoning on switches), but short enough that a genuinely independent
+// state change shortly after release still gets through eventually.
+const ECHO_SUPPRESS_TIMEOUT_MS = 1500
+
+// Combines usePressRelease with getEffectiveStates for a button whose
+// activeStateExpr reads back the very variable its own press/release actions
+// just set (KEK5 is the motivating case: press sends UFC_5=1, release sends
+// UFC_5=0, and activeStateExpr shows Clicked whenever variables.UFC_5 === 1)
+// — without this, the sequence is: local optimistic Clicked while pressed
+// (correct), back to Default on release (correct, the live variable hasn't
+// caught up yet), then Clicked AGAIN a beat later once DCS-BIOS actually
+// re-exports the round trip of OUR OWN commands — a redundant second flash
+// confirming something already shown locally, not new information. Once
+// release() fires on an activeStateExpr-bound button, this suppresses
+// exactly that echo (falling back to states[0], same as
+// resolveBaseState's own default-on-failure fallback in shared/states.ts)
+// until activeStateExpr itself confirms back to non-clicked or the timeout
+// above gives up — same "hold against a stale/delayed live value" shape as
+// useSwitchPosition.ts's `pending`, just suppressing an echo instead of
+// asserting a fresh selection.
+function useTriggerableState(
+  widget: StatefulWidget,
+  variables: VariableMap
+): { pressed: boolean; press: () => void; release: () => void; state: WidgetState } {
+  const { pressed, press, release: releaseRaw } = usePressRelease(widget.id)
+  const [defaultState, clickedState] = getEffectiveStates(widget, variables)
+
+  const [suppressEcho, setSuppressEcho] = useState(false)
+  const suppressTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => {
+    if (suppressEcho && defaultState !== clickedState) {
+      clearTimeout(suppressTimeoutRef.current)
+      setSuppressEcho(false)
+    }
+  }, [defaultState, clickedState, suppressEcho])
+
+  useEffect(() => () => clearTimeout(suppressTimeoutRef.current), [])
+
+  function release(): void {
+    releaseRaw()
+    if (widget.activeStateExpr) {
+      clearTimeout(suppressTimeoutRef.current)
+      setSuppressEcho(true)
+      suppressTimeoutRef.current = setTimeout(() => setSuppressEcho(false), ECHO_SUPPRESS_TIMEOUT_MS)
+    }
+  }
+
+  const liveDefaultState = suppressEcho && clickedState && defaultState === clickedState ? widget.states[0] : defaultState
+  const state = pressed && clickedState ? clickedState : liveDefaultState
+
+  return { pressed, press, release, state }
+}
+
 // Today's plain-button interactive rendering — press/release + tap-to-
 // trigger. Typed StatefulWidget narrowed to ButtonWidget by ViewWidget's own
 // dispatch below (morph now goes through MorphView instead) — kept as
@@ -328,9 +388,7 @@ function TriggerableViewWidget({
   variables: VariableMap
   error?: string
 }): React.JSX.Element {
-  const { pressed, press, release } = usePressRelease(widget.id)
-  const [defaultState, clickedState] = getEffectiveStates(widget, variables)
-  const state = pressed && clickedState ? clickedState : defaultState
+  const { press, release, state } = useTriggerableState(widget, variables)
 
   // Keyboard/assistive-tech activation dispatches a synthetic `click` with
   // no pointer events at all — e.detail === 0 is the standard signal a
@@ -384,9 +442,7 @@ function TriggerableViewWidget({
 // to any DOM element, since MorphButtonWidgetContent only renders the
 // handle when active).
 function MorphView({ widget, variables, error }: { widget: MorphButtonWidget; variables: VariableMap; error?: string }): React.JSX.Element {
-  const { pressed, press, release } = usePressRelease(widget.id)
-  const [defaultState, clickedState] = getEffectiveStates(widget, variables)
-  const state = pressed && clickedState ? clickedState : defaultState
+  const { press, release, state } = useTriggerableState(widget, variables)
   const { dragFraction, handlePointerDown, handlePointerMove, handlePointerUp } = useMorphSliderDrag(widget, variables)
   const sliderFraction = dragFraction ?? (widget.valueExpr ? (resolveNumericExpr(widget.valueExpr, variables) ?? 0) / 100 : 0)
 

@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useDashboardStore } from '../store'
-import { getVariablesFilter, nextId, setVariablesFilter } from '../id'
+import { getIgnoredVariableIds, getVariablesFilter, nextId, setIgnoredVariableIds, setVariablesFilter } from '../id'
 import { useEscapeToClose } from '../useEscapeToClose'
 import { uniqueVariableName } from '../variableNaming'
 import type { Variable, VariableValue } from '@shared/types'
@@ -16,8 +16,18 @@ const VIRTUALIZE_THRESHOLD = 100
 // closely enough for react-virtual's absolute-positioned rows — rows have
 // fixed padding/font-size and never wrap, so a static estimate is fine.
 const ROW_HEIGHT = 34
+// The divider row's own slot height in the virtualized list — see
+// VariableRows' boundaryIndex/estimateSize for why this needs to be exact,
+// not just a rough guess like ROW_HEIGHT above.
+const DIVIDER_HEIGHT = 21
 // Not a real EventSource id — the tab for variables with no mapping.
 const CUSTOM_TAB = 'custom'
+// How long a variable counts as "recently changed" for 'recent' sort mode,
+// and the cadence of the countdown shown on the Recent button (see
+// VariablesModal's countdown state below) — kept equal so "next re-check in
+// Ns" and "how long a row stays pinned at the top" are the same number, not
+// two cadences a user has to reconcile in their head.
+const RECENT_WINDOW_MS = 5000
 
 // Coerces a text input's raw value back into a VariableValue on blur/change
 // — "true"/"false" become booleans, anything else numeric becomes a number,
@@ -50,13 +60,31 @@ function parseVariableValue(raw: string): VariableValue {
 const VariableRow = memo(function VariableRow({
   variable,
   mappedFrom,
+  ignored,
+  showIgnoreToggle,
   onPatch,
-  onRemove
+  onRemove,
+  onToggleIgnore
 }: {
   variable: Variable
   mappedFrom: string | undefined
+  // Whether this variable is currently excluded from 'recent' sort's
+  // "just changed" bucket — see onToggleIgnore's own comment below for what
+  // this does and doesn't affect.
+  ignored: boolean
+  // Only 'recent' sort mode has any use for the ignore toggle at all — 'name'
+  // sort doesn't look at recency, so showing it there would just be a button
+  // that visibly does nothing.
+  showIgnoreToggle: boolean
   onPatch: (id: string, fields: Partial<Variable>) => void
   onRemove: (id: string) => void
+  // Toggles whether this variable's changes count toward 'recent' sort's
+  // top-of-list bucket — purely a sort-order exclusion. The variable itself
+  // still updates, still saves, still flashes green here same as any other
+  // row; it just never gets bumped to the top for it. Meant for silencing a
+  // noisy fast-changing variable (a clock, telemetry) while hunting for one
+  // specific control's variable in a busy 'recent' list.
+  onToggleIgnore: (id: string) => void
 }): React.JSX.Element {
   const valueInputRef = useRef<HTMLInputElement>(null)
   // Seeded with the CURRENT value (not a mount-flag) specifically so this
@@ -86,7 +114,7 @@ const VariableRow = memo(function VariableRow({
   }, [variable.value])
 
   return (
-    <div className="variables-modal__row">
+    <div className={`variables-modal__row${showIgnoreToggle ? ' variables-modal__row--with-ignore' : ''}${ignored ? ' variables-modal__row--ignored' : ''}`}>
       <input
         value={variable.name}
         // readOnly, not disabled — a disabled input can't be focused at all,
@@ -102,6 +130,20 @@ const VariableRow = memo(function VariableRow({
         key={`${variable.id}-${String(variable.value)}`}
         onBlur={(e) => onPatch(variable.id, { value: parseVariableValue(e.target.value) })}
       />
+      {showIgnoreToggle && (
+        <button
+          type="button"
+          className={`variables-modal__ignore${ignored ? ' variables-modal__ignore--active' : ''}`}
+          title={
+            ignored
+              ? 'Ignored for Recent sort — this variable’s changes no longer bump it to the top. Value updates normally.'
+              : 'Ignore for Recent sort — silences this variable’s changes for sorting only, so it stops jumping to the top'
+          }
+          onClick={() => onToggleIgnore(variable.id)}
+        >
+          ⊘
+        </button>
+      )}
       <button
         type="button"
         className="variables-modal__remove"
@@ -124,20 +166,53 @@ const VariableRow = memo(function VariableRow({
 function VariableRows({
   variables,
   mappedFromSource,
+  ignoredIds,
+  showIgnoreToggle,
+  recentIds,
   onPatch,
-  onRemove
+  onRemove,
+  onToggleIgnore
 }: {
   variables: Variable[]
   mappedFromSource: Map<string, { sourceId: string; sourceName: string }>
+  ignoredIds: Set<string>
+  showIgnoreToggle: boolean
+  // null outside 'recent' sort mode — when set, everything in `variables` up
+  // to (not including) boundaryIndex below is a member, since VariablesModal
+  // already sorted recent-first. Passed down (rather than recomputed here)
+  // so this stays the single source of truth both the sort order and this
+  // divider agree on.
+  recentIds: Set<string> | null
   onPatch: (id: string, fields: Partial<Variable>) => void
   onRemove: (id: string) => void
+  onToggleIgnore: (id: string) => void
 }): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   const virtualize = variables.length > VIRTUALIZE_THRESHOLD
+
+  // Index of the first NOT-recent variable — where the divider goes. undefined
+  // when there's nothing to separate: 'recent' isn't active, or every/no
+  // variable currently qualifies (a divider at position 0 or at the very end
+  // wouldn't actually separate anything).
+  const boundaryIndex = useMemo(() => {
+    if (!recentIds) return undefined
+    let count = 0
+    for (const v of variables) {
+      if (!recentIds.has(v.id)) break
+      count++
+    }
+    return count > 0 && count < variables.length ? count : undefined
+  }, [variables, recentIds])
+
+  // One extra virtual slot for the divider, inserted at boundaryIndex — the
+  // divider's own slot gets DIVIDER_HEIGHT instead of ROW_HEIGHT so the
+  // virtualizer's positions stay pixel-accurate around it (react-virtual has
+  // no dynamic measurement wired up here, so estimateSize IS the real size
+  // used for every row's translateY, not just a first guess).
   const virtualizer = useVirtualizer({
-    count: variables.length,
+    count: variables.length + (boundaryIndex !== undefined ? 1 : 0),
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: (index) => (boundaryIndex !== undefined && index === boundaryIndex ? DIVIDER_HEIGHT : ROW_HEIGHT),
     overscan: 8
   })
 
@@ -146,13 +221,36 @@ function VariableRows({
       <div ref={scrollRef} className="variables-modal__group-scroll">
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {virtualizer.getVirtualItems().map((item) => {
-            const variable = variables[item.index]
+            const wrapperStyle: React.CSSProperties = {
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: item.size,
+              transform: `translateY(${item.start}px)`
+            }
+            if (boundaryIndex !== undefined && item.index === boundaryIndex) {
+              return (
+                <div key="recent-boundary" style={wrapperStyle}>
+                  <div className="variables-modal__recent-divider" />
+                </div>
+              )
+            }
+            // Every index past the inserted divider slot is shifted by one
+            // relative to the real `variables` array.
+            const variableIndex = boundaryIndex !== undefined && item.index > boundaryIndex ? item.index - 1 : item.index
+            const variable = variables[variableIndex]
             return (
-              <div
-                key={variable.id}
-                style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: item.size, transform: `translateY(${item.start}px)` }}
-              >
-                <VariableRow variable={variable} mappedFrom={mappedFromSource.get(variable.name)?.sourceName} onPatch={onPatch} onRemove={onRemove} />
+              <div key={variable.id} style={wrapperStyle}>
+                <VariableRow
+                  variable={variable}
+                  mappedFrom={mappedFromSource.get(variable.name)?.sourceName}
+                  ignored={ignoredIds.has(variable.id)}
+                  showIgnoreToggle={showIgnoreToggle}
+                  onPatch={onPatch}
+                  onRemove={onRemove}
+                  onToggleIgnore={onToggleIgnore}
+                />
               </div>
             )
           })}
@@ -161,13 +259,24 @@ function VariableRows({
     )
   }
 
-  return (
-    <div className="variables-modal__list">
-      {variables.map((variable) => (
-        <VariableRow key={variable.id} variable={variable} mappedFrom={mappedFromSource.get(variable.name)?.sourceName} onPatch={onPatch} onRemove={onRemove} />
-      ))}
-    </div>
-  )
+  const rows: React.ReactNode[] = []
+  variables.forEach((variable, index) => {
+    if (boundaryIndex === index) rows.push(<div key="recent-boundary" className="variables-modal__recent-divider" />)
+    rows.push(
+      <VariableRow
+        key={variable.id}
+        variable={variable}
+        mappedFrom={mappedFromSource.get(variable.name)?.sourceName}
+        ignored={ignoredIds.has(variable.id)}
+        showIgnoreToggle={showIgnoreToggle}
+        onPatch={onPatch}
+        onRemove={onRemove}
+        onToggleIgnore={onToggleIgnore}
+      />
+    )
+  })
+
+  return <div className="variables-modal__list">{rows}</div>
 }
 
 export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.Element {
@@ -178,13 +287,109 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
 
   const [search, setSearch] = useState(() => getVariablesFilter().search)
   const [activeTab, setActiveTab] = useState<string>(() => getVariablesFilter().tab || CUSTOM_TAB)
+  const [sortMode, setSortMode] = useState<'name' | 'recent'>(() => getVariablesFilter().sort)
 
   // Persisted as one blob so reopening the modal lands back where you left
   // it — see getVariablesFilter's own comment in id.ts for why (the modal is
   // unmounted on close, so component state alone doesn't survive that).
   useEffect(() => {
-    setVariablesFilter({ search, tab: activeTab })
-  }, [search, activeTab])
+    setVariablesFilter({ search, tab: activeTab, sort: sortMode })
+  }, [search, activeTab, sortMode])
+
+  // When each variable last actually changed value (or first appeared) —
+  // keyed by id, not touched for a variable whose value didn't change.
+  // Compares actual values, not object identity — applyVariableUpdates in
+  // main/index.ts does preserve object identity for a variable a tick didn't
+  // touch, but that's server-side only; store.ts's 'variables:sync' handler
+  // gets there via JSON.parse(event.data), which mints a brand-new object
+  // for every variable on every sync regardless of whether its value
+  // changed. An identity check here would mark the WHOLE list "just
+  // changed" the instant a single DCS-BIOS field ticked, which is
+  // indistinguishable from plain name sort — exactly the bug this replaced.
+  const lastChangedAtRef = useRef<Map<string, number>>(new Map())
+  const prevVariablesRef = useRef<Variable[]>(variables)
+  if (prevVariablesRef.current !== variables) {
+    const prevById = new Map(prevVariablesRef.current.map((v) => [v.id, v]))
+    const now = Date.now()
+    for (const v of variables) {
+      const prev = prevById.get(v.id)
+      if (!prev || prev.value !== v.value) lastChangedAtRef.current.set(v.id, now)
+    }
+    prevVariablesRef.current = variables
+  }
+
+  // `recentIds` — see its own comment further down — is deliberately NOT
+  // recomputed on every `variables` change, only on this timer (plus a
+  // couple of direct user actions below). These refs let the interval below
+  // always read the LATEST variables/ignoredIds without needing them in its
+  // dependency array — listing them there would tear down and restart the
+  // interval (and reset the visible countdown) on literally every DCS-BIOS
+  // packet, which defeats the whole point.
+  const variablesRef = useRef(variables)
+  variablesRef.current = variables
+  const ignoredIdsRef = useRef<Set<string>>(new Set())
+
+  const [recentIds, setRecentIds] = useState<Set<string> | null>(null)
+  const recomputeRecentIds = useCallback((): void => {
+    const now = Date.now()
+    const set = new Set<string>()
+    for (const v of variablesRef.current) {
+      if (!ignoredIdsRef.current.has(v.id) && now - (lastChangedAtRef.current.get(v.id) ?? 0) < RECENT_WINDOW_MS) set.add(v.id)
+    }
+    setRecentIds(set)
+  }, [])
+
+  // `countdown` doubles as the recompute trigger AND the number shown on the
+  // Recent button: ticks down once a second, and only actually recomputes
+  // (resetting back to the full window) once it hits zero — so a background
+  // field simply changing value can't jump the queue and re-sort early; only
+  // this timer (or a direct ignore/un-ignore below) does.
+  const [countdown, setCountdown] = useState(RECENT_WINDOW_MS / 1000)
+  useEffect(() => {
+    if (sortMode !== 'recent') {
+      setRecentIds(null)
+      return
+    }
+    recomputeRecentIds()
+    setCountdown(RECENT_WINDOW_MS / 1000)
+    const interval = setInterval(() => {
+      setCountdown((s) => {
+        if (s > 1) return s - 1
+        recomputeRecentIds()
+        return RECENT_WINDOW_MS / 1000
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [sortMode, recomputeRecentIds])
+
+  // Variables excluded from 'recent' sort's "just changed" bucket — see
+  // VariableRow's onToggleIgnore prop comment for exactly what this does and
+  // doesn't affect. Persisted the same way as search/tab/sort above (the
+  // modal fully unmounts on close, see getVariablesFilter's own comment in
+  // id.ts) since a silenced-forever "clock" or telemetry variable is meant to
+  // stay silenced across reopening the modal, not just for the rest of this
+  // session.
+  const [ignoredIds, setIgnoredIds] = useState<Set<string>>(() => new Set(getIgnoredVariableIds()))
+  ignoredIdsRef.current = ignoredIds
+  useEffect(() => {
+    setIgnoredVariableIds([...ignoredIds])
+  }, [ignoredIds])
+  const toggleIgnored = useCallback((id: string): void => {
+    setIgnoredIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  // Ignoring/un-ignoring is a direct action — reflect it immediately rather
+  // than waiting for the next countdown tick (this effect runs after
+  // ignoredIdsRef.current above has already been synced to the new value, so
+  // recomputeRecentIds sees it correctly).
+  useEffect(() => {
+    if (sortMode === 'recent') recomputeRecentIds()
+  }, [ignoredIds, sortMode, recomputeRecentIds])
 
   // Renaming/removing a variable here wouldn't affect the event source
   // mapping that targets it by name — the mapping would just keep
@@ -230,8 +435,12 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
       activeTab === CUSTOM_TAB
         ? variables.filter((v) => !mappedFromSource.has(v.name))
         : variables.filter((v) => mappedFromSource.get(v.name)?.sourceId === activeTab)
-    return [...inTab].sort((a, b) => a.name.localeCompare(b.name))
-  }, [variables, mappedFromSource, activeTab])
+    if (!recentIds) return [...inTab].sort((a, b) => a.name.localeCompare(b.name))
+    return [...inTab].sort((a, b) => {
+      const recentDelta = Number(recentIds.has(b.id)) - Number(recentIds.has(a.id))
+      return recentDelta !== 0 ? recentDelta : a.name.localeCompare(b.name)
+    })
+  }, [variables, mappedFromSource, activeTab, recentIds])
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase()
@@ -308,6 +517,36 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
+                <div className="variables-modal__sort-toggle">
+                  <span className="variables-modal__sort-label">Sort:</span>
+                  <button
+                    type="button"
+                    className={`variables-modal__sort-btn${sortMode === 'recent' ? ' variables-modal__sort-btn--active' : ''}`}
+                    title={`Pin recently-changed variables to the top, re-checked every ${RECENT_WINDOW_MS / 1000} seconds`}
+                    onClick={() => setSortMode('recent')}
+                  >
+                    Recent{sortMode === 'recent' ? ` (${countdown}s)` : ''}
+                  </button>
+                  <button
+                    type="button"
+                    className={`variables-modal__sort-btn${sortMode === 'name' ? ' variables-modal__sort-btn--active' : ''}`}
+                    title="Sort alphabetically by name"
+                    onClick={() => setSortMode('name')}
+                  >
+                    Name
+                  </button>
+                  {sortMode === 'recent' && (
+                    <button
+                      type="button"
+                      className="variables-modal__sort-btn"
+                      disabled={ignoredIds.size === 0}
+                      title="Stop ignoring every variable currently silenced for Recent sort"
+                      onClick={() => setIgnoredIds(new Set())}
+                    >
+                      Clear ignores{ignoredIds.size > 0 ? ` (${ignoredIds.size})` : ''}
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="variables-modal__scroll">
@@ -318,7 +557,16 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
 
                 {filtered.length > 0 && (
                   <div className="variables-modal__groups">
-                    <VariableRows variables={filtered} mappedFromSource={mappedFromSource} onPatch={patchVariable} onRemove={removeVariable} />
+                    <VariableRows
+                      variables={filtered}
+                      mappedFromSource={mappedFromSource}
+                      ignoredIds={ignoredIds}
+                      showIgnoreToggle={sortMode === 'recent'}
+                      recentIds={recentIds}
+                      onPatch={patchVariable}
+                      onRemove={removeVariable}
+                      onToggleIgnore={toggleIgnored}
+                    />
                   </div>
                 )}
               </div>

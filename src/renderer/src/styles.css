@@ -3194,6 +3194,17 @@ button.deck-morph-cell:focus-visible {
 	margin: 12px 0 16px;
 }
 
+/* Separates 'recent' sort's "just changed" group from the rest of the list
+   — see VariableRows' boundaryIndex for where this gets inserted. Height
+   (1px line + 10px margin each side = 21px) matches DIVIDER_HEIGHT in
+   VariablesModal.tsx, which the virtualized branch relies on for exact
+   positioning; keep the two in sync if this changes. */
+.variables-modal__recent-divider {
+	height: 1px;
+	background: #3a3f4a;
+	margin: 10px 0;
+}
+
 .variables-modal__toolbar {
 	display: flex;
 	gap: 8px;
@@ -3209,6 +3220,53 @@ button.deck-morph-cell:focus-visible {
 	color: #e8e8ea;
 	padding: 6px 8px;
 	font-size: 13px;
+}
+
+.variables-modal__sort-toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+.variables-modal__sort-label {
+	font-size: 12px;
+	color: #6b7280;
+}
+
+.variables-modal__sort-btn {
+	background: #14161b;
+	border: 1px solid #3a3f4a;
+	border-radius: 4px;
+	color: #9098a8;
+	padding: 6px 10px;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.variables-modal__sort-btn:hover {
+	background: #1c2028;
+	color: #e8e8ea;
+}
+
+.variables-modal__sort-btn--active {
+	background: #5b8def;
+	border-color: #5b8def;
+	color: #14161b;
+}
+
+.variables-modal__sort-btn--active:hover {
+	background: #7ba3f2;
+}
+
+.variables-modal__sort-btn:disabled {
+	color: #4a505e;
+	cursor: not-allowed;
+}
+
+.variables-modal__sort-btn:disabled:hover {
+	background: #14161b;
+	color: #4a505e;
 }
 
 .variables-modal__group-controls {
@@ -3237,6 +3295,12 @@ button.deck-morph-cell:focus-visible {
 	flex-direction: column;
 	gap: 10px;
 	margin: 0 0 16px;
+	/* Lets .variables-modal__group-scroll below claim however much height is
+	   actually left in the modal (itself capped by .variables-modal's own
+	   max-height) instead of everything shrink-wrapping to content — see that
+	   rule's own comment for why min-height: 0 has to come along with it. */
+	flex: 1;
+	min-height: 0;
 }
 
 .variables-modal__group {
@@ -3273,9 +3337,18 @@ button.deck-morph-cell:focus-visible {
 	margin: 10px 0 0;
 }
 
+/* The virtualizer's own scroll container (VariableRows' virtualized branch,
+   >VIRTUALIZE_THRESHOLD rows) — needs a real bounded height to measure
+   against, but a flat 320px cap meant a 500-row DCS-BIOS deck's variable list
+   stayed a cramped little box even inside an otherwise near-full-height
+   modal. flex: 1 + min-height: 0 instead claims whatever's actually left
+   inside .variables-modal__groups (ultimately bounded by .variables-modal's
+   own max-height) — full height when there's enough rows to fill it, same
+   shrink-wrapped size as before when there isn't. */
 .variables-modal__group-scroll {
 	margin-top: 10px;
-	max-height: 320px;
+	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 }
 
@@ -3284,6 +3357,21 @@ button.deck-morph-cell:focus-visible {
 	grid-template-columns: 1fr 1fr 22px;
 	gap: 8px;
 	align-items: center;
+}
+
+/* Only rendered at all in 'recent' sort mode (see VariableRow's
+   showIgnoreToggle prop) — one extra column for the ⊘ ignore-for-sort
+   button. */
+.variables-modal__row--with-ignore {
+	grid-template-columns: 1fr 1fr 22px 22px;
+}
+
+/* Dims the whole row so an ignored variable still reads clearly at a glance
+   while scanning a 'recent'-sorted list — it hasn't been removed from the
+   list or stopped updating, just excluded from the "just changed" bucket
+   (see onToggleIgnore's own comment on VariableRow). */
+.variables-modal__row--ignored {
+	opacity: 0.5;
 }
 
 /* Applied to the value input specifically (see VariableRow in
@@ -3333,6 +3421,28 @@ button.deck-morph-cell:focus-visible {
 .variables-modal__row input:read-only {
 	color: #6b7280;
 	cursor: text;
+}
+
+.variables-modal__ignore {
+	background: none;
+	border: none;
+	color: #8a92a3;
+	font-size: 15px;
+	line-height: 1;
+	cursor: pointer;
+	padding: 4px;
+}
+
+.variables-modal__ignore:hover {
+	color: #e8e8ea;
+}
+
+.variables-modal__ignore--active {
+	color: #ff4d4d;
+}
+
+.variables-modal__ignore--active:hover {
+	color: #ff7a7a;
 }
 
 .variables-modal__remove {

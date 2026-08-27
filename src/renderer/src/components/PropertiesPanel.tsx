@@ -3492,7 +3492,7 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
           </div>
 
-          <label className="properties__field">
+          <div className="properties__field">
             <span>Rest value (optional)</span>
             <div className="color-picker-button__expr-editor-wrap">
               <CodeEditor
@@ -3510,7 +3510,7 @@ export function PropertiesPanel(): React.JSX.Element {
                 ⤢
               </button>
             </div>
-          </label>
+          </div>
           {adjusterValueExprExpanded && (
             <ExpressionEditorModal
               value={adjuster.valueExpr ?? ''}

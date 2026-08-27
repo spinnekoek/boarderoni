@@ -85,26 +85,52 @@ export function setSectionOpen(key: string, open: boolean): void {
 
 const VARIABLES_FILTER_KEY = 'boarderoni-variables-filter'
 
-// Which tab/search the Variables modal was left on — purely a local UI
+// Which tab/search/sort the Variables modal was left on — purely a local UI
 // preference (not synced through the server). The modal itself is unmounted
 // on close (see Toolbar.tsx's `{variablesOpen && <VariablesModal .../>}`),
-// so without this its search/tab would silently reset every time it's
+// so without this its search/tab/sort would silently reset every time it's
 // reopened. `tab` empty means "unset" — VariablesModal.tsx falls back to its
 // own CUSTOM_TAB default (and separately resets it if it names a source
 // that's since been removed), same as a first-time user with nothing stored.
-export function getVariablesFilter(): { search: string; tab: string } {
+// `sort` defaults to 'name' — the list's original (and only) behavior before
+// 'recent' existed, so anyone with a filter blob saved from before this field
+// existed keeps seeing exactly what they always have.
+export function getVariablesFilter(): { search: string; tab: string; sort: 'name' | 'recent' } {
   const raw = localStorage.getItem(VARIABLES_FILTER_KEY)
-  if (!raw) return { search: '', tab: '' }
+  if (!raw) return { search: '', tab: '', sort: 'name' }
   try {
-    const parsed = JSON.parse(raw) as { search?: string; tab?: string }
-    return { search: parsed.search ?? '', tab: parsed.tab ?? '' }
+    const parsed = JSON.parse(raw) as { search?: string; tab?: string; sort?: string }
+    return { search: parsed.search ?? '', tab: parsed.tab ?? '', sort: parsed.sort === 'recent' ? 'recent' : 'name' }
   } catch {
-    return { search: '', tab: '' }
+    return { search: '', tab: '', sort: 'name' }
   }
 }
 
-export function setVariablesFilter(filter: { search: string; tab: string }): void {
+export function setVariablesFilter(filter: { search: string; tab: string; sort: 'name' | 'recent' }): void {
   localStorage.setItem(VARIABLES_FILTER_KEY, JSON.stringify(filter))
+}
+
+const IGNORED_VARIABLE_IDS_KEY = 'boarderoni-ignored-variable-ids'
+
+// Variable ids currently silenced from 'recent' sort's "just changed" bucket
+// (VariablesModal.tsx's ignoredIds) — persisted across modal closes/app
+// restarts like the filter above, not just kept in memory. Stale ids (a
+// variable since deleted, or from a different dashboard entirely — this
+// isn't scoped per-deck) are harmless: nothing currently matches them, they
+// just sit unused until manually cleared via "Clear ignores."
+export function getIgnoredVariableIds(): string[] {
+  const raw = localStorage.getItem(IGNORED_VARIABLE_IDS_KEY)
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+export function setIgnoredVariableIds(ids: string[]): void {
+  localStorage.setItem(IGNORED_VARIABLE_IDS_KEY, JSON.stringify(ids))
 }
 
 const LAST_DCS_AIRCRAFT_KEY = 'boarderoni-last-dcs-aircraft'
