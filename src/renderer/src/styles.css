@@ -3680,6 +3680,16 @@ button.deck-morph-cell:focus-visible {
 	gap: 8px;
 }
 
+.events-modal__field-select-all {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 2px;
+	font-size: 12px;
+	color: #9098a8;
+	cursor: pointer;
+}
+
 .events-modal__field-groups {
 	display: flex;
 	flex-direction: column;

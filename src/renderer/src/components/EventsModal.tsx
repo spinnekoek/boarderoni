@@ -282,11 +282,34 @@ function DcsBiosFieldBrowser({
   const groups = useMemo(() => groupByCategory(filtered), [filtered])
   const hasSearch = search.trim().length > 0
 
+  const allFilteredChecked = filtered.length > 0 && filtered.every((e) => checked.has(e.key))
+  const someFilteredChecked = filtered.some((e) => checked.has(e.key))
+  const selectAllRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someFilteredChecked && !allFilteredChecked
+  }, [someFilteredChecked, allFilteredChecked])
+
   function toggle(key: string): void {
     setChecked((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
+      return next
+    })
+  }
+
+  // Scoped to the filtered set, not every entry in the catalog — with a
+  // search narrowing hundreds of fields down to a handful, "select all"
+  // should mean "all matches," not silently also check everything hidden
+  // by the filter.
+  function toggleAll(): void {
+    setChecked((prev) => {
+      const next = new Set(prev)
+      if (allFilteredChecked) {
+        for (const e of filtered) next.delete(e.key)
+      } else {
+        for (const e of filtered) next.add(e.key)
+      }
       return next
     })
   }
@@ -318,6 +341,14 @@ function DcsBiosFieldBrowser({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          {filtered.length > 0 && (
+            <label className="events-modal__field-select-all">
+              <input type="checkbox" ref={selectAllRef} checked={allFilteredChecked} onChange={toggleAll} />
+              <span>
+                Select all {hasSearch ? `${filtered.length} matching` : filtered.length} field{filtered.length === 1 ? '' : 's'}
+              </span>
+            </label>
+          )}
           <div className="events-modal__field-groups">
             {groups.map((group) => (
               <DcsBiosFieldCategoryGroup
