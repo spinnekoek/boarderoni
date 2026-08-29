@@ -27,6 +27,9 @@ import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -52,6 +55,13 @@ private const val SERVICE_TYPE = "_boarderoni._tcp."
 private const val DEFAULT_WEB_PORT = 17334
 
 private const val DISCOVERY_WATCHDOG_MS = 8000L
+
+// Prefs for remembering the manual-connect field across launches — most
+// devices that need the manual fallback (see connectManually) need it every
+// time (the OEM Wi-Fi stacks that drop mDNS don't start working later), so
+// retyping the same IP each launch is pure friction.
+private const val PREFS_NAME = "boarderoni"
+private const val KEY_LAST_MANUAL_INPUT = "last_manual_input"
 
 class MainActivity : AppCompatActivity() {
 
@@ -240,6 +250,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setUpManualConnect() {
+        val lastInput = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_LAST_MANUAL_INPUT, null)
+        if (!lastInput.isNullOrEmpty()) {
+            manualIpInput.setText(lastInput)
+            manualIpInput.setSelection(lastInput.length)
+        }
+
         manualConnectButton.setOnClickListener { connectManually() }
         manualIpInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO) {
@@ -251,22 +268,61 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Accepts "192.168.1.23" (defaults to DEFAULT_WEB_PORT — the packaged
-    // build's fixed port) or "192.168.1.23:5173" (an explicit port, for
-    // testing against `npm run dev` — its actual page is served by the Vite
-    // dev server, not DEFAULT_WEB_PORT, which only answers "WS only in dev
-    // mode" there).
+    // Accepts "192.168.1.23" (asks the desktop itself which port to use —
+    // see resolveManualWebPort) or "192.168.1.23:5173" (an explicit port,
+    // for pointing at something other than what the desktop reports, e.g. a
+    // second desktop instance on a nonstandard port).
     private fun connectManually() {
         val input = manualIpInput.text.toString().trim()
         if (input.isEmpty()) return
         val colonIndex = input.lastIndexOf(':')
         val host = if (colonIndex >= 0) input.substring(0, colonIndex) else input
-        val port = if (colonIndex >= 0) input.substring(colonIndex + 1).toIntOrNull() ?: DEFAULT_WEB_PORT else DEFAULT_WEB_PORT
         if (host.isEmpty()) return
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putString(KEY_LAST_MANUAL_INPUT, input)
+            .apply()
         cancelDiscoveryWatchdog()
         cancelRetry()
-        currentTarget = "$host:$port"
-        loadMobileLink(host, port)
+        if (colonIndex >= 0) {
+            val port = input.substring(colonIndex + 1).toIntOrNull() ?: DEFAULT_WEB_PORT
+            currentTarget = "$host:$port"
+            loadMobileLink(host, port)
+        } else {
+            resolveManualWebPort(host)
+        }
+    }
+
+    // No typed port means "figure it out" — SERVER_PORT (DEFAULT_WEB_PORT)
+    // always answers /api/apk-info regardless of dev/packaged mode (see
+    // index.ts: that route is handled before the "WS only in dev mode"
+    // placeholder), and its appUrl field already carries the real webPort
+    // (the Vite dev server's port under `npm run dev`, or SERVER_PORT
+    // itself in a packaged build) — the same value mDNS's TXT record would
+    // supply, just fetched directly since manual entry has no TXT record to
+    // read. Falls back to DEFAULT_WEB_PORT if the probe fails for any
+    // reason (unreachable host, older desktop build, timeout).
+    private fun resolveManualWebPort(host: String) {
+        Thread {
+            val resolvedPort = try {
+                val connection =
+                    URL("http://$host:$DEFAULT_WEB_PORT/api/apk-info").openConnection() as HttpURLConnection
+                connection.connectTimeout = 2000
+                connection.readTimeout = 2000
+                try {
+                    val body = connection.inputStream.bufferedReader().readText()
+                    val appUrl = JSONObject(body).optString("appUrl")
+                    if (appUrl.isEmpty()) null else Regex(""":(\d+)/""").find(appUrl)?.groupValues?.get(1)?.toIntOrNull()
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (_: Exception) {
+                null
+            } ?: DEFAULT_WEB_PORT
+            mainHandler.post {
+                currentTarget = "$host:$resolvedPort"
+                loadMobileLink(host, resolvedPort)
+            }
+        }.start()
     }
 
     // Most real-world NSD "discovery just doesn't find anything" reports
