@@ -80,7 +80,17 @@ export async function captureRegionJpeg(region: ScreenRegion, displayId: number,
     quality,
     sharpen
   })
-  return jpeg
+  // worker_threads' postMessage strips Buffer down to a plain Uint8Array on
+  // this side of the structured-clone boundary (Buffer is just a Uint8Array
+  // subclass, and the clone algorithm doesn't preserve that) — every other
+  // consumer of this function only ever writes the raw bytes straight
+  // through (an HTTP response body, a file), which works identically for
+  // either type, so this went unnoticed. Buffer.from(jpeg).toString('base64')
+  // is the one call that silently does the wrong thing on a bare
+  // Uint8Array (it ignores the 'base64' argument and falls back to
+  // Array-style comma-joined decimal digits) instead of throwing — wrapping
+  // here, once, keeps every caller's Promise<Buffer> actually true.
+  return Buffer.from(jpeg)
 }
 
 // Self-contained overlay page — deliberately not part of the built React
@@ -108,6 +118,9 @@ html,body{margin:0;padding:0;overflow:hidden;cursor:crosshair;background:transpa
 #toolbar button{font:13px sans-serif;border:none;border-radius:5px;padding:6px 12px;cursor:pointer;}
 #confirm-btn{background:#5b8def;color:#fff;}
 #cancel-btn{background:rgba(255,255,255,0.12);color:#fff;}
+#magnifier{position:absolute;display:none;border:2px solid #5b8def;border-radius:6px;overflow:hidden;background:#000;box-shadow:0 4px 16px rgba(0,0,0,0.5);pointer-events:none;}
+#magnifier.visible{display:block;}
+#magnifier img{width:100%;height:100%;display:block;}
 </style></head><body>
 <div id="dim"></div>
 <div id="box">
@@ -125,6 +138,7 @@ html,body{margin:0;padding:0;overflow:hidden;cursor:crosshair;background:transpa
   <button id="cancel-btn">Cancel</button>
   <button id="confirm-btn">Confirm</button>
 </div>
+<div id="magnifier"><img id="magnifier-img" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" /></div>
 <div id="hint">Drag to select a region</div>
 <script>
 var boxEl = document.getElementById('box')
@@ -132,12 +146,22 @@ var dimEl = document.getElementById('dim')
 var toolbarEl = document.getElementById('toolbar')
 var sizeLabel = document.getElementById('size-label')
 var hintEl = document.getElementById('hint')
+var magnifierEl = document.getElementById('magnifier')
+var magnifierImg = document.getElementById('magnifier-img')
 var MIN_SIZE = 20
+// Below this in either dimension, dragging at 1:1 makes it hard to see
+// exactly what's under the box (e.g. picking out a taskbar clock's
+// digits) — the magnifier kicks in under this threshold.
+var MAGNIFY_THRESHOLD = 100
+// The magnifier's larger side, in CSS px — the box's own aspect ratio is
+// preserved, zoom is however much that takes (capped below).
+var MAGNIFIER_MAX = 200
 var box = null
 var mode = null // 'create' | 'move' | 'resize'
 var activeHandle = null
 var dragStart = null
 var createStart = null
+var magnifyRequestId = 0
 
 function clamp(box) {
   var w = window.innerWidth, h = window.innerHeight
@@ -161,7 +185,7 @@ function resize(orig, handle, dx, dy) {
 }
 
 function render() {
-  if (!box) { boxEl.style.display = 'none'; toolbarEl.classList.remove('visible'); dimEl.style.clipPath = ''; return }
+  if (!box) { boxEl.style.display = 'none'; toolbarEl.classList.remove('visible'); dimEl.style.clipPath = ''; magnifierEl.classList.remove('visible'); return }
   boxEl.style.display = 'block'
   boxEl.style.left = box.x + 'px'
   boxEl.style.top = box.y + 'px'
@@ -173,14 +197,101 @@ function render() {
     x1 + 'px ' + y1 + 'px, ' + x1 + 'px ' + y2 + 'px, ' + x2 + 'px ' + y2 + 'px, ' + x2 + 'px ' + y1 + 'px, ' + x1 + 'px ' + y1 + 'px)'
 }
 
+// Picks whichever of above/below/left/right has the most room for the
+// magnifier at its current zoomed size, falling back to whichever has the
+// most space anyway (clamped back into the viewport) if none genuinely
+// fit. showToolbar anchors itself to WHEREVER this lands (not the other
+// way around, and not two independent guesses trying not to collide) —
+// see updateMagnifier's own return value.
+function positionMagnifier(magW, magH) {
+  var w = window.innerWidth, h = window.innerHeight, gap = 10
+  var candidates = [
+    { space: h - (box.y + box.height), left: box.x + box.width / 2 - magW / 2, top: box.y + box.height + gap, need: magH + gap },
+    { space: box.y, left: box.x + box.width / 2 - magW / 2, top: box.y - magH - gap, need: magH + gap },
+    { space: w - (box.x + box.width), left: box.x + box.width + gap, top: box.y + box.height / 2 - magH / 2, need: magW + gap },
+    { space: box.x, left: box.x - magW - gap, top: box.y + box.height / 2 - magH / 2, need: magW + gap }
+  ]
+  var pick = null
+  for (var i = 0; i < candidates.length; i++) {
+    var c = candidates[i]
+    if (c.space >= c.need && (!pick || c.space > pick.space)) pick = c
+  }
+  if (!pick) {
+    pick = candidates[0]
+    for (var j = 1; j < candidates.length; j++) if (candidates[j].space > pick.space) pick = candidates[j]
+  }
+  return {
+    left: Math.min(Math.max(4, pick.left), w - magW - 4),
+    top: Math.min(Math.max(4, pick.top), h - magH - 4)
+  }
+}
+
+// Fetched once the drag settles (called from showToolbar), not live during
+// an active drag — a screen-capture round trip per frame has no chance of
+// keeping up with pointermove, and there's no need for it to: the box is
+// already visible at 1:1 while dragging, this is purely to double-check
+// the final placement before confirming. Returns the magnifier's own
+// placed rect (so showToolbar can anchor to it) or null when it's not
+// shown at all (box too big to need it).
+function updateMagnifier() {
+  if (box.width >= MAGNIFY_THRESHOLD || box.height >= MAGNIFY_THRESHOLD) {
+    magnifierEl.classList.remove('visible')
+    return null
+  }
+  var zoom = Math.min(8, Math.max(2, MAGNIFIER_MAX / Math.max(box.width, box.height)))
+  var magW = Math.round(box.width * zoom), magH = Math.round(box.height * zoom)
+  var pos = positionMagnifier(magW, magH)
+  magnifierEl.style.left = pos.left + 'px'
+  magnifierEl.style.top = pos.top + 'px'
+  magnifierEl.style.width = magW + 'px'
+  magnifierEl.style.height = magH + 'px'
+  magnifierEl.classList.add('visible')
+
+  var rect = { x: box.x, y: box.y, width: box.width, height: box.height }
+  var requestId = ++magnifyRequestId
+  window.regionPicker.magnify(rect).then(function (dataUrl) {
+    // Dropped if a newer request has since started (another drag finished
+    // before this one came back) — a stale frame shouldn't flash onto the
+    // current magnifier.
+    if (requestId !== magnifyRequestId || !dataUrl) return
+    magnifierImg.src = dataUrl
+  })
+  return { left: pos.left, top: pos.top, width: magW, height: magH }
+}
+
 function showToolbar() {
   hintEl.style.display = 'none'
-  toolbarEl.classList.add('visible')
   sizeLabel.textContent = Math.round(box.width) + ' \\u00d7 ' + Math.round(box.height)
-  var top = box.y + box.height + 12
+
+  // Anchored to the magnifier's own rect when it's showing, not the box's
+  // — the two would otherwise happily pick overlapping spots on their
+  // own (a box in a screen corner, e.g. the taskbar clock, easily fits
+  // both "toolbar below the box" and "magnifier also near the bottom"),
+  // since showToolbar had no idea where positionMagnifier actually
+  // landed. Stacking the toolbar directly off the magnifier guarantees
+  // they never overlap, by construction rather than by two heuristics
+  // hoping not to collide.
+  var anchor = updateMagnifier()
+  var ax = anchor ? anchor.left : box.x
+  var ay = anchor ? anchor.top : box.y
+  var aw = anchor ? anchor.width : box.width
+  var ah = anchor ? anchor.height : box.height
+
+  toolbarEl.classList.add('visible')
+  var top = ay + ah + 12
   var toolbarH = 40
-  if (top + toolbarH > window.innerHeight) top = box.y - toolbarH - 4
-  toolbarEl.style.left = (box.x + box.width / 2) + 'px'
+  if (top + toolbarH > window.innerHeight) top = ay - toolbarH - 4
+  // #toolbar's own CSS centers it on 'left' via transform: translateX(-50%)
+  // — for an anchor near either screen edge (e.g. the taskbar clock,
+  // bottom-right corner) the naive center point pushes half the toolbar
+  // past the viewport with nothing to clip it back in, since this
+  // window's own bounds ARE the screen edges. offsetWidth is 0 while
+  // 'visible' hadn't been added yet, so it's only accurate read AFTER the
+  // class above.
+  var halfW = toolbarEl.offsetWidth / 2
+  var center = ax + aw / 2
+  center = Math.min(Math.max(center, halfW + 4), window.innerWidth - halfW - 4)
+  toolbarEl.style.left = center + 'px'
   toolbarEl.style.top = Math.max(4, top) + 'px'
 }
 
@@ -191,6 +302,7 @@ document.addEventListener('pointerdown', function (e) {
     mode = 'resize'; activeHandle = handle
     dragStart = { x: e.clientX, y: e.clientY, box: Object.assign({}, box) }
     toolbarEl.classList.remove('visible')
+    magnifierEl.classList.remove('visible')
     e.preventDefault()
     return
   }
@@ -198,6 +310,7 @@ document.addEventListener('pointerdown', function (e) {
     mode = 'move'
     dragStart = { x: e.clientX, y: e.clientY, box: Object.assign({}, box) }
     toolbarEl.classList.remove('visible')
+    magnifierEl.classList.remove('visible')
     e.preventDefault()
     return
   }
@@ -205,6 +318,7 @@ document.addEventListener('pointerdown', function (e) {
   createStart = { x: e.clientX, y: e.clientY }
   box = { x: e.clientX, y: e.clientY, width: 0, height: 0 }
   toolbarEl.classList.remove('visible')
+  magnifierEl.classList.remove('visible')
   render()
 })
 document.addEventListener('pointermove', function (e) {
@@ -263,6 +377,43 @@ function registerPickerIpcHandlers(): void {
   if (handlersRegistered) return
   handlersRegistered = true
 
+  // Backs the picker's own magnifier (shown once the box drops below
+  // 100x100 — easy to lose precision at that size, e.g. picking out a
+  // taskbar clock's digits, dragged at 1:1 scale) — reuses the same
+  // captureRegionJpeg pipeline the OCR/streaming source itself uses, just
+  // pointed at the box's own current rect instead of a saved one. Returns
+  // null (rather than throwing across the IPC boundary) on any capture
+  // failure — the magnifier just stays on its last successful frame,
+  // dragging itself isn't interrupted.
+  ipcMain.handle('region-picker:magnify', async (_event, rect: PickedRect): Promise<string | null> => {
+    if (!activePicker) return null
+    const { display, win } = activePicker
+    try {
+      // The picker window itself — its box border and drag-handle dots —
+      // is still the topmost thing on screen at this point, so a plain
+      // screen capture grabs those baked into the frame along with the
+      // real desktop underneath. setOpacity(0) hides the window without
+      // closing it (all its state/listeners survive) for just long enough
+      // to grab a clean shot; the short wait is for the compositor to
+      // actually repaint a frame without it before capturing — setOpacity
+      // itself returns before that's guaranteed to have happened.
+      win.setOpacity(0)
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      const jpeg = await captureRegionJpeg(
+        { x: display.bounds.x + rect.x, y: display.bounds.y + rect.y, width: rect.width, height: rect.height },
+        display.id,
+        90,
+        true
+      )
+      return `data:image/jpeg;base64,${jpeg.toString('base64')}`
+    } catch (err) {
+      console.error('[boarderoni] region-picker magnify failed', err)
+      return null
+    } finally {
+      if (!win.isDestroyed()) win.setOpacity(1)
+    }
+  })
+
   ipcMain.on('region-picker:submit', (_event, rect: PickedRect | null) => {
     if (!activePicker) return
     const { resolve, display, win } = activePicker
@@ -305,7 +456,18 @@ export function openRegionPicker(displayId: number): Promise<ScreenRegion | null
       skipTaskbar: true,
       resizable: false,
       movable: false,
-      fullscreenable: false,
+      // Windows 10/11 specifically hardened the shell so a plain topmost
+      // window — even one already sized to cover the taskbar's own screen
+      // area (display.bounds, not workArea) and repeatedly re-asserted via
+      // moveTop() — still loses mouse input to Explorer the instant the
+      // cursor crosses into the taskbar's area; regular apps can no longer
+      // out-z-order it. Real exclusive fullscreen is the one mechanism
+      // that legitimately covers it, since Windows itself auto-hides the
+      // taskbar's input handling for the fullscreen app's monitor — same
+      // reason a fullscreen game's cursor can reach where the taskbar
+      // would otherwise be.
+      fullscreenable: true,
+      fullscreen: true,
       hasShadow: false,
       autoHideMenuBar: true,
       webPreferences: {
@@ -315,6 +477,14 @@ export function openRegionPicker(displayId: number): Promise<ScreenRegion | null
     activePicker = { resolve, display, win }
     win.setMenuBarVisibility(false)
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(pickerHtml())}`)
+    // Unlike the main app window (see main/index.ts), nothing was piping
+    // this ephemeral window's own console to our terminal — any in-page
+    // failure here (a thrown exception, a rejected magnify() call) was
+    // completely invisible.
+    win.webContents.on('console-message', (event) => {
+      console.log(`[region-picker:${event.level}] ${event.message}`)
+    })
+
     win.on('closed', () => {
       if (activePicker?.win !== win) return
       const pending = activePicker

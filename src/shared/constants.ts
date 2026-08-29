@@ -52,3 +52,10 @@ export const DEFAULT_GRID_SIZE = 8
 // already showing it at, rather than some unrelated guess.
 export const DEFAULT_CANVAS_WIDTH = 1920
 export const DEFAULT_CANVAS_HEIGHT = 1080
+
+// Shorthand recognized in SendDcsCommandAction's plain (non-expression)
+// Value field — typing exactly this instead of opening ƒx and writing out
+// `return variables.$value;` by hand does the same thing. See
+// runSendDcsCommand in main/index.ts and SendDcsCommandActionEditor's
+// handleTest in PropertiesPanel.tsx, which both special-case it.
+export const DCS_COMMAND_VALUE_SHORTHAND = '$value'

@@ -15,7 +15,7 @@ import { ScreenCaptureWidgetContent } from './widgets/ScreenCaptureWidget'
 import { LabelWidgetContent } from './widgets/LabelWidget'
 import { LineWidgetContent } from './widgets/LineWidget'
 import { resolveActivePositionIndex } from '@shared/switchPosition'
-import { resolveNumericExpr, type VariableMap } from '@shared/expr'
+import { resolveNumericExpr, resolveWidgetVisible, type VariableMap } from '@shared/expr'
 import type { BoxWidget } from '@shared/types'
 
 interface ResizeState {
@@ -83,6 +83,15 @@ export function CanvasWidget({
         ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle)
         : widget.rotateAngle
       : undefined
+
+  // The editor always shows every widget regardless of visible/visibleExpr
+  // (see WidgetVisibility in shared/types.ts) — hiding it here would make
+  // it unselectable/uneditable the moment it's toggled off. Dimming it
+  // instead gives the same live feedback (and, since this evaluates the
+  // exact same expression the deployed view does, the same console.log
+  // reaching the debug panel that every other expression field already
+  // gets here).
+  const visible = resolveWidgetVisible(widget, variables)
 
   function snap(value: number): number {
     return snapToGrid ? Math.round(value / gridSize) * gridSize : Math.round(value)
@@ -162,7 +171,7 @@ export function CanvasWidget({
 
   return (
     <div
-      className={`canvas-widget${selected ? ' canvas-widget--selected' : ''}`}
+      className={`canvas-widget${selected ? ' canvas-widget--selected' : ''}${visible ? '' : ' canvas-widget--hidden'}`}
       style={{
         left: widget.x,
         top: widget.y,

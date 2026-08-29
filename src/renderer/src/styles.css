@@ -663,6 +663,14 @@ body {
 	cursor: pointer;
 }
 
+/* Editor-only feedback for a widget currently resolving Visible to false
+   (see WidgetVisibility in shared/types.ts) — dimmed rather than actually
+   hidden, so it stays clickable/selectable/editable here even though the
+   deployed view (ViewCanvas.tsx) skips rendering it outright. */
+.canvas-widget--hidden {
+	opacity: 0.35;
+}
+
 /* A morph widget's box is its blocks' bounding box, which can include empty
    area (e.g. a U's notch) that isn't actually part of the shape — the box
    itself must let clicks pass through so anything placed behind/inside it
@@ -3155,6 +3163,11 @@ button.deck-morph-cell:focus-visible {
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
+	/* Same reasoning as .variables-modal__group-scroll's own padding — this
+	   is the scroll container for the non-virtualized row list (below
+	   VIRTUALIZE_THRESHOLD), so it needs the same breathing room for
+	   .variables-modal__row--flash's box-shadow on the first/last row. */
+	padding: 3px 0;
 }
 
 .variables-modal__tabs {
@@ -3350,6 +3363,13 @@ button.deck-morph-cell:focus-visible {
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
+	/* .variables-modal__row--flash's box-shadow bleeds 2px outside the row's
+	   own box — for every row but the first/last that bleed lands in the gap
+	   between rows, but the top/bottom rows sit flush against this
+	   container's own clip edge (overflow-y: auto clips at the padding box,
+	   margin doesn't help), so the ring gets visibly cut off there without
+	   this padding. */
+	padding: 3px 0;
 }
 
 .variables-modal__row {

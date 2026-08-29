@@ -17,5 +17,9 @@ contextBridge.exposeInMainWorld('regionPicker', {
   // local to the display — main process adds the display's own origin and
   // converts to physical pixels (see screenCapture.ts). null means
   // cancelled (Escape).
-  submit: (rect: PickedRect | null): void => ipcRenderer.send('region-picker:submit', rect)
+  submit: (rect: PickedRect | null): void => ipcRenderer.send('region-picker:submit', rect),
+  // Backs the small-selection magnifier — same rect convention as submit.
+  // Resolves to a data: URL JPEG of the live desktop under that rect, or
+  // null on capture failure.
+  magnify: (rect: PickedRect): Promise<string | null> => ipcRenderer.invoke('region-picker:magnify', rect)
 })

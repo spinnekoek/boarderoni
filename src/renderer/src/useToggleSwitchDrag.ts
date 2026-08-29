@@ -123,9 +123,23 @@ export function useToggleSwitchDrag(
   // position and back off it can tell "was that momentary throw already
   // fired" apart from "is this index just being previewed."
   const heldMomentaryIndexRef = useRef<number | null>(null)
+  // Whichever index select() was most recently called for mid-drag — via a
+  // momentary position (always) or, when widget.fireWhileDragging is on, any
+  // position reached along the way. Reset to null at the start of every
+  // gesture. handlePointerUp checks this (gated on fireWhileDragging, so
+  // fireWhileDragging off leaves every other release behavior exactly as it
+  // was before this existed) to avoid firing the same position's
+  // onSelect/positionChange a second time on release when it already fired
+  // live as the last position reached.
+  const lastFiredIndexRef = useRef<number | null>(null)
 
   function isMomentary(index: number): boolean {
     return !isMiddlePosition(index, widget.positions.length) && (widget.positions[index]?.momentary ?? false)
+  }
+
+  function fireSelect(index: number): void {
+    select(index)
+    lastFiredIndexRef.current = index
   }
 
   function springBackFromMomentary(): void {
@@ -133,7 +147,7 @@ export function useToggleSwitchDrag(
     heldMomentaryIndexRef.current = null
     if (heldIndex === null) return
     const target = momentarySpringBackIndex(heldIndex, widget.positions.length)
-    if (target >= 0) select(target)
+    if (target >= 0) fireSelect(target)
   }
 
   function updateFromEvent(e: React.PointerEvent): number {
@@ -147,10 +161,12 @@ export function useToggleSwitchDrag(
     if (isMomentary(index)) {
       if (heldMomentaryIndexRef.current !== index) {
         heldMomentaryIndexRef.current = index
-        select(index)
+        fireSelect(index)
       }
-    } else if (heldMomentaryIndexRef.current !== null) {
-      springBackFromMomentary()
+    } else {
+      if (heldMomentaryIndexRef.current !== null) springBackFromMomentary()
+      // Defaults on — see fireWhileDragging's own comment in shared/types.ts.
+      if ((widget.fireWhileDragging ?? true) && lastFiredIndexRef.current !== index) fireSelect(index)
     }
     return index
   }
@@ -160,6 +176,7 @@ export function useToggleSwitchDrag(
     hasMovedRef.current = false
     startRef.current = { x: e.clientX, y: e.clientY }
     baselineIndexRef.current = activeIndex
+    lastFiredIndexRef.current = null
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
@@ -201,7 +218,7 @@ export function useToggleSwitchDrag(
     // mode's own onZonePointerUp.
     if (heldMomentaryIndexRef.current !== null) {
       springBackFromMomentary()
-    } else {
+    } else if (!((widget.fireWhileDragging ?? true) && lastFiredIndexRef.current === index)) {
       select(index)
     }
   }

@@ -21,7 +21,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { Bonjour, type Service } from 'bonjour-service'
 import { z } from 'zod'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
-import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN, DECK_CLOSE_CODE_DENIED, MDNS_SERVICE_TYPE } from '../shared/constants'
+import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN, DECK_CLOSE_CODE_DENIED, MDNS_SERVICE_TYPE, DCS_COMMAND_VALUE_SHORTHAND } from '../shared/constants'
 import {
   DEFAULT_DASHBOARD,
   DECK_EXPORT_FORMAT_VERSION,
@@ -215,6 +215,16 @@ function migrateDialSwitchIncrementDecrement(widget: DialSwitchWidget): DialSwit
   return { ...widget, events: { ...widget.events, increment: events?.increment ?? [], decrement: events?.decrement ?? [] } }
 }
 
+// fireWhileDragging now defaults on for every toggle switch, including ones
+// saved before it existed (or before it was flipped on) — not just freshly
+// created ones (see Palette.tsx's handleAddToggleSwitch). Unconditional
+// rather than an `?? true` backfill: any existing false is itself pre-
+// default, from before this migration existed, not a deliberate opt-out.
+function migrateToggleSwitchFireWhileDragging(widget: ToggleSwitchWidget): ToggleSwitchWidget {
+  if (widget.fireWhileDragging === true) return widget
+  return { ...widget, fireWhileDragging: true }
+}
+
 // SwitchWidgetBase.positions is typed as "at least 2" but nothing on the
 // load path ever enforced that at runtime — a corrupted/hand-edited
 // dashboard.json, or a widget caught mid-migration by an old app version,
@@ -250,7 +260,10 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
     )
   }
 
-  if (widget.type === 'switch-toggle') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
+  if (widget.type === 'switch-toggle')
+    return migrateToggleSwitchFireWhileDragging(
+      migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
+    )
 
   if (widget.type === 'switch-rocker') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
 
@@ -1419,11 +1432,21 @@ async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction, t
   }
 
   let argument = action.argument
-  if (action.argumentExpr && action.argumentExpr.trim()) {
+  // The plain Value field's own $value shorthand (see the constant's doc
+  // comment) — only kicks in when argumentExpr isn't already set, same
+  // precedence the UI itself enforces (SendDcsCommandActionEditor only shows
+  // one or the other, never both).
+  const argumentExpr =
+    action.argumentExpr && action.argumentExpr.trim()
+      ? action.argumentExpr
+      : action.argument.trim() === DCS_COMMAND_VALUE_SHORTHAND
+        ? `return variables.${DCS_COMMAND_VALUE_SHORTHAND};`
+        : undefined
+  if (argumentExpr) {
     const variableMap = toVariableMap(room.dashboard.variables ?? [])
     const result = trigger
-      ? evaluateMappingExpression(action.argumentExpr, trigger.value, variableMap, trigger.index)
-      : tryEvaluateExpression(action.argumentExpr, variableMap)
+      ? evaluateMappingExpression(argumentExpr, trigger.value, variableMap, trigger.index)
+      : tryEvaluateExpression(argumentExpr, variableMap)
     if (!result.ok) throw new Error(result.error)
     argument = String(result.value)
   }

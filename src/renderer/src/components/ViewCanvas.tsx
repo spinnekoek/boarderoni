@@ -5,7 +5,7 @@ import { isBoarderoniAndroidApp, setKeepScreenOn } from '../androidBridge'
 import { getKeepScreenOnPreference } from '../id'
 import { getEffectiveStates } from '@shared/states'
 import { morphFootprint } from '@shared/morph'
-import { resolveColor, resolveNumericExpr, toVariableMap, type VariableMap } from '@shared/expr'
+import { resolveColor, resolveNumericExpr, resolveWidgetVisible, toVariableMap, type VariableMap } from '@shared/expr'
 import { findSubDeck, getSubDeckCanvasSize, getSubDeckWidgets } from '@shared/subDecks'
 import type {
   AdjusterWidget,
@@ -580,6 +580,7 @@ export function ScreenWidgetsLayer({
   return (
     <>
       {widgets.map((widget) => {
+        if (!resolveWidgetVisible(widget, variables)) return null
         const rendered = widget.type === 'morph' ? morphFootprint(widget) : widget
         return (
           <div

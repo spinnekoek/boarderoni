@@ -348,7 +348,21 @@ export interface WidgetState extends BoxAppearance, ColorAppearance {
   isClicked?: boolean
 }
 
-export interface ButtonWidget {
+// Whether a widget renders at all on the deployed view (a phone, the
+// desktop's own /?mode=view) — the editor itself always shows every
+// widget regardless, so it stays selectable/editable while hidden.
+// Undefined behaves as true (opt-in to hide, not opt-in to show), so an
+// existing dashboard saved before this field existed renders exactly as
+// before. visibleExpr, when set, overrides the plain flag — same
+// convention as ToggleSwitchWidget.guardOpenExpr (see resolveBooleanExpr
+// in shared/expr.ts): any truthy/falsy result works, not just a literal
+// true/false.
+export interface WidgetVisibility {
+  visible?: boolean
+  visibleExpr?: string
+}
+
+export interface ButtonWidget extends WidgetVisibility {
   id: string
   type: 'button'
   x: number
@@ -426,7 +440,7 @@ export interface MorphBlock extends MorphCell {
 // keys, and the states list itself are shared by the whole widget (one set
 // of states for all blocks) — color, spacing, radius, and border (via
 // perState on each block) can all differ block to block.
-export interface MorphButtonWidget {
+export interface MorphButtonWidget extends WidgetVisibility {
   id: string
   type: 'morph'
   x: number
@@ -511,7 +525,7 @@ export interface GaugeTickSet {
   labelTextExpr?: string
 }
 
-export interface GaugeWidget {
+export interface GaugeWidget extends WidgetVisibility {
   id: string
   type: 'gauge'
   x: number
@@ -553,6 +567,11 @@ export interface GaugeWidget {
   // dashboard's gauge renders unchanged until this is deliberately turned
   // on.
   showIndicator?: boolean
+  // Overrides showIndicator when set — same convention as
+  // WidgetVisibility.visibleExpr/ToggleSwitchWidget.guardOpenExpr (see
+  // resolveBooleanExpr in shared/expr.ts): any truthy/falsy result works,
+  // not just a literal true/false.
+  showIndicatorExpr?: string
   // 'needle' (default) is the same tapered pointer DialSwitchWidget uses;
   // 'square' is a plain radial bar instead.
   indicatorShape?: 'needle' | 'square'
@@ -604,7 +623,7 @@ export interface GaugeWidget {
 // evaluateMappingExpression in shared/expr.ts, the same convention an
 // EventSourceMapping's own `expr` already uses) for whichever expression
 // field the chosen action kind reads.
-export interface AdjusterWidget extends DialShapeStyle {
+export interface AdjusterWidget extends DialShapeStyle, WidgetVisibility {
   id: string
   type: 'adjuster'
   x: number
@@ -735,7 +754,7 @@ export interface EncoderTickSet {
   distance?: number
 }
 
-export interface EncoderWidget extends DialShapeStyle {
+export interface EncoderWidget extends DialShapeStyle, WidgetVisibility {
   id: string
   type: 'encoder'
   x: number
@@ -839,7 +858,7 @@ interface SwitchWidgetBase {
 
 // A segmented rocker/toggle switch — gear lever, master arm, band switch.
 // Positions render as adjoining segments stacked along `orientation`.
-export interface RockerSwitchWidget extends SwitchWidgetBase {
+export interface RockerSwitchWidget extends SwitchWidgetBase, WidgetVisibility {
   id: string
   type: 'switch-rocker'
   x: number
@@ -923,7 +942,7 @@ export interface RockerSwitchWidget extends SwitchWidgetBase {
 // Each position's own labels still place themselves the same way a
 // DialSwitch detent's do — via each WidgetLabel's own labelAnchor,
 // defaulting to 'auto' (radially outward at that position's own angle).
-export interface ToggleSwitchWidget extends SwitchWidgetBase {
+export interface ToggleSwitchWidget extends SwitchWidgetBase, WidgetVisibility {
   id: string
   type: 'switch-toggle'
   x: number
@@ -964,6 +983,20 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase {
   // release, since a momentary throw has nothing meaningful to "commit"
   // later — see SwitchPosition.momentary.
   interactionMode?: 'tap' | 'drag'
+  // 'drag' interactionMode only. On by default (undefined ?? true — see
+  // useToggleSwitchDrag.ts and PropertiesPanel.tsx's own fallbacks, and
+  // migrateToggleSwitchFireWhileDragging in main/index.ts, which backfills
+  // an explicit true onto every toggle switch saved before this existed):
+  // every distinct position the drag passes through fires
+  // 'select'/positionChange live, the instant it's reached, same "nothing
+  // meaningful to commit later" treatment a momentary position's onSelect
+  // already always gets (see SwitchPosition.momentary) — just opt-in here
+  // for a normal position too. Release still fires once more for whatever
+  // position the gesture actually ends on, unless that position already
+  // fired live as the last one reached (see useToggleSwitchDrag.ts's
+  // lastFiredIndexRef). Explicit false opts back out to the old
+  // release-only behavior.
+  fireWhileDragging?: boolean
   track: ColorAppearance // bezel color
   fill: ColorAppearance // lever color
   borderColor?: string
@@ -1251,7 +1284,7 @@ export interface DialShapeStyle {
 // A rotary dial switch — HSI/ADI mode selector, ignition/mag switch.
 // Positions render as labeled detents around startAngle..endAngle, with a
 // needle pointing at whichever one is active.
-export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle {
+export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle, WidgetVisibility {
   id: string
   type: 'switch-dial'
   x: number
@@ -1349,7 +1382,7 @@ export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle {
 // (own press/release, like Adjuster/Encoder, AND per-position onSelect, like
 // the switches) — see its own dedicated branch in triggerAction rather than
 // forcing it through either single-purpose union.
-export interface DropdownWidget extends SwitchWidgetBase {
+export interface DropdownWidget extends SwitchWidgetBase, WidgetVisibility {
   id: string
   type: 'dropdown'
   x: number
@@ -1402,7 +1435,7 @@ export interface ScreenRegion {
 // never clickable on the view client. `region` is unset until "Pick
 // region" (see ScreenCaptureWidget's own properties-panel section) has
 // been used at least once; the widget renders a placeholder until then.
-export interface ScreenCaptureWidget {
+export interface ScreenCaptureWidget extends WidgetVisibility {
   id: string
   type: 'screen-capture'
   x: number
@@ -1452,7 +1485,7 @@ export interface ScreenCaptureWidget {
 // nothing for a second one to add. No events, no colors of its own (the
 // label's own WidgetLabel.backgroundColor covers that) — see
 // LabelWidgetContent in components/widgets/LabelWidget.tsx.
-export interface LabelWidget {
+export interface LabelWidget extends WidgetVisibility {
   id: string
   type: 'label'
   x: number
@@ -1471,7 +1504,7 @@ export interface LabelWidget {
 // ButtonWidget/RockerSwitchWidget's own rotateAngle (degrees, clockwise, 0
 // unrotated). No labels/events of its own — if you need those, use a Label
 // or Button widget instead; this is purely a visual divider/rule.
-export interface LineWidget {
+export interface LineWidget extends WidgetVisibility {
   id: string
   type: 'line'
   x: number

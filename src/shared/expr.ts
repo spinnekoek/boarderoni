@@ -1,4 +1,4 @@
-import type { ColorAppearance, Variable, VariableValue, WidgetLabel } from './types'
+import type { ColorAppearance, Variable, VariableValue, WidgetLabel, WidgetVisibility } from './types'
 import { pickLegibleTextColor } from './color'
 
 export type VariableMap = Record<string, VariableValue>
@@ -115,6 +115,19 @@ export function resolveNumericExpr(expr: string, variables: VariableMap): number
 export function resolveBooleanExpr(expr: string, variables: VariableMap): boolean | undefined {
   const result = tryEvaluateExpression(expr, variables)
   return result.ok ? Boolean(result.value) : undefined
+}
+
+// Same convention as resolveBooleanExpr above — visibleExpr (see
+// WidgetVisibility in shared/types.ts) overrides the plain flag when set.
+// Shared by every place a widget actually gets drawn: the deployed view
+// (ViewCanvas.tsx) hides it outright, the editor's own live preview
+// (CanvasWidget.tsx / MorphCanvasWidget.tsx) dims it instead so it stays
+// selectable/editable — but both evaluate the exact same expression the
+// same way, so a visibleExpr's console.log reaches the debug panel while
+// editing, same as any other expression field already does there.
+export function resolveWidgetVisible(widget: WidgetVisibility, variables: VariableMap): boolean {
+  if (widget.visibleExpr) return resolveBooleanExpr(widget.visibleExpr, variables) ?? true
+  return widget.visible ?? true
 }
 
 export function resolveColor(box: ColorAppearance, variables: VariableMap): ResolvedColor {

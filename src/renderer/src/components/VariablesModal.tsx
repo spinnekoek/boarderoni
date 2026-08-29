@@ -216,6 +216,21 @@ function VariableRows({
     overscan: 8
   })
 
+  // react-virtual only fully recomputes row positions when `count` (or a
+  // couple other tracked options) changes — it has no way to know
+  // `estimateSize`'s OUTPUT for a given index also depends on boundaryIndex.
+  // When the boundary merely moves (a different variable becomes "most
+  // recently changed," same total split into two groups either side), count
+  // stays identical, so it silently reuses stale cached positions from the
+  // old boundary location while the row *content* re-renders at the new
+  // one — the divider's slot height falls out of sync with what's actually
+  // drawn there, and everything after it visually overlaps. measure() is
+  // react-virtual's documented escape hatch for an externally-driven size
+  // change it can't detect on its own.
+  useEffect(() => {
+    virtualizer.measure()
+  }, [boundaryIndex, virtualizer])
+
   if (virtualize) {
     return (
       <div ref={scrollRef} className="variables-modal__group-scroll">
@@ -443,9 +458,12 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
   }, [variables, mappedFromSource, activeTab, recentIds])
 
   const filtered = useMemo(() => {
-    const needle = search.trim().toLowerCase()
-    if (!needle) return tabVariables
-    return tabVariables.filter((v) => v.name.toLowerCase().includes(needle) || String(v.value).toLowerCase().includes(needle))
+    const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (words.length === 0) return tabVariables
+    return tabVariables.filter((v) => {
+      const haystack = `${v.name.toLowerCase()} ${String(v.value).toLowerCase()}`
+      return words.every((word) => haystack.includes(word))
+    })
   }, [tabVariables, search])
 
   // useCallback'd specifically so VariableRow's React.memo (see above) can

@@ -6,7 +6,7 @@ import { nextId, isSectionOpen, setSectionOpen, getLastDcsAircraft, setLastDcsAi
 import { usePropertiesExpansionStore, expandAllSections, collapseAllSections } from '../propertiesExpansionStore'
 import { FONT_OPTIONS, resolveFont, customFontToOption } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, pickAutoBorderColor, pickLegibleTextColor } from '@shared/color'
-import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
+import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING, DCS_COMMAND_VALUE_SHORTHAND } from '@shared/constants'
 import { deriveClickedState } from '@shared/states'
 import { blockMerge, hasMorphCycle, isMorphSliderActive, type BlockMerge } from '@shared/morph'
 import { toVariableMap, tryEvaluateExpression } from '@shared/expr'
@@ -323,6 +323,83 @@ function labelSectionTitle(label: WidgetLabel): string {
   return label.textExpr !== undefined ? 'ƒx label' : 'Untitled label'
 }
 
+// Every widget type's own "Visible" toggle (see WidgetVisibility in
+// shared/types.ts) — one shared component rather than duplicating this
+// checkbox/ƒx pair into each of the 11 per-type Advanced sections below,
+// same "generic over the shared fields" reasoning as LabelFields. Same
+// plain/expression toggle shape as SendDcsCommandActionEditor's Value
+// field and ToggleSwitchWidget's "Open when," just with a checkbox
+// (rather than a text input, or a plain/expression radio with no static
+// value at all) standing in for the non-expression state.
+const VISIBLE_EXPR_PLACEHOLDER = 'return variables.my_variable > 0;'
+// GaugeWidget.showIndicatorExpr's own placeholder — same convention as
+// VISIBLE_EXPR_PLACEHOLDER above.
+const SHOW_INDICATOR_EXPR_PLACEHOLDER = 'return variables.my_variable > 0;'
+
+function VisibilityField({
+  visible,
+  visibleExpr,
+  onChange
+}: {
+  visible: boolean | undefined
+  visibleExpr: string | undefined
+  onChange: (fields: { visible?: boolean; visibleExpr?: string }) => void
+}): React.JSX.Element {
+  const isExpr = visibleExpr !== undefined
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <>
+      {/* A plain div, not a <label> — same reasoning as LabelFields' own
+          text field: the CodeEditor below nests its own focusable input,
+          and clicking into it inside a <label> would also synthesize a
+          click on the field's first labelable descendant (the ƒx/clear
+          button), instantly exiting expression mode the moment you tried
+          to type. */}
+      <div className="properties__field">
+        <span>Visible</span>
+        <div className="color-picker-button__row">
+          {isExpr ? (
+            <div className="color-picker-button__trigger color-picker-button__trigger--expr">ƒx</div>
+          ) : (
+            <label className="properties__checkbox" style={{ flex: 1, minWidth: 0 }}>
+              <input type="checkbox" checked={visible ?? true} onChange={(e) => onChange({ visible: e.target.checked })} />
+              Shown
+            </label>
+          )}
+          {isExpr ? (
+            <button type="button" className="color-picker-button__clear" title="Use a fixed on/off value instead" onClick={() => onChange({ visibleExpr: undefined })}>
+              ×
+            </button>
+          ) : (
+            <button type="button" className="color-picker-button__fx" title="Compute visibility with an expression" onClick={() => onChange({ visibleExpr: '' })}>
+              ƒx
+            </button>
+          )}
+        </div>
+        {isExpr && (
+          <div className="color-picker-button__expr-panel">
+            <div className="color-picker-button__expr-editor-wrap">
+              <CodeEditor value={visibleExpr ?? ''} onChange={(code) => onChange({ visibleExpr: code })} placeholder={VISIBLE_EXPR_PLACEHOLDER} minimal />
+              <button type="button" className="color-picker-button__expand" title="Expand" onClick={() => setExpanded(true)}>
+                ⤢
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {expanded && (
+        <ExpressionEditorModal
+          value={visibleExpr ?? ''}
+          onChange={(code) => onChange({ visibleExpr: code })}
+          placeholder={VISIBLE_EXPR_PLACEHOLDER}
+          onClose={() => setExpanded(false)}
+        />
+      )}
+    </>
+  )
+}
+
 function LabelFields({
   label,
   backgroundColor,
@@ -496,7 +573,12 @@ function LabelFields({
         />
       </div>
 
-      <label className="properties__field">
+      {/* A plain div, not a <label> — same reasoning as VisibilityField's own
+          comment: clicking the open space inside a <label> (not just its
+          actual controls) synthesizes a click on the field's first
+          labelable descendant, which would always be the top/left button
+          regardless of where in the grid you actually clicked. */}
+      <div className="properties__field">
         <span>Align</span>
         <div className="text-align-grid">
           {ALIGN_GRID.map(({ h, v }) => {
@@ -519,7 +601,7 @@ function LabelFields({
             )
           })}
         </div>
-      </label>
+      </div>
 
       <label className="properties__field">
         <span>Text align</span>
@@ -1760,8 +1842,16 @@ function SendDcsCommandActionEditor({
 
   function handleTest(): void {
     let arg: string
-    if (isExpr && action.argumentExpr) {
-      const result = tryEvaluateExpression(action.argumentExpr, toVariableMap(variables))
+    // Mirrors runSendDcsCommand's own $value-shorthand precedence — see
+    // DCS_COMMAND_VALUE_SHORTHAND's doc comment.
+    const expr =
+      isExpr && action.argumentExpr
+        ? action.argumentExpr
+        : action.argument.trim() === DCS_COMMAND_VALUE_SHORTHAND
+          ? `return variables.${DCS_COMMAND_VALUE_SHORTHAND};`
+          : undefined
+    if (expr) {
+      const result = tryEvaluateExpression(expr, toVariableMap(variables))
       if (!result.ok) return
       arg = String(result.value)
     } else {
@@ -1873,7 +1963,11 @@ function SendDcsCommandActionEditor({
               {isExpr ? (
                 <span className="properties__hint-inline">Using expression below</span>
               ) : (
-                <input value={action.argument} onChange={(e) => onPatch({ argument: e.target.value })} />
+                <input
+                  value={action.argument}
+                  onChange={(e) => onPatch({ argument: e.target.value })}
+                  title={`Type ${DCS_COMMAND_VALUE_SHORTHAND} to send the value that triggered this action, same as an expression of "return variables.${DCS_COMMAND_VALUE_SHORTHAND};" below`}
+                />
               )}
               {isExpr ? (
                 <button
@@ -1888,7 +1982,7 @@ function SendDcsCommandActionEditor({
                 <button
                   type="button"
                   className="color-picker-button__fx"
-                  title="Compute the value with an expression"
+                  title={`Compute the value with an expression — or type ${DCS_COMMAND_VALUE_SHORTHAND} in the Value field above as shorthand for "return variables.${DCS_COMMAND_VALUE_SHORTHAND};"`}
                   onClick={() => onPatch({ argumentExpr: draftRef.current })}
                 >
                   ƒx
@@ -2475,6 +2569,9 @@ export function PropertiesPanel(): React.JSX.Element {
   // activePositionExprExpanded above: its hook order can't change across a
   // selection change to/from an adjuster.
   const [adjusterValueExprExpanded, setAdjusterValueExprExpanded] = useState(false)
+  // GaugeWidget.showIndicatorExpr's own expand button — same "declared
+  // unconditionally" reasoning as adjusterValueExprExpanded above.
+  const [gaugeShowIndicatorExprExpanded, setGaugeShowIndicatorExprExpanded] = useState(false)
 
   const widget = selectedWidgetIds.length === 1 ? widgets.find((w) => w.id === selectedWidgetIds[0]) ?? null : null
 
@@ -2705,6 +2802,10 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={lw.zIndex ?? 0} onChange={(e) => patchWidget({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={lw.visible} visibleExpr={lw.visibleExpr} onChange={patchWidget} />
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteLabel}>
@@ -2860,6 +2961,10 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={line.zIndex ?? 0} onChange={(e) => patchLine({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={line.visible} visibleExpr={line.visibleExpr} onChange={patchLine} />
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteLine}>
@@ -3236,11 +3341,68 @@ export function PropertiesPanel(): React.JSX.Element {
             </PropertiesSection>
 
             <PropertiesSection title="Indicator">
-              <label className="properties__checkbox">
-                <input type="checkbox" checked={gauge.showIndicator ?? false} onChange={(e) => patchGauge({ showIndicator: e.target.checked })} />
-                Show needle indicator
-              </label>
-              {gauge.showIndicator && (
+              <div className="properties__field">
+                <div className="color-picker-button__row">
+                  {gauge.showIndicatorExpr !== undefined ? (
+                    <div className="color-picker-button__trigger color-picker-button__trigger--expr">ƒx</div>
+                  ) : (
+                    <label className="properties__checkbox" style={{ flex: 1, minWidth: 0 }}>
+                      <input type="checkbox" checked={gauge.showIndicator ?? false} onChange={(e) => patchGauge({ showIndicator: e.target.checked })} />
+                      Show needle indicator
+                    </label>
+                  )}
+                  {gauge.showIndicatorExpr !== undefined ? (
+                    <button
+                      type="button"
+                      className="color-picker-button__clear"
+                      title="Use a fixed on/off value instead"
+                      onClick={() => patchGauge({ showIndicatorExpr: undefined })}
+                    >
+                      ×
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="color-picker-button__fx"
+                      title="Compute with an expression"
+                      onClick={() => patchGauge({ showIndicatorExpr: '' })}
+                    >
+                      ƒx
+                    </button>
+                  )}
+                </div>
+                {gauge.showIndicatorExpr !== undefined && (
+                  <div className="color-picker-button__expr-panel">
+                    <div className="color-picker-button__expr-editor-wrap">
+                      <CodeEditor
+                        value={gauge.showIndicatorExpr ?? ''}
+                        onChange={(code) => patchGauge({ showIndicatorExpr: code })}
+                        placeholder={SHOW_INDICATOR_EXPR_PLACEHOLDER}
+                        minimal
+                      />
+                      <button
+                        type="button"
+                        className="color-picker-button__expand"
+                        title="Expand"
+                        onClick={() => setGaugeShowIndicatorExprExpanded(true)}
+                      >
+                        ⤢
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {gaugeShowIndicatorExprExpanded && (
+                <ExpressionEditorModal
+                  value={gauge.showIndicatorExpr ?? ''}
+                  onChange={(code) => patchGauge({ showIndicatorExpr: code })}
+                  placeholder={SHOW_INDICATOR_EXPR_PLACEHOLDER}
+                  onClose={() => setGaugeShowIndicatorExprExpanded(false)}
+                />
+              )}
+
+              {(gauge.showIndicatorExpr !== undefined || gauge.showIndicator) && (
                 <>
                   <label className="properties__field">
                     <span>Shape</span>
@@ -3379,6 +3541,10 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={gauge.zIndex ?? 0} onChange={(e) => patchGauge({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={gauge.visible} visibleExpr={gauge.visibleExpr} onChange={patchGauge} />
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteGauge}>
@@ -3958,6 +4124,10 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={adjuster.zIndex ?? 0} onChange={(e) => patchAdjuster({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={adjuster.visible} visibleExpr={adjuster.visibleExpr} onChange={patchAdjuster} />
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteAdjuster}>
@@ -4254,6 +4424,10 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={encoder.zIndex ?? 0} onChange={(e) => patchEncoder({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={encoder.visible} visibleExpr={encoder.visibleExpr} onChange={patchEncoder} />
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteEncoder}>
@@ -4509,6 +4683,10 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={sw.zIndex ?? 0} onChange={(e) => patchSwitch({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={sw.visible} visibleExpr={sw.visibleExpr} onChange={patchSwitch} />
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteSwitch}>
@@ -4623,6 +4801,19 @@ export function PropertiesPanel(): React.JSX.Element {
               ? 'Tap directly on a position (top/middle/bottom, or its label) to select it.'
               : "Press anywhere on the toggle and drag toward the position you want — you can drag past the widget's own edges. The lever snaps live to whichever position is nearest, so you can see what releasing will select."}
           </p>
+          {sw.interactionMode === 'drag' && (
+            <>
+              <label className="properties__checkbox">
+                <input type="checkbox" checked={sw.fireWhileDragging ?? true} onChange={(e) => patchSwitch({ fireWhileDragging: e.target.checked })} />
+                Fire while dragging
+              </label>
+              <p className="properties__hint">
+                {(sw.fireWhileDragging ?? true)
+                  ? "Position Change (and that position's own actions) fires the instant the drag reaches it, not just when you let go — the default. Turn this off to fire it once, only on release."
+                  : 'Position Change fires once, when you release, instead of live as the lever crosses into each position during the drag.'}
+              </p>
+            </>
+          )}
         </PropertiesSection>
 
         <PropertiesSection title="Rotation">
@@ -5239,6 +5430,10 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={sw.zIndex ?? 0} onChange={(e) => patchSwitch({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={sw.visible} visibleExpr={sw.visibleExpr} onChange={patchSwitch} />
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteSwitch}>
@@ -5516,6 +5711,10 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={sw.zIndex ?? 0} onChange={(e) => patchSwitch({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={sw.visible} visibleExpr={sw.visibleExpr} onChange={patchSwitch} />
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteSwitch}>
@@ -5702,6 +5901,10 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={dd.zIndex ?? 0} onChange={(e) => patchDropdown({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={dd.visible} visibleExpr={dd.visibleExpr} onChange={patchDropdown} />
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteDropdown}>
@@ -5898,6 +6101,10 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Z-index</span>
             <input type="number" value={sc.zIndex ?? 0} onChange={(e) => patchScreenCapture({ zIndex: Math.round(Number(e.target.value)) })} />
           </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={sc.visible} visibleExpr={sc.visibleExpr} onChange={patchScreenCapture} />
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteScreenCapture}>
@@ -6534,6 +6741,10 @@ export function PropertiesPanel(): React.JSX.Element {
           </div>
         </label>
         <p className="properties__hint">Auto follows normal paint order (see Bring to front / Send to back above).</p>
+
+        <div className="properties__divider" />
+
+        <VisibilityField visible={widget.visible} visibleExpr={widget.visibleExpr} onChange={patch} />
       </PropertiesSection>
 
       <button className="properties__delete" onClick={handleDelete}>

@@ -6,7 +6,7 @@ import { morphFootprint, normalizeMorphBlocks, blockNeighbors, neighborCount } f
 import { getSubDeckWidgets } from '@shared/subDecks'
 import { nextId } from '../id'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
-import { resolveNumericExpr, type VariableMap } from '@shared/expr'
+import { resolveNumericExpr, resolveWidgetVisible, type VariableMap } from '@shared/expr'
 import type { MorphBlock, MorphButtonWidget, MorphCell } from '@shared/types'
 
 interface ResizeState {
@@ -208,10 +208,15 @@ export function MorphCanvasWidget({
   const footprint = morphFootprint(widget)
   const isSoleSelection = selected && selectedWidgetIds.length === 1
   const edgeSpots = computeEdgeSpots(widget.blocks)
+  // See CanvasWidget's own comment on the same call — dims rather than
+  // hides, so the widget stays selectable/editable, and evaluates the same
+  // expression the deployed view does so a visibleExpr's console.log
+  // reaches the debug panel while editing.
+  const visible = resolveWidgetVisible(widget, variables)
 
   return (
     <div
-      className={`canvas-widget canvas-widget--morph${selected ? ' canvas-widget--selected' : ''}`}
+      className={`canvas-widget canvas-widget--morph${selected ? ' canvas-widget--selected' : ''}${visible ? '' : ' canvas-widget--hidden'}`}
       style={{ left: footprint.x, top: footprint.y, width: footprint.w, height: footprint.h }}
     >
       <MorphButtonWidgetContent

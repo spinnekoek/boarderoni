@@ -1,5 +1,5 @@
 import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
-import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
+import { resolveBooleanExpr, resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { GaugeWidget } from '@shared/types'
 import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
@@ -102,6 +102,9 @@ function GaugeArc({
     })
   }))
 
+  const exprShowIndicator = widget.showIndicatorExpr ? resolveBooleanExpr(widget.showIndicatorExpr, variables) : undefined
+  const showIndicator = exprShowIndicator ?? widget.showIndicator ?? false
+
   const indicatorAngle = startAngle + fraction * (endAngle - startAngle)
   // Deliberately not falling back to fillColor/trackColor — the needle is
   // its own independent color so restyling the arc's fill/track doesn't
@@ -148,7 +151,7 @@ function GaugeArc({
         {tickResults.map((r) => (
           <g key={r.id}>{r.marks}</g>
         ))}
-        {widget.showIndicator && (
+        {showIndicator && (
           <>
             {indicatorShape === 'needle' ? (
               <polygon
