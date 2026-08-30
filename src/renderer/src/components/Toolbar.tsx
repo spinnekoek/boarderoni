@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useEditorSettings } from '../settingsStore'
 import { useDebugConsoleStore } from '../debugConsoleStore'
+import { useHistoryStore } from '../historyStore'
 import { useDashboardStore, useGridSize, useCanvasSize } from '../store'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
@@ -36,6 +37,10 @@ export function Toolbar(): React.JSX.Element {
   const setDebugMode = useEditorSettings((s) => s.setDebugMode)
   const consoleOpen = useDebugConsoleStore((s) => s.open)
   const toggleConsoleOpen = useDebugConsoleStore((s) => s.toggleOpen)
+  const canUndo = useHistoryStore((s) => s.past.length > 0)
+  const canRedo = useHistoryStore((s) => s.future.length > 0)
+  const undo = useHistoryStore((s) => s.undo)
+  const redo = useHistoryStore((s) => s.redo)
 
   const devices = useDashboardStore((s) => s.devices)
 
@@ -43,6 +48,12 @@ export function Toolbar(): React.JSX.Element {
 
   return (
     <div className="toolbar">
+      <button type="button" className="toolbar__button" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
+        Undo
+      </button>
+      <button type="button" className="toolbar__button" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={redo}>
+        Redo
+      </button>
       <ScreenSwitcher />
       <label className="toolbar__control">
         <span>Device</span>

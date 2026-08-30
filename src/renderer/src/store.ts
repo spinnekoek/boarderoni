@@ -35,6 +35,7 @@ import { getDeviceId, setLastDeckId, clearLastDeckId, nextId } from './id'
 import { syncCustomFontFaces } from './customFontFaces'
 import { useConfirmStore } from './confirmStore'
 import { pushRemoteDebugLog } from './debugConsoleStore'
+import { useHistoryStore } from './historyStore'
 
 // A slide-over sub-deck currently open on the view client — client-local,
 // never persisted/synced beyond the single subdeck:open-overlay message
@@ -240,6 +241,12 @@ interface DashboardStore {
   // save instead of writing on every frame; omitted/true for everything
   // else (one-off edits, a drag's own final tick), unchanged from before.
   updateWidgets: (widgets: Widget[], options?: { final?: boolean }) => void
+  // Replaces the whole dashboard outright — the common tail every other
+  // mutating action below already ends with (`set({dashboard}); send(...)`),
+  // pulled out on its own for historyStore.ts's undo/redo to apply a
+  // restored snapshot through the exact same sync path as any normal edit,
+  // with no server-side special-casing needed.
+  restoreDashboard: (dashboard: Dashboard) => void
   updateDashboardMeta: (
     fields: Partial<
       Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundColorExpr' | 'backgroundFit' | 'backgroundAnchor' | 'variables' | 'plugins'>
@@ -554,6 +561,13 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   connect: (mode, deckId) => {
     closeLobby()
+    // Undo history from whichever deck was open before (if any) has no
+    // meaning once this connects to a different one — but connect() is also
+    // what the close handler's own auto-reconnect below calls after a
+    // network drop, to this SAME deckId, which should leave in-progress
+    // undo history alone rather than wiping it out from under the user on
+    // every blip.
+    if (get().deckId !== deckId) useHistoryStore.getState().clear()
     set({ mode, deckId })
     setLastDeckId(deckId)
     if (socket) return
@@ -815,35 +829,47 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     socket = null
     clearLastDeckId()
     set(pickerResetState())
+    useHistoryStore.getState().clear()
   },
 
   updateWidgets: (widgets, options) => {
+    useHistoryStore.getState().recordBeforeMutation({ final: options?.final })
     const dashboard = setSubDeckWidgets(get().dashboard, get().editingSubDeckId, widgets)
     set({ dashboard })
     send({ type: 'dashboard:update', dashboard, final: options?.final ?? true })
   },
 
+  restoreDashboard: (dashboard) => {
+    set({ dashboard })
+    send({ type: 'dashboard:update', dashboard })
+  },
+
   updateDashboardMeta: (fields) => {
+    useHistoryStore.getState().recordBeforeMutation()
     const dashboard = { ...get().dashboard, ...fields }
     set({ dashboard })
     send({ type: 'dashboard:update', dashboard })
   },
 
   uploadBackgroundImage: (dataUrl) => {
+    useHistoryStore.getState().recordBeforeMutation()
     send({ type: 'background-image:upload', dataUrl })
   },
 
   clearBackgroundImage: () => {
+    useHistoryStore.getState().recordBeforeMutation()
     send({ type: 'background-image:clear' })
   },
 
   setGridSize: (value) => {
+    useHistoryStore.getState().recordBeforeMutation()
     const dashboard = setSubDeckGridSize(get().dashboard, get().editingSubDeckId, Math.max(1, Math.round(value)))
     set({ dashboard })
     send({ type: 'dashboard:update', dashboard })
   },
 
   setCanvasSize: (width, height) => {
+    useHistoryStore.getState().recordBeforeMutation()
     const dashboard = setSubDeckCanvasSize(get().dashboard, get().editingSubDeckId, Math.max(1, Math.round(width)), Math.max(1, Math.round(height)))
     set({ dashboard })
     send({ type: 'dashboard:update', dashboard })
@@ -892,6 +918,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   },
 
   addSubDeck: (name) => {
+    useHistoryStore.getState().recordBeforeMutation()
     const subDeck: SubDeck = { id: nextId(), name, widgets: [] }
     const dashboard = { ...get().dashboard, subDecks: [...(get().dashboard.subDecks ?? []), subDeck] }
     set({ dashboard })
@@ -900,6 +927,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   },
 
   renameSubDeck: (id, name) => {
+    useHistoryStore.getState().recordBeforeMutation()
     const dashboard = {
       ...get().dashboard,
       subDecks: (get().dashboard.subDecks ?? []).map((sd) => (sd.id === id ? { ...sd, name } : sd))
@@ -909,6 +937,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   },
 
   removeSubDeck: (id) => {
+    useHistoryStore.getState().recordBeforeMutation()
     const dashboard = { ...get().dashboard, subDecks: (get().dashboard.subDecks ?? []).filter((sd) => sd.id !== id) }
     set({ dashboard })
     send({ type: 'dashboard:update', dashboard })

@@ -249,6 +249,15 @@ body {
 	background: #343a46;
 }
 
+.toolbar__button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.toolbar__button:disabled:hover {
+	background: #2a2e37;
+}
+
 .toolbar__button--active {
 	background: #5b8def;
 	border-color: #5b8def;

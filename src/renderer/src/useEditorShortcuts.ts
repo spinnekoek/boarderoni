@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useDashboardStore } from './store'
 import { useConfirmStore } from './confirmStore'
 import { useClipboardStore } from './clipboardStore'
+import { useHistoryStore } from './historyStore'
 import { getSubDeckWidgets, getSubDeckGridSize } from '@shared/subDecks'
 
 export function isTextInputElement(el: Element | null): boolean {
@@ -19,12 +20,12 @@ const NUDGE_DIRECTIONS: Record<string, [number, number]> = {
 }
 
 // Global editor keyboard shortcuts for the selected widget(s) on the canvas
-// — copy/paste, delete, and arrow-key nudging. Lives outside any one widget
-// component (mounted once by Canvas) since these should fire regardless of
-// which widget, if any, last had pointer focus. The right-click context menu
-// (ContextMenu.tsx) triggers the same underlying actions for the
-// mouse-driven equivalent (copy/paste/delete; there's no mouse equivalent of
-// a nudge).
+// — copy/paste, delete, arrow-key nudging, and undo/redo (historyStore.ts).
+// Lives outside any one widget component (mounted once by Canvas) since
+// these should fire regardless of which widget, if any, last had pointer
+// focus. The right-click context menu (ContextMenu.tsx) triggers the same
+// underlying actions for the mouse-driven equivalent (copy/paste/delete;
+// there's no mouse equivalent of a nudge or undo/redo).
 export function useEditorShortcuts(): void {
   useEffect(() => {
     async function handleDelete(ids: string[]): Promise<void> {
@@ -63,10 +64,10 @@ export function useEditorShortcuts(): void {
         return
       }
 
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return
 
       const key = e.key.toLowerCase()
-      if (key === 'c') {
+      if (key === 'c' && !e.shiftKey) {
         // A real, non-empty text selection (e.g. log lines picked in the
         // debug console panel) means Ctrl+C should do the browser's own
         // native copy, not this shortcut's widget-copy — isTextInputElement
@@ -79,9 +80,15 @@ export function useEditorShortcuts(): void {
         e.preventDefault()
         const idSet = new Set(selectedWidgetIds)
         useClipboardStore.getState().copy(getSubDeckWidgets(dashboard, editingSubDeckId).filter((w) => idSet.has(w.id)))
-      } else if (key === 'v') {
+      } else if (key === 'v' && !e.shiftKey) {
         e.preventDefault()
         useClipboardStore.getState().paste()
+      } else if (key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        useHistoryStore.getState().undo()
+      } else if (key === 'z' && e.shiftKey) {
+        e.preventDefault()
+        useHistoryStore.getState().redo()
       }
     }
 
