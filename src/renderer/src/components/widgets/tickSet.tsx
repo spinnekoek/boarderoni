@@ -51,12 +51,19 @@ export function renderTickSet({
   const size = tickSet.size ?? 6
   const thickness = tickSet.thickness ?? 2
   const distance = tickSet.distance ?? arcRadius + 4
+  // See GaugeTickSet.labelMin/labelMax's own comment — this tick set's own
+  // range for the auto-computed label value below ONLY; `t`/`angle` (a
+  // tick's actual position) stay driven by the widget's real min/max
+  // regardless, since they still have to land where the widget's own
+  // fill/needle would for that value.
+  const labelMin = tickSet.labelMin ?? min
+  const labelMax = tickSet.labelMax ?? max
   const marks: React.ReactNode[] = []
   const labels: React.ReactNode[] = []
   for (let i = 0; i < count; i++) {
     const t = i / (count - 1)
     const angle = startAngle + t * (endAngle - startAngle)
-    const value = min + t * (max - min)
+    const value = labelMin + t * (labelMax - labelMin)
     const midR = distance + size / 2
     const point = polarToCartesian(center.x, center.y, midR, angle)
     marks.push(

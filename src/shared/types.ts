@@ -508,6 +508,17 @@ export interface GaugeTickSet {
   labelFontSize?: number
   // Decimal places shown on each tick's auto-generated value label. Default 0.
   labelDecimals?: number
+  // Overrides the widget's own min/max for JUST this tick set's
+  // auto-computed label values — the ticks themselves still sit at
+  // evenly-spaced angles across the widget's own startAngle..endAngle sweep
+  // regardless (see renderTickSet in widgets/tickSet.tsx); only what number
+  // each one prints changes. Useful for e.g. a compass-style ring labeled
+  // 0-360 on a widget whose real bound value only ever spans 0-1, or
+  // relabeling one tick set in different units than another on the same
+  // widget. Either unset (independently) falls back to the widget's own
+  // min/max, same as before these existed.
+  labelMin?: number
+  labelMax?: number
   // Extra distance from a tick's own outer edge to its label — same
   // "distance past the anchor point" convention as WidgetLabel.labelDistance
   // elsewhere.
@@ -908,6 +919,18 @@ export interface RockerSwitchWidget extends SwitchWidgetBase, WidgetVisibility {
   // this only ever affects which segment (if any) LOOKS active, never
   // whether a tap triggers.
   settleToInactive?: boolean
+  // Only meaningful (shown in the properties panel, reachable at all) while
+  // settleToInactive is on — the pseudo-position's own action. A real
+  // position's own onSelect fires on press (see RockerSwitchWidgetContent's
+  // onSelect); this one fires on release instead (see its onRelease/
+  // useSwitchPosition.ts's settleInactive), matching when the switch
+  // actually settles back to nothing active. Same "runs alongside
+  // positionChange" convention as a real SwitchPosition.onSelect. Not a
+  // SwitchPosition itself since there's nothing to it to style or delete —
+  // no color, no label, no id of its own — variables.$value/$index are the
+  // fixed string 'Inactive'/-1 (see TriggerValue's own comment in
+  // main/index.ts) rather than a real positions[] entry's name/index.
+  onInactive: SequenceStep[]
   radiusTopLeft?: number
   radiusTopRight?: number
   radiusBottomLeft?: number
@@ -1343,9 +1366,26 @@ export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle, Widg
   // want (can go past the widget's own bounds) — the needle snaps live to
   // whichever position is nearest the drag angle so you can see what
   // releasing would select, same as turning a real rotary switch. Both
-  // still fire the same 'select' action:trigger on commit — see
-  // useDialSwitchDrag.ts and useSwitchPosition.ts.
+  // still fire the same 'select' action:trigger on commit, or live as each
+  // position is passed through — see fireWhileDragging below — and
+  // useDialSwitchDrag.ts/useSwitchPosition.ts.
   interactionMode?: 'tap' | 'drag'
+  // 'drag' interactionMode only. On by default (undefined ?? true — see
+  // useDialSwitchDrag.ts and PropertiesPanel.tsx's own fallbacks, and
+  // migrateDialSwitchFireWhileDragging in main/index.ts, which backfills an
+  // explicit true onto every dial switch saved before this existed): every
+  // distinct position the drag passes through fires 'select'/positionChange
+  // (and increment/decrement, same as any other landed-on selection — see
+  // events' own comment above) live, the instant it's reached, rather than
+  // only on release. Release still fires once more for whatever position
+  // the gesture actually ends on, unless that position already fired live
+  // as the last one reached (see useDialSwitchDrag.ts's lastFiredIndexRef).
+  // Explicit false opts back out to the old release-only behavior. Same
+  // convention as ToggleSwitchWidget.fireWhileDragging — see its own
+  // comment — just without a momentary position's own always-live
+  // exception, since DialSwitchWidget's positions have no momentary concept
+  // (see SwitchPosition.momentary's own comment).
+  fireWhileDragging?: boolean
   track: ColorAppearance // dial face
   fill: ColorAppearance // needle/pointer color
   // Per-label label anchor — see WidgetLabel.labelAnchor.

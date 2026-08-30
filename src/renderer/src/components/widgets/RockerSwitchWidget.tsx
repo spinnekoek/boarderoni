@@ -17,6 +17,7 @@ export function RockerSwitchWidgetContent({
   interactive,
   activeIndex,
   onSelect,
+  onRelease,
   selectedPositionId,
   onPositionSelect
 }: {
@@ -27,7 +28,15 @@ export function RockerSwitchWidgetContent({
   // useSwitchPosition.ts) means no position is currently active; every
   // segment renders unselected/unhighlighted.
   activeIndex: number | null
+  // Fires on press (pointerdown), not release — a physical switch throws the
+  // instant it's touched, not when you let go. See onRelease below for the
+  // settleToInactive counterpart.
   onSelect?: (index: number) => void
+  // RockerSwitchWidget.settleToInactive only (useSwitchPosition.ts's
+  // settleInactive) — fires once on release of whichever segment was
+  // actually pressed, never from a bare hover-out with nothing pressed (see
+  // handleSegmentRelease below). Unused/no-op for every other switch type.
+  onRelease?: () => void
   // Editor-only (interactive=false), same click-through-to-drill-down idea
   // MorphButtonWidgetContent's selectedBlockId/onBlockSelect use — see
   // CanvasWidget.tsx, which gates onPositionSelect on this widget already
@@ -43,18 +52,30 @@ export function RockerSwitchWidgetContent({
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
   const orientation = widget.orientation ?? 'vertical'
   const flexDirection = orientation === 'vertical' ? 'column' : 'row'
-  // Purely a live "currently being pressed" preview, independent of
-  // activeIndex itself — onClick (below) still fires the actual select on
-  // release, same timing as always. Without this, a RockerSwitchWidget with
-  // settleToInactive on (see its own comment in shared/types.ts) never
-  // visibly highlights at all: onClick only fires (and activeIndex only
-  // settles back to null) after the press/release gesture has already fully
-  // completed, so there'd be nothing to see mid-press. With this, holding a
-  // segment down shows it active immediately, then it clears on release —
-  // matching a momentary rocker's physical feel. Harmless for the normal
-  // (non-settling) case too: the segment previewed here is the same one
-  // activeIndex settles onto right after anyway.
+  // Live "currently being pressed" preview, independent of activeIndex
+  // itself. onSelect below already fires on the same pointerdown that sets
+  // this, so for a non-settling switch this just mirrors activeIndex a
+  // frame early. It matters for settleToInactive (see its own comment in
+  // shared/types.ts): activeIndex has no resting "on" value there at all, so
+  // without this a press wouldn't visibly highlight anything — holding a
+  // segment down shows it active for as long as it's held, then it clears on
+  // release (see handleSegmentRelease), matching a momentary rocker's
+  // physical feel.
   const [pressedIndex, setPressedIndex] = useState<number | null>(null)
+
+  // Guards onRelease so it only ever fires for the segment that was actually
+  // pressed — onPointerLeave (below) fires from a bare hover-out too, with
+  // no button down at all, so a naive unconditional call here would send a
+  // spurious settleInactive trigger just from moving the mouse across an
+  // unpressed switch. The functional setState form reads the just-committed
+  // pressedIndex rather than whatever this render's `index` closed over,
+  // which matters since onPointerUp/Cancel/Leave can all reach here.
+  function handleSegmentRelease(index: number): void {
+    setPressedIndex((current) => {
+      if (current === index) onRelease?.()
+      return null
+    })
+  }
   const rotateAngle = widget.rotateAngleExpr ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle) : widget.rotateAngle
 
   return (
@@ -100,18 +121,26 @@ export function RockerSwitchWidgetContent({
               key={position.id}
               className={`deck-rocker-switch__segment${selected ? ' deck-rocker-switch__segment--selected' : ''}`}
               style={{ background: segmentColor }}
-              onClick={interactive ? () => onSelect?.(index) : undefined}
               // Deliberately doesn't stop this from also bubbling up to the
               // outer canvas-widget div's own onPointerDown (widget-level
               // select/drag) — see CanvasWidget.tsx's isSoleSelection check,
               // which relies on that handler having already run (bubble
               // order: this fires first, then the ancestor) for a click that
               // both selects the widget AND lands on a position to correctly
-              // not also drill into it in the same click.
-              onPointerDown={interactive ? () => setPressedIndex(index) : () => onPositionSelect?.(position)}
-              onPointerUp={interactive ? () => setPressedIndex(null) : undefined}
-              onPointerCancel={interactive ? () => setPressedIndex(null) : undefined}
-              onPointerLeave={interactive ? () => setPressedIndex(null) : undefined}
+              // not also drill into it in the same click. onSelect fires
+              // here, on press, not from a click/pointerup handler — see its
+              // own doc comment above.
+              onPointerDown={
+                interactive
+                  ? () => {
+                      setPressedIndex(index)
+                      onSelect?.(index)
+                    }
+                  : () => onPositionSelect?.(position)
+              }
+              onPointerUp={interactive ? () => handleSegmentRelease(index) : undefined}
+              onPointerCancel={interactive ? () => handleSegmentRelease(index) : undefined}
+              onPointerLeave={interactive ? () => handleSegmentRelease(index) : undefined}
             >
               {renderWidgetLabels(position.labels, segmentColor, variables, debugMode)}
             </div>

@@ -46,6 +46,17 @@ off as they're fixed; add new ones as they come up.
       touch handling) doesn't show the deck list. Needs reproduction on an
       actual Android device to narrow down (state not loading? list
       rendering empty? gesture opening the wrong view?).
+- [ ] Properties panel's drag-to-resize handle only grabs while the panel is
+      scrolled to the top. Root cause: `.properties__resize-handle`
+      (styles.css) is `position: absolute; top: 0; height: 100%` inside
+      `.properties` itself, which is also the scrolling element
+      (`overflow-y: auto`) — so the handle scrolls away with the content
+      instead of staying pinned to the visible edge. Fix likely means
+      splitting `.properties` into a fixed-position outer wrapper (holding
+      `resizeHandle`) and an inner scrollable content div, which every widget
+      type's own render branch in `PropertiesPanel.tsx` would need updating
+      for (currently ~14 duplicated `<aside className="properties">
+      {resizeHandle}...` call sites).
 
 ## Features to investigate
 

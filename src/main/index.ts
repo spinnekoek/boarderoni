@@ -244,6 +244,22 @@ function migrateToggleSwitchFireWhileDragging(widget: ToggleSwitchWidget): Toggl
   return { ...widget, fireWhileDragging: true }
 }
 
+// Same backfill as migrateToggleSwitchFireWhileDragging above, for
+// DialSwitchWidget's own fireWhileDragging (see its own comment in
+// shared/types.ts).
+function migrateDialSwitchFireWhileDragging(widget: DialSwitchWidget): DialSwitchWidget {
+  if (widget.fireWhileDragging === true) return widget
+  return { ...widget, fireWhileDragging: true }
+}
+
+// RockerSwitchWidget gained onInactive (see its own comment in
+// shared/types.ts) after already shipping with settleToInactive — a
+// dashboard saved before that needs it backfilled to an empty sequence, same
+// convention as migrateToggleSwitchGuardEvent above.
+function migrateRockerSwitchInactiveAction(widget: RockerSwitchWidget): RockerSwitchWidget {
+  return Array.isArray(widget.onInactive) ? widget : { ...widget, onInactive: [] }
+}
+
 // SwitchWidgetBase.positions is typed as "at least 2" but nothing on the
 // load path ever enforced that at runtime — a corrupted/hand-edited
 // dashboard.json, or a widget caught mid-migration by an old app version,
@@ -272,9 +288,11 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
   if (widget.type === 'dropdown') return migrateSwitchWidgetPositionChangeEvents(migrateDropdownOrientation(backfillSwitchPositions(widget)))
 
   if (widget.type === 'switch-dial') {
-    return migrateDialSwitchIncrementDecrement(
-      migrateSwitchWidgetPositionChangeEvents(
-        migrateSwitchWidgetTopLevelLabels(migrateDialSwitchLabelAnchor(backfillSwitchPositions(widget as DialSwitchWidget & LegacyDialSwitchWidget)))
+    return migrateDialSwitchFireWhileDragging(
+      migrateDialSwitchIncrementDecrement(
+        migrateSwitchWidgetPositionChangeEvents(
+          migrateSwitchWidgetTopLevelLabels(migrateDialSwitchLabelAnchor(backfillSwitchPositions(widget as DialSwitchWidget & LegacyDialSwitchWidget)))
+        )
       )
     )
   }
@@ -286,7 +304,10 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
       )
     )
 
-  if (widget.type === 'switch-rocker') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
+  if (widget.type === 'switch-rocker')
+    return migrateRockerSwitchInactiveAction(
+      migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
+    )
 
   // Morph/gauge/adjuster/encoder/screen-capture/label/line widgets never
   // existed in any of the legacy shapes below — they're always created with
@@ -926,13 +947,16 @@ function listDeckSummaries(): DeckSummary[] {
 // Every SequenceStep this widget can fire, from wherever they live on it —
 // its own events (press/release/move/etc., only present on interactive
 // types — Gauge/Label/ScreenCaptureWidget have none) plus, for the switch
-// family, each position's own onSelect. Used by collectImportWarnings below
-// to find every CallRestAction reachable from a deck, regardless of which
+// family, each position's own onSelect, plus RockerSwitchWidget's own
+// onInactive (see its own comment in shared/types.ts — not reachable through
+// `positions` since it isn't one). Used by collectImportWarnings below to
+// find every CallRestAction reachable from a deck, regardless of which
 // event/position it's attached to.
 function sequenceStepsForWidget(widget: Widget): SequenceStep[] {
   const eventSteps = 'events' in widget && widget.events ? Object.values(widget.events).flat() : []
   const positionSteps = 'positions' in widget && Array.isArray(widget.positions) ? widget.positions.flatMap((p) => p.onSelect ?? []) : []
-  return [...eventSteps, ...positionSteps]
+  const inactiveSteps = widget.type === 'switch-rocker' ? (widget.onInactive ?? []) : []
+  return [...eventSteps, ...positionSteps, ...inactiveSteps]
 }
 
 // Surfaces the two ways an imported deck can be structurally fine but still
@@ -1499,7 +1523,11 @@ function applyVariableUpdates(room: DeckRoom, updates: Record<string, unknown>, 
 // below); a SwitchPosition/DropdownWidget position select passes that
 // position's own name as $value alongside its index as $index, so one
 // onSelect sequence shared/copy-pasted across positions can still tell
-// which one actually fired it (see triggerAction below).
+// which one actually fired it (see triggerAction below). RockerSwitchWidget's
+// settleToInactive pseudo-position (see its own comment on
+// RockerSwitchWidget.onInactive in shared/types.ts) is the one exception:
+// it's not a real positions[] entry, so it passes the fixed string
+// 'Inactive' as $value and -1 (never a real array index) as $index instead.
 interface TriggerValue {
   value: VariableValue
   index?: number
@@ -1964,6 +1992,23 @@ async function triggerAction(
       // was landed ON by this turn, not a step count, since that's almost
       // always the more useful thing for the expression to know.
       await runSequence(room, widget.events[event], { value: position.name, index }, true, ws, widgetId, event)
+      return
+    }
+
+    // RockerSwitchWidget's settleToInactive pseudo-position only — the
+    // client (see useSwitchPosition.ts's settleInactive) sends this sentinel
+    // index on release, once the switch settles back to nothing active
+    // (a real position's own 'select' already fired separately, on press —
+    // see RockerSwitchWidgetContent's onSelect), so onInactive/
+    // positionChange both fire to match what the widget just visually did.
+    // Gated on settleToInactive itself, not just the widget type, since the
+    // client only ever sends -1 while it's on — an otherwise-stale/
+    // malicious -1 gets the same "cannot fire" error as any other bogus
+    // index below.
+    if (widget.type === 'switch-rocker' && event === 'select' && value === -1 && widget.settleToInactive) {
+      const trigger: TriggerValue = { value: 'Inactive', index: -1 }
+      await runSequence(room, widget.onInactive, trigger, true, ws, widgetId, event)
+      await runSequence(room, widget.events.positionChange, trigger, true, ws, widgetId, event)
       return
     }
 

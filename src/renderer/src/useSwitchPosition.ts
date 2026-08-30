@@ -35,7 +35,7 @@ const PENDING_CONFIRM_TIMEOUT_MS = 1500
 export function useSwitchPosition(
   widget: SwitchWidget | DropdownWidget,
   variables: VariableMap
-): { activeIndex: number | null; select: (index: number) => void } {
+): { activeIndex: number | null; select: (index: number) => void; settleInactive: () => void } {
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   const settleToInactive = widget.type === 'switch-rocker' && (widget.settleToInactive ?? false)
   const [localIndex, setLocalIndex] = useState<number | null>(() => (settleToInactive ? null : 0))
@@ -86,5 +86,17 @@ export function useSwitchPosition(
     }
   }
 
-  return { activeIndex, select }
+  // RockerSwitchWidget.settleToInactive only (see its own comment in
+  // shared/types.ts) — called separately from select() above, on release
+  // rather than press (see RockerSwitchWidgetContent's onRelease), so a
+  // press-and-hold shows the tapped position active for as long as it's
+  // held instead of instantly flashing back to nothing. -1 is the sentinel
+  // triggerAction (main/index.ts) reads as "run onInactive, not a real
+  // positions[] entry." A no-op for every other widget type/setting, so
+  // callers don't need to gate on settleToInactive themselves.
+  function settleInactive(): void {
+    if (settleToInactive) triggerWidget(widget.id, 'select', -1)
+  }
+
+  return { activeIndex, select, settleInactive }
 }

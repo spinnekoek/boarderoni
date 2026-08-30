@@ -193,7 +193,8 @@ export function Palette(): React.JSX.Element {
       positions: defaultPositions(),
       track: { color: DEFAULT_WIDGET_COLOR },
       labels: [],
-      events: { press: [], release: [], positionChange: [] }
+      events: { press: [], release: [], positionChange: [] },
+      onInactive: []
     }
     addWidget(widget)
     selectWidget(widget.id)
@@ -212,7 +213,8 @@ export function Palette(): React.JSX.Element {
       labels: [],
       track: { color: DEFAULT_WIDGET_COLOR },
       fill: { color: '#5b8def' },
-      events: { press: [], release: [], positionChange: [], increment: [], decrement: [] }
+      events: { press: [], release: [], positionChange: [], increment: [], decrement: [] },
+      fireWhileDragging: true
     }
     addWidget(widget)
     selectWidget(widget.id)

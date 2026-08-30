@@ -3299,6 +3299,30 @@ export function PropertiesPanel(): React.JSX.Element {
                           />
                         </label>
                       </div>
+                      <div className="properties__grid2">
+                        <label className="properties__field">
+                          <span>Label start</span>
+                          <input
+                            type="number"
+                            placeholder={String(gauge.min)}
+                            value={tickSet.labelMin ?? ''}
+                            onChange={(e) => patchTickSet(tickSet.id, { labelMin: e.target.value === '' ? undefined : Number(e.target.value) })}
+                          />
+                        </label>
+                        <label className="properties__field">
+                          <span>Label end</span>
+                          <input
+                            type="number"
+                            placeholder={String(gauge.max)}
+                            value={tickSet.labelMax ?? ''}
+                            onChange={(e) => patchTickSet(tickSet.id, { labelMax: e.target.value === '' ? undefined : Number(e.target.value) })}
+                          />
+                        </label>
+                      </div>
+                      <p className="properties__hint">
+                        Only changes the numbers the ticks print — where they actually sit stays tied to the gauge's own Min/Max. Leave
+                        blank to use the gauge's own {gauge.min}-{gauge.max} range.
+                      </p>
                       <div className="properties__field">
                         <span>Label color</span>
                         <ColorPickerButton
@@ -4014,6 +4038,30 @@ export function PropertiesPanel(): React.JSX.Element {
                         />
                       </label>
                     </div>
+                    <div className="properties__grid2">
+                      <label className="properties__field">
+                        <span>Label start</span>
+                        <input
+                          type="number"
+                          placeholder={String(adjuster.min)}
+                          value={tickSet.labelMin ?? ''}
+                          onChange={(e) => patchTickSet(tickSet.id, { labelMin: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        />
+                      </label>
+                      <label className="properties__field">
+                        <span>Label end</span>
+                        <input
+                          type="number"
+                          placeholder={String(adjuster.max)}
+                          value={tickSet.labelMax ?? ''}
+                          onChange={(e) => patchTickSet(tickSet.id, { labelMax: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        />
+                      </label>
+                    </div>
+                    <p className="properties__hint">
+                      Only changes the numbers the ticks print — where they actually sit stays tied to the knob's own Min/Max. Leave
+                      blank to use the knob's own {adjuster.min}-{adjuster.max} range.
+                    </p>
                     <div className="properties__field">
                       <span>Label color</span>
                       <ColorPickerButton
@@ -4634,9 +4682,22 @@ export function PropertiesPanel(): React.JSX.Element {
               title: 'Position Change',
               steps: sw.events.positionChange,
               onChange: (steps) => patchSwitch({ events: { ...sw.events, positionChange: steps } }),
-              hint: "Runs on every selection, alongside that position's own action below — variables.$value is the position's name, variables.$index its position, so one shared sequence can still tell which fired it.",
+              hint: sw.settleToInactive
+                ? "Runs on every selection (press), alongside that position's own action below — variables.$value is the position's name, variables.$index its position, so one shared sequence can still tell which fired it. With \"Settle to inactive\" on, it also runs once more on release, for the switch settling back to nothing active — variables.$value is 'Inactive', $index is -1 (see the Inactive action below)."
+                : "Runs on every selection (press), alongside that position's own action below — variables.$value is the position's name, variables.$index its position, so one shared sequence can still tell which fired it.",
               variableHint: 'variables.$value'
-            }
+            },
+            ...(sw.settleToInactive
+              ? [
+                  {
+                    title: 'Inactive',
+                    steps: sw.onInactive,
+                    onChange: (steps: SequenceStep[]) => patchSwitch({ onInactive: steps }),
+                    hint: 'Runs once, on release, once the switch settles back to nothing active — not a real position, so there\'s nothing here to style or delete. variables.$value is the fixed string \'Inactive\', variables.$index is -1.',
+                    variableHint: 'variables.$value'
+                  }
+                ]
+              : [])
           ]}
         />
 
@@ -5529,6 +5590,19 @@ export function PropertiesPanel(): React.JSX.Element {
               ? 'Tap directly on a detent (or its label) to select it.'
               : "Press anywhere on the dial and drag in the direction you want — you can drag past the widget's own edges. The needle snaps live to whichever position is nearest, so you can see what releasing will select."}
           </p>
+          {sw.interactionMode === 'drag' && (
+            <>
+              <label className="properties__checkbox">
+                <input type="checkbox" checked={sw.fireWhileDragging ?? true} onChange={(e) => patchSwitch({ fireWhileDragging: e.target.checked })} />
+                Fire while dragging
+              </label>
+              <p className="properties__hint">
+                {(sw.fireWhileDragging ?? true)
+                  ? "Position Change (and that position's own actions, and Turn CW/CCW) fires the instant the drag reaches it, not just when you let go — the default. Turn this off to fire it once, only on release."
+                  : 'Position Change fires once, when you release, instead of live as the needle crosses into each position during the drag.'}
+              </p>
+            </>
+          )}
 
           <PropertiesSection title="Detents">
             <DetentShapeEditor

@@ -52,8 +52,9 @@ function nearestPositionIndex(widget: DialSwitchWidget, pointerAngle: number): n
 // position is angularly nearest (see nearestPositionIndex), which is also
 // what dragIndex previews live so the needle visibly snaps between real
 // positions as you drag, never sitting at some in-between angle. `select` is
-// useSwitchPosition's own — reused as-is so a drag-commit updates this
-// device's local remembered position exactly the same way a tap does.
+// useSwitchPosition's own — reused as-is so a drag-commit (or a live fire,
+// see fireWhileDragging below) updates this device's local remembered
+// position exactly the same way a tap does.
 export function useDialSwitchDrag(
   widget: DialSwitchWidget,
   select: (index: number) => void,
@@ -70,17 +71,31 @@ export function useDialSwitchDrag(
   // transform — kept in sync here so the drag math counter-rotates by
   // exactly what the widget is actually visually rotated by right now.
   const rotateAngle = (widget.rotateAngleExpr ? resolveNumericExpr(widget.rotateAngleExpr, variables) : undefined) ?? widget.rotateAngle ?? 0
+  // Whichever index select() was most recently called for mid-drag, when
+  // widget.fireWhileDragging is on — same "avoid firing the same position's
+  // onSelect/positionChange twice on release" bookkeeping as
+  // useToggleSwitchDrag.ts's own lastFiredIndexRef (see its comment); reset
+  // to null at the start of every gesture.
+  const lastFiredIndexRef = useRef<number | null>(null)
+
+  function fireSelect(index: number): void {
+    select(index)
+    lastFiredIndexRef.current = index
+  }
 
   function updateFromEvent(e: React.PointerEvent): number {
     const rect = e.currentTarget.getBoundingClientRect()
     const angle = angleFromEvent(e, rect, rotateAngle)
     const index = nearestPositionIndex(widget, angle)
     setDragIndex(index)
+    // Defaults on — see fireWhileDragging's own comment in shared/types.ts.
+    if ((widget.fireWhileDragging ?? true) && lastFiredIndexRef.current !== index) fireSelect(index)
     return index
   }
 
   function handlePointerDown(e: React.PointerEvent): void {
     draggingRef.current = true
+    lastFiredIndexRef.current = null
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
@@ -102,9 +117,15 @@ export function useDialSwitchDrag(
     } catch {
       // best-effort
     }
+    // With fireWhileDragging on, updateFromEvent below always leaves
+    // lastFiredIndexRef pointing at this final index — either it already
+    // did (nothing changed since the last live fire) or it just fired it —
+    // so the check below only ever actually calls select() again here when
+    // fireWhileDragging is off, same release-only commit as before this
+    // feature existed.
     const index = updateFromEvent(e)
     setDragIndex(undefined)
-    select(index)
+    if (!((widget.fireWhileDragging ?? true) && lastFiredIndexRef.current === index)) select(index)
   }
 
   return { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp }

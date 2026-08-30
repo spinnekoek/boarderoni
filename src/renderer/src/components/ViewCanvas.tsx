@@ -92,7 +92,7 @@ function EncoderView({ widget, variables }: { widget: EncoderWidget; variables: 
 // only ever works this way; DialSwitchWidget can also use a drag gesture
 // instead — see DialSwitchView below.
 function RockerSwitchView({ widget, variables }: { widget: RockerSwitchWidget; variables: VariableMap }): React.JSX.Element {
-  const { activeIndex, select } = useSwitchPosition(widget, variables)
+  const { activeIndex, select, settleInactive } = useSwitchPosition(widget, variables)
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   // Root-level press/release (see RockerSwitchWidget.events' own doc
   // comment) — fires on every physical press/release of the widget
@@ -108,7 +108,14 @@ function RockerSwitchView({ widget, variables }: { widget: RockerSwitchWidget; v
       onPointerUp={() => triggerWidget(widget.id, 'release')}
       onPointerCancel={() => triggerWidget(widget.id, 'release')}
     >
-      <RockerSwitchWidgetContent widget={widget} variables={variables} interactive activeIndex={activeIndex} onSelect={select} />
+      <RockerSwitchWidgetContent
+        widget={widget}
+        variables={variables}
+        interactive
+        activeIndex={activeIndex}
+        onSelect={select}
+        onRelease={settleInactive}
+      />
     </div>
   )
 }
