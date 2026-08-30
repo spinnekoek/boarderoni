@@ -120,6 +120,9 @@ describe.skipIf(!hasBuiltWorker)('dcsBios worker (integration, real compiled art
     // Decoys — confirms listAircraft() excludes known shared/infrastructure
     // doc files rather than listing them as if they were pickable aircraft
     // (a real docs folder always has these alongside real aircraft files).
+    // CommonData.json is the one exception — see listAircraft()'s own
+    // comment — so it's asserted as present below, not excluded like the
+    // other two.
     writeFileSync(join(docsDir, 'CommonData.json'), '{}', 'utf-8')
     writeFileSync(join(docsDir, 'AircraftAliases.json'), '{}', 'utf-8')
     writeFileSync(join(docsDir, 'MetadataEnd.json'), '{}', 'utf-8')
@@ -146,7 +149,13 @@ describe.skipIf(!hasBuiltWorker)('dcsBios worker (integration, real compiled art
 
   it('lists the installed aircraft from the docs folder', async () => {
     const res = await host.request({ type: 'listAircraft' })
-    expect(res).toEqual({ type: 'aircraftList', aircraft: [{ id: 'Hornet', name: 'Hornet' }] })
+    expect(res).toEqual({
+      type: 'aircraftList',
+      aircraft: [
+        { id: 'CommonData', name: 'Common Data' },
+        { id: 'Hornet', name: 'Hornet' }
+      ]
+    })
   })
 
   it('parses and flattens the field catalog', async () => {

@@ -244,7 +244,7 @@ export function Palette(): React.JSX.Element {
       labels: [],
       track: { color: DEFAULT_WIDGET_COLOR },
       fill: { color: '#5b8def' },
-      events: { press: [], release: [], positionChange: [] },
+      events: { press: [], release: [], positionChange: [], guardToggle: [] },
       fireWhileDragging: true
     }
     addWidget(widget)

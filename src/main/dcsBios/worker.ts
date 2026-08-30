@@ -10,6 +10,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { parentPort, workerData } from 'node:worker_threads'
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosStatus, DcsBiosWorkerStats } from '../../shared/dcsBiosTypes'
 import { parseAircraftCommands, parseAircraftDoc } from './docParser'
+import { COMMON_DATA_AIRCRAFT_ID } from './messages'
 import type { DcsBiosWorkerData, DcsBiosWorkerPush, DcsBiosWorkerRequest, DcsBiosWorkerResponse } from './messages'
 import { DcsBiosFrameDecoder, type DcsBiosWrite } from './protocol'
 
@@ -135,9 +136,12 @@ function loadAircraftData(aircraft: string): AircraftData {
 // aircraft that don't have their own primary doc file just won't show up,
 // same as if they weren't installed). This hardcoded list is a pragmatic
 // stand-in for that, scoped to what's actually been seen in a real docs
-// folder — CommonData/NS430/FC3 are shared avionics modules aliased by
-// several aircraft, never a real aircraft's own `_ACFT_NAME`.
-const NON_AIRCRAFT_DOCS = new Set(['AircraftAliases', 'CommonData', 'MetadataStart', 'MetadataEnd', 'NS430', 'FC3'])
+// folder — NS430/FC3 are shared avionics modules aliased by several
+// aircraft, never a real aircraft's own `_ACFT_NAME`. CommonData is the same
+// kind of shared doc, but gets its own carve-out below instead of being
+// filtered out here — see COMMON_DATA_AIRCRAFT_ID's own comment in
+// messages.ts.
+const NON_AIRCRAFT_DOCS = new Set(['AircraftAliases', 'MetadataStart', 'MetadataEnd', 'NS430', 'FC3'])
 
 function listAircraft(): { id: string; name: string }[] {
   let files: string[]
@@ -146,11 +150,29 @@ function listAircraft(): { id: string; name: string }[] {
   } catch {
     return []
   }
-  return files
-    .map((f) => f.slice(0, -JSON_EXT.length))
-    .filter((id) => !NON_AIRCRAFT_DOCS.has(id))
+  const ids = files.map((f) => f.slice(0, -JSON_EXT.length))
+  const aircraft = ids
+    .filter((id) => id !== COMMON_DATA_AIRCRAFT_ID && !NON_AIRCRAFT_DOCS.has(id))
     .sort((a, b) => a.localeCompare(b))
     .map((id) => ({ id, name: prettifyAircraftName(id) }))
+  // CommonData.json isn't a real aircraft, but unlike the docs filtered out
+  // above it carries real, generic fields of its own (e.g. airspeed/altitude
+  // shared across several modules) with no aircraft of its own to browse
+  // them under — proper alias resolution (see NON_AIRCRAFT_DOCS's own
+  // comment for why that's out of scope for now) would fold it into every
+  // aircraft that aliases it instead, but until that exists this is the only
+  // way to reach those fields at all. Exposed as if it were just another
+  // pickable "aircraft" — same doc-parsing path as any real one
+  // (aircraftDocPath/loadAircraftData don't care what the file is actually
+  // called) — under a friendlier display name than prettifyAircraftName
+  // would produce (nothing to split on: no underscore/hyphen in
+  // "CommonData"), and pinned first rather than sorted in alphabetically —
+  // it reads as a distinct, always-there option rather than something that
+  // could be mistaken for a real aircraft alongside it. handleWrite()'s own
+  // decode loop, and connectionManager.ts's push routing, both need their
+  // own matching special-case for this same id — see
+  // COMMON_DATA_AIRCRAFT_ID's own comment in messages.ts.
+  return ids.includes(COMMON_DATA_AIRCRAFT_ID) ? [{ id: COMMON_DATA_AIRCRAFT_ID, name: 'Common Data' }, ...aircraft] : aircraft
 }
 
 // _ACFT_NAME (and other core metadata) lives in these two always-loaded
@@ -231,10 +253,17 @@ function handleWrite(write: DcsBiosWrite): void {
   for (const [aircraftId, table] of addressTables) {
     const fields = table.get(write.address)
     if (!fields) continue
-    // Only trust an ordinary mapped field while this table's own aircraft
-    // is the one actually active, so two aircraft with coincidentally
-    // overlapping addresses never cross-contaminate each other's values.
-    if (aircraftId !== activeAircraft) continue
+    // Only trust an ordinary mapped field while this table's own aircraft is
+    // the one actually active, so two aircraft with coincidentally
+    // overlapping addresses never cross-contaminate each other's values —
+    // except CommonData's own table, which never IS activeAircraft (that's
+    // always a real _ACFT_NAME — see listAircraft()'s own comment on why
+    // CommonData is exposed as a pickable "aircraft" despite not being one),
+    // so this check would silently drop every one of its writes otherwise.
+    // Safe to always trust: DCS-BIOS only ever transmits at CommonData's
+    // addresses while a module that actually aliases it is loaded, so
+    // there's nothing for an unrelated active aircraft to collide with.
+    if (aircraftId !== activeAircraft && aircraftId !== COMMON_DATA_AIRCRAFT_ID) continue
     // A single word commonly packs several unrelated fields at once (e.g.
     // the Hornet packs 8 different controls into one address) — every field
     // living at this address needs its own independent decode against the

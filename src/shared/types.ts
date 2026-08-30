@@ -200,7 +200,7 @@ export type SequenceStep = DelayStep | ActionStep
 // own comment. See eventKindsFor/getEventSteps in shared/widgetEvents.ts,
 // the single source of truth for which of the rest apply to which widget
 // type.
-export type WidgetEventKind = 'press' | 'release' | 'move' | 'increment' | 'decrement' | 'select' | 'positionChange'
+export type WidgetEventKind = 'press' | 'release' | 'move' | 'increment' | 'decrement' | 'select' | 'positionChange' | 'guardToggle'
 
 // x/y/w/h are absolute CSS pixels on the dashboard canvas — not grid units.
 // A widget is always rendered at exactly this pixel size on every client, no
@@ -973,8 +973,16 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase, WidgetVisibility {
   rotateAngleExpr?: string
   // Root-level, alongside (not instead of) each position's own onSelect —
   // see RockerSwitchWidget.events' own comment for the full reasoning
-  // (same convention here).
-  events: { press: SequenceStep[]; release: SequenceStep[]; positionChange: SequenceStep[] }
+  // (same convention here). guardToggle (guardEnabled only — see its own
+  // comment below) is this widget's one addition beyond what every other
+  // switch type carries: fires whenever the guard is tapped, whether that
+  // open/closes it locally or the tap is actually overridden by
+  // guardOpenExpr — the only way to hang a real side effect (a DCS-BIOS
+  // command, an update-state) off pressing the cover itself, since
+  // guardOpenExpr only ever reads a variable, never writes one back.
+  // variables.$value (see TriggerValue) is 1 if this tap is opening the
+  // guard, 0 if closing it — see ToggleSwitchView in ViewCanvas.tsx.
+  events: { press: SequenceStep[]; release: SequenceStep[]; positionChange: SequenceStep[]; guardToggle: SequenceStep[] }
   orientation?: 'horizontal' | 'vertical' // default 'vertical'
   // 'tap' (default): tap a zone (or its label) to select that position
   // directly. 'drag': press anywhere on the widget and drag toward the
@@ -2020,6 +2028,15 @@ export type ServerToClient =
   // sentinel value) for a pre-sequence error like "Widget not found" or
   // "cannot fire this event", which has no step context.
   | { type: 'action:error'; widgetId: string; message: string; detail?: { event: WidgetEventKind; stepIndex: number; stepKind: SequenceStep['kind'] } }
+  // An update-state/send-dcs-command/call-rest action's own console.log
+  // call, forwarded from wherever it actually ran — always the main process
+  // (see runUpdateState et al in main/index.ts), never the editor's own
+  // renderer, so without this the desktop editor's debug panel could never
+  // see it. Only ever sent to edit-role sockets (see broadcastToEditClients)
+  // — a deployed 'view' device has no debug panel to show it in. `message`
+  // is already formatted (see stringifyExpressionLogArgs) since raw args
+  // wouldn't survive this JSON round-trip unchanged (e.g. an Error).
+  | { type: 'action:log'; message: string }
   | { type: 'devices:sync'; devices: DeviceInfo[] }
   // Sent to a 'view' client instead of dashboard:sync when its deviceId
   // hasn't been approved yet — the client shows a waiting screen and gets no

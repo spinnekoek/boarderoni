@@ -32,6 +32,24 @@ const exprConsole = {
   log: (...args: unknown[]) => consoleSink?.(args)
 }
 
+// Turns a console.log's argument list into one devtools-ish line — shared by
+// every sink consumer (the desktop editor's own debug panel, and main's
+// action:log forwarder, which can't just hand a WS client raw `unknown[]`
+// since not everything survives JSON.stringify unchanged, e.g. an Error).
+export function stringifyExpressionLogArgs(args: unknown[]): string {
+  return args
+    .map((arg) => {
+      if (typeof arg === 'string') return arg
+      if (arg instanceof Error) return arg.stack ?? arg.message
+      try {
+        return JSON.stringify(arg)
+      } catch {
+        return String(arg)
+      }
+    })
+    .join(' ')
+}
+
 // Evaluates a bindable expression's code as a function body with `variables`
 // (and `console`, see exprConsole above) in scope. Plain `new Function` — no
 // Node/Electron/DOM APIs assumed by the mechanism itself — so this behaves

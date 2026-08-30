@@ -54,7 +54,7 @@ import {
 import { getEventSteps } from '../shared/widgetEvents'
 import { FONT_MIME_BY_EXTENSION, fontExtension } from '../shared/fonts'
 import { findSubDeck, findWidgetAnywhere, allDeckWidgets } from '../shared/subDecks'
-import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression } from '../shared/expr'
+import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression, setExpressionConsoleSink, stringifyExpressionLogArgs } from '../shared/expr'
 import { extractPlaceholders } from '../shared/restPlaceholders'
 import { PLUGIN_PRODUCERS } from './plugins'
 import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuality, addMjpegViewer } from './screenCapture'
@@ -225,6 +225,15 @@ function migrateDialSwitchIncrementDecrement(widget: DialSwitchWidget): DialSwit
   return { ...widget, events: { ...widget.events, increment: events?.increment ?? [], decrement: events?.decrement ?? [] } }
 }
 
+// ToggleSwitchWidget gained events.guardToggle (see its own comment in
+// shared/types.ts) after already shipping with guardEnabled/guardOpenExpr —
+// a dashboard saved before that needs it backfilled to an empty sequence,
+// same convention as migrateSwitchWidgetPositionChangeEvents above.
+function migrateToggleSwitchGuardEvent(widget: ToggleSwitchWidget): ToggleSwitchWidget {
+  const events = widget.events as { guardToggle?: SequenceStep[] }
+  return { ...widget, events: { ...widget.events, guardToggle: events.guardToggle ?? [] } }
+}
+
 // fireWhileDragging now defaults on for every toggle switch, including ones
 // saved before it existed (or before it was flipped on) — not just freshly
 // created ones (see Palette.tsx's handleAddToggleSwitch). Unconditional
@@ -271,8 +280,10 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
   }
 
   if (widget.type === 'switch-toggle')
-    return migrateToggleSwitchFireWhileDragging(
-      migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
+    return migrateToggleSwitchGuardEvent(
+      migrateToggleSwitchFireWhileDragging(
+        migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
+      )
     )
 
   if (widget.type === 'switch-rocker') return migrateSwitchWidgetPositionChangeEvents(migrateSwitchWidgetTopLevelLabels(backfillSwitchPositions(widget)))
@@ -1502,6 +1513,32 @@ function numericTrigger(value: number | undefined): TriggerValue | undefined {
   return value !== undefined ? { value } : undefined
 }
 
+// Routes an action expression's console.log calls (see
+// stringifyExpressionLogArgs/setExpressionConsoleSink) to whichever room
+// triggered it, as an action:log — the sink itself is a bare (args) => void
+// with no room context, and these expressions run here in the main process,
+// never the editor's own renderer, so without this the desktop editor's
+// debug panel could never show them (see ServerToClient's own comment on
+// action:log). Only ever set for the duration of one synchronous eval call —
+// never left dangling across an `await` — since multiple rooms/devices can
+// be firing actions concurrently and there's no queue here, just this one
+// slot.
+let logRoom: DeckRoom | null = null
+
+function withLogRoom<T>(room: DeckRoom, evaluate: () => T): T {
+  logRoom = room
+  try {
+    return evaluate()
+  } finally {
+    logRoom = null
+  }
+}
+
+setExpressionConsoleSink((args) => {
+  if (!logRoom) return
+  broadcastToEditClients(logRoom, { type: 'action:log', message: stringifyExpressionLogArgs(args) })
+})
+
 // Evaluates an update-state action's code and merges whatever it returns
 // into the room's dashboard.variables. Runs server-side (not per-client) so
 // every client's next dashboard:sync already reflects the result, same as
@@ -1514,7 +1551,9 @@ function runUpdateState(room: DeckRoom, code: string, trigger: TriggerValue | un
   // PluginMapping's own `expr` already uses (see
   // evaluateMappingExpression). A plain button/morph click
   // has no value, so it evaluates exactly as before.
-  const result = trigger ? evaluateMappingExpression(code, trigger.value, variableMap, trigger.index) : tryEvaluateExpression(code, variableMap)
+  const result = withLogRoom(room, () =>
+    trigger ? evaluateMappingExpression(code, trigger.value, variableMap, trigger.index) : tryEvaluateExpression(code, variableMap)
+  )
   // A genuine failure (syntax error, thrown exception, ...) surfaces to the
   // caller — triggerAction's catch turns it into an action:error the client
   // shows on the widget. Code that just doesn't return anything (empty body,
@@ -1557,9 +1596,9 @@ async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction, t
         : undefined
   if (argumentExpr) {
     const variableMap = toVariableMap(room.dashboard.variables ?? [])
-    const result = trigger
-      ? evaluateMappingExpression(argumentExpr, trigger.value, variableMap, trigger.index)
-      : tryEvaluateExpression(argumentExpr, variableMap)
+    const result = withLogRoom(room, () =>
+      trigger ? evaluateMappingExpression(argumentExpr, trigger.value, variableMap, trigger.index) : tryEvaluateExpression(argumentExpr, variableMap)
+    )
     if (!result.ok) throw new Error(result.error)
     argument = String(result.value)
   }
@@ -1582,10 +1621,11 @@ async function runCallRestAction(room: DeckRoom, action: CallRestAction, trigger
   for (const name of extractPlaceholders(payloadText)) {
     const entry = action.values.find((v) => v.placeholder === name)
     let resolved: unknown = null
-    if (entry?.expr && entry.expr.trim()) {
-      const result = trigger
-        ? evaluateMappingExpression(entry.expr, trigger.value, variableMap, trigger.index)
-        : tryEvaluateExpression(entry.expr, variableMap)
+    const expr = entry?.expr
+    if (expr && expr.trim()) {
+      const result = withLogRoom(room, () =>
+        trigger ? evaluateMappingExpression(expr, trigger.value, variableMap, trigger.index) : tryEvaluateExpression(expr, variableMap)
+      )
       if (!result.ok) throw new Error(result.error)
       resolved = result.value
     } else if (entry?.value !== undefined) {
@@ -1902,6 +1942,14 @@ async function triggerAction(
   if (widget.type === 'switch-rocker' || widget.type === 'switch-dial' || widget.type === 'switch-toggle') {
     if (event === 'press' || event === 'release') {
       await runSequence(room, widget.events[event], numericTrigger(value), final, ws, widgetId, event)
+      return
+    }
+
+    // ToggleSwitchWidget-only (see its own events.guardToggle comment in
+    // shared/types.ts) — value is 1/0 for opening/closing, same numericTrigger
+    // wrapping as press/release above, exposed as variables.$value.
+    if (widget.type === 'switch-toggle' && event === 'guardToggle') {
+      await runSequence(room, widget.events.guardToggle, numericTrigger(value), final, ws, widgetId, event)
       return
     }
 

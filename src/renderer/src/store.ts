@@ -34,6 +34,7 @@ import { registerCustomFonts, type CustomFont } from '@shared/fonts'
 import { getDeviceId, setLastDeckId, clearLastDeckId, nextId } from './id'
 import { syncCustomFontFaces } from './customFontFaces'
 import { useConfirmStore } from './confirmStore'
+import { pushRemoteDebugLog } from './debugConsoleStore'
 
 // A slide-over sub-deck currently open on the view client — client-local,
 // never persisted/synced beyond the single subdeck:open-overlay message
@@ -657,6 +658,8 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
           createdAt: Date.now()
         }
         set((s) => ({ toasts: [...s.toasts, toast].slice(-5) }))
+      } else if (message.type === 'action:log') {
+        pushRemoteDebugLog(message.message)
       } else if (message.type === 'devices:sync') {
         set({ devices: message.devices })
       } else if (message.type === 'screen-capture:displays') {

@@ -129,9 +129,19 @@ function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; v
   const { activeIndex: rawActiveIndex, select } = useSwitchPosition(widget, variables)
   const activeIndex = rawActiveIndex ?? 0
   const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useToggleSwitchDrag(widget, activeIndex, select, variables)
-  const { open: guardOpen, toggle: guardToggle } = useSwitchGuard(widget, variables)
+  const { open: guardOpen, toggle: guardToggleLocal } = useSwitchGuard(widget, variables)
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   const count = widget.positions.length
+  // Fires the widget's own configurable guardToggle action (see
+  // ToggleSwitchWidget.events' own comment) alongside the local open/closed
+  // flip every tap on the guard already did — the only hook available for a
+  // real side effect (a DCS-BIOS command, an update-state) off pressing the
+  // cover itself, since guardOpenExpr only ever reads a variable back, never
+  // writes one. $value is 1 if this tap is opening the guard, 0 if closing.
+  function guardToggle(): void {
+    triggerWidget(widget.id, 'guardToggle', guardOpen ? 0 : 1)
+    guardToggleLocal()
+  }
   // The properties panel enforces at most one momentary position on a
   // 2-position switch — see PropertiesPanel.tsx's Momentary section — so
   // this is really "is there a momentary position at all," not "which one."

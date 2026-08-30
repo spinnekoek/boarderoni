@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSettings, DcsBiosStatus, DcsBiosWorkerStats } from '../../shared/dcsBiosTypes'
 import { WorkerHost } from '../workerHost'
+import { COMMON_DATA_AIRCRAFT_ID } from './messages'
 import type { DcsBiosWorkerData, DcsBiosWorkerPush, DcsBiosWorkerRequest, DcsBiosWorkerResponse } from './messages'
 
 const DEFAULT_MULTICAST_ADDRESS = '239.255.50.10'
@@ -107,11 +108,22 @@ host.subscribe((push) => {
     for (const handler of statsHandlers) handler(push.stats)
     return
   }
-  const subscribers = subscribersByAircraft.get(push.activeAircraft)
-  if (!subscribers) return
-  for (const subscriber of subscribers) {
-    Object.assign(subscriber.pending, push.updates)
-    subscriber.hasPending = true
+  // A push's own `updates` is whatever changed across EVERY table
+  // worker.ts's handleWrite decoded this tick, real aircraft and CommonData
+  // alike, all merged into one flat object (see flushFields in worker.ts) —
+  // so a CommonData subscriber just needs the same push everyone subscribed
+  // to the real activeAircraft gets, not a separately-tagged one. It's
+  // tagged with activeAircraft (never literally "CommonData" — that's
+  // always a real _ACFT_NAME) purely for routing to THOSE subscribers, so a
+  // subscriber registered under COMMON_DATA_AIRCRAFT_ID needs its own,
+  // separate delivery here — see subscribeAircraft's own comment.
+  for (const key of push.activeAircraft === COMMON_DATA_AIRCRAFT_ID ? [push.activeAircraft] : [push.activeAircraft, COMMON_DATA_AIRCRAFT_ID]) {
+    const subscribers = subscribersByAircraft.get(key)
+    if (!subscribers) continue
+    for (const subscriber of subscribers) {
+      Object.assign(subscriber.pending, push.updates)
+      subscriber.hasPending = true
+    }
   }
 })
 
@@ -143,6 +155,11 @@ function clampUpdateHz(hz: number | undefined): number {
 // re-saves to disk, which is a downstream concern each Plugin
 // instance may want tuned differently. Multiple subscribers to the same
 // aircraft each get their own independent timer off the same worker pushes.
+// Passing COMMON_DATA_AIRCRAFT_ID here (a real, pickable choice — see its
+// own comment in messages.ts) subscribes the same way, and still gets
+// registerAircraft'd on the worker like any other id — the one thing that's
+// different is push routing (see the host.subscribe callback above), since
+// a push is never actually tagged with that id, only a real _ACFT_NAME.
 export function subscribeAircraft(
   aircraft: string,
   onUpdate: (fields: Record<string, unknown>) => void,

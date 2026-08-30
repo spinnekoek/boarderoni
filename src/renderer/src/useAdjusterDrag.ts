@@ -13,6 +13,27 @@ const RECONCILE_EPSILON = 0.01
 const DEFAULT_START_ANGLE = 135
 const DEFAULT_END_ANGLE = 405
 
+// A knob's angle math (see fractionFromEvent's dead-zone bisection below)
+// can only clamp a raw angle that lands squarely in the dead zone — it has
+// no way to tell a genuine sweep across the whole range apart from an
+// instantaneous jump, which happens whenever two consecutive pointer
+// samples land on opposite sides of the dead zone (or just far apart within
+// the valid sweep) without the raw angle ever actually being sampled while
+// crossing it: a fast/diagonal mouse flick, or the pointer passing near the
+// widget's own center where a tiny physical movement swings the angle
+// wildly. Capping how far the fraction can move in a single event (see
+// clampKnobFractionJump) catches that without affecting legitimate quick
+// full-range sweeps — pointermove fires far more often than this scenario
+// needs, so a real drag's samples land within this step of each other even
+// when fast; it just takes a couple more samples to finish, instead of one.
+const MAX_KNOB_FRACTION_STEP = 0.4
+
+function clampKnobFractionJump(previous: number, next: number): number {
+  const delta = next - previous
+  if (Math.abs(delta) <= MAX_KNOB_FRACTION_STEP) return next
+  return previous + Math.sign(delta) * MAX_KNOB_FRACTION_STEP
+}
+
 // Maps a pointer event to a 0..1 fraction along the widget's drag axis
 // (slider: position along the track; knob: angle around the center),
 // clamped to the configured range. `rotateAngle` is the widget's own
@@ -99,6 +120,11 @@ export function useAdjusterDrag(
   // reconcile against in the first place).
   const dragValueRef = useRef<number | null>(null)
   const draggingRef = useRef(false)
+  // Last fraction accepted this drag (post-jump-clamp) — the reference point
+  // clampKnobFractionJump measures the next sample's delta against. Only
+  // meaningful mid-gesture; reset on every pointerDown, unused for the
+  // slider style (see the `widget.style === 'knob'` guards below).
+  const lastFractionRef = useRef(0)
   // Same resolution AdjusterWidgetContent itself uses to build the CSS
   // transform — kept in sync here so the drag math counter-rotates by
   // exactly what the widget is actually visually rotated by right now.
@@ -160,6 +186,9 @@ export function useAdjusterDrag(
       // best-effort, see CanvasWidget's handleResizePointerDown
     }
     const fraction = fractionFromEvent(widget, e, rect, rotateAngle)
+    // No prior sample this drag to jump away from, so the touch-down point
+    // itself is always accepted as-is.
+    lastFractionRef.current = fraction
     setDragFraction(fraction)
     // Fires once, immediately — a new, explicit 'press' event ahead of the
     // throttled 'move' ticks below. Preserves "fires on first touch" legacy
@@ -172,7 +201,9 @@ export function useAdjusterDrag(
   function handlePointerMove(e: React.PointerEvent): void {
     const rect = dragRectRef.current
     if (!rect) return
-    const fraction = fractionFromEvent(widget, e, rect, rotateAngle)
+    const raw = fractionFromEvent(widget, e, rect, rotateAngle)
+    const fraction = widget.style === 'knob' ? clampKnobFractionJump(lastFractionRef.current, raw) : raw
+    lastFractionRef.current = fraction
     setDragFraction(fraction)
     scheduleSend(fraction)
   }
@@ -186,7 +217,9 @@ export function useAdjusterDrag(
     } catch {
       // best-effort
     }
-    const fraction = fractionFromEvent(widget, e, rect, rotateAngle)
+    const raw = fractionFromEvent(widget, e, rect, rotateAngle)
+    const fraction = widget.style === 'knob' ? clampKnobFractionJump(lastFractionRef.current, raw) : raw
+    lastFractionRef.current = fraction
     setDragFraction(fraction)
     // Final, unthrottled 'move' send — guarantees the last position commits
     // even if a scheduled rAF tick from scheduleSend was still pending. Also

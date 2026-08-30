@@ -1,5 +1,14 @@
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosStatus, DcsBiosWorkerStats } from '../../shared/dcsBiosTypes'
 
+// CommonData.json's own aircraft id — shared between worker.ts (which
+// special-cases it in listAircraft()/handleWrite()'s decode loop, since it's
+// exposed as a pickable "aircraft" despite not being one — see
+// listAircraft()'s own comment) and connectionManager.ts (which has to
+// special-case it too, in its own push-routing — see subscribeAircraft's own
+// comment). Lives here, not in either file, so the two special-cases can't
+// drift apart from each other.
+export const COMMON_DATA_AIRCRAFT_ID = 'CommonData'
+
 // Passed as workerData on every (re)spawn of the DCS-BIOS worker.
 export interface DcsBiosWorkerData {
   docsDir: string

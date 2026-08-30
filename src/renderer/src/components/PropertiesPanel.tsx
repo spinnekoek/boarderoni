@@ -1194,16 +1194,14 @@ function ActionFields({
         <>
           <label className="properties__field">
             <span>Code</span>
-            <textarea
-              className="properties__code"
-              rows={6}
+            <CodeEditor
+              value={action.code}
+              onChange={(code) => onChange({ kind: 'update-state', code })}
               placeholder={
                 variableHint
                   ? `return { my_variable: ${variableHint} };`
                   : 'return { my_variable: (variables.my_variable ?? 0) + 1 };'
               }
-              value={action.code}
-              onChange={(e) => onChange({ kind: 'update-state', code: e.target.value })}
             />
           </label>
           <p className="properties__hint">
@@ -5385,7 +5383,18 @@ export function PropertiesPanel(): React.JSX.Element {
               onChange: (steps) => patchSwitch({ events: { ...sw.events, positionChange: steps } }),
               hint: "Runs on every selection, alongside that position's own action below — variables.$value is the position's name, variables.$index its position, so one shared sequence can still tell which fired it.",
               variableHint: 'variables.$value'
-            }
+            },
+            ...(sw.guardEnabled
+              ? [
+                  {
+                    title: 'Guard Press',
+                    steps: sw.events.guardToggle,
+                    onChange: (steps: SequenceStep[]) => patchSwitch({ events: { ...sw.events, guardToggle: steps } }),
+                    hint: 'Fires whenever the cover is tapped, whether that flips it open or closed — variables.$value is 1 when opening, 0 when closing. The only way to send a real command off pressing the guard itself, since Open when above only ever reads a variable back.',
+                    variableHint: 'variables.$value'
+                  }
+                ]
+              : [])
           ]}
         />
 

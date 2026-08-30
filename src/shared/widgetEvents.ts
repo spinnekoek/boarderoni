@@ -11,7 +11,8 @@ export const EVENT_LABELS: Record<WidgetEventKind, string> = {
   // MultiSwitchWidget isn't an EventfulWidget) — present only so this stays a
   // total Record over WidgetEventKind.
   select: 'Select',
-  positionChange: 'Position Change'
+  positionChange: 'Position Change',
+  guardToggle: 'Guard Press'
 }
 
 // Which WidgetEventKind values apply to this widget's type, in display/
