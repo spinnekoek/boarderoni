@@ -107,7 +107,7 @@ export function DcsBiosSettingsPanel(): React.JSX.Element {
           value={draft.defaultUpdateHz}
           onChange={(e) => patch({ defaultUpdateHz: Number(e.target.value) })}
         />
-        <span className="properties__hint-inline">The starting rate a newly-added DCS-BIOS event source uses — each source can override it.</span>
+        <span className="properties__hint-inline">The starting rate a newly-added DCS-BIOS plugin uses — each source can override it.</span>
       </label>
 
       <div className="dcsbios-settings__actions">

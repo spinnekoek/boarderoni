@@ -26,7 +26,7 @@ const ocrHost = new WorkerHost<OcrWorkerRequest, OcrWorkerResponse, never>({
 
 // Same lazy-acquire-never-release shape as screenCaptureHost — an idle
 // worker thread costs effectively nothing, and avoids spawn/teardown churn
-// as OCR event sources come and go across syncEventSources restarts.
+// as OCR plugins come and go across syncPlugins restarts.
 let hostAcquired = false
 function ensureHostAcquired(): void {
   if (hostAcquired) return

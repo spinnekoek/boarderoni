@@ -29,6 +29,7 @@ import {
   reconcileDashboard
 } from '@shared/subDecks'
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSettings, DcsBiosStatus, DcsBiosWorkerStats } from '@shared/dcsBiosTypes'
+import type { DcsViewportsSettings, DcsViewportsStatus } from '@shared/dcsViewportsTypes'
 import { registerCustomFonts, type CustomFont } from '@shared/fonts'
 import { getDeviceId, setLastDeckId, clearLastDeckId, nextId } from './id'
 import { syncCustomFontFaces } from './customFontFaces'
@@ -61,8 +62,8 @@ export interface ActionErrorToast {
 }
 
 // A field catalog fetch is either not yet requested (absent from the map),
-// in flight, resolved, or failed — EventsModal's field browser (see
-// components/EventsModal.tsx) renders a different state for each.
+// in flight, resolved, or failed — EventSourcesModal's field browser (see
+// components/EventSourcesModal.tsx) renders a different state for each.
 export type DcsBiosFieldCatalogState = 'loading' | { error: string } | DcsBiosFieldCatalogEntry[]
 // Same idea, for a "Send DCS command" action's command browser (see
 // PropertiesPanel.tsx's SendDcsCommandActionEditor).
@@ -127,13 +128,13 @@ interface DashboardStore {
   // (no decks exist yet). Edit mode's DeckPicker still fetches its own copy
   // over REST instead, since it's always trusted regardless of this.
   decks: DeckSummary[] | null
-  // Edit mode's settings modal only — the master approved-device list (see
+  // Edit mode's Devices modal only — the master approved-device list (see
   // requestApprovedDevices/revokeDeviceApproval), for revoking access.
   approvedDevices: ApprovedDeviceSummary[]
-  // DCS-BIOS event source support — all null/empty until first requested,
-  // fetched once app-wide and cached rather than per EventSource instance
-  // (see EventsModal.tsx). null means "not yet requested," distinct from
-  // an empty result.
+  // DCS-BIOS plugin support — all null/empty until first requested,
+  // fetched once app-wide and cached rather than per Plugin instance
+  // (see renderer/src/plugins/DcsBiosConfigPanel.tsx). null means "not yet
+  // requested," distinct from an empty result.
   dcsBiosAircraft: { id: string; name: string }[] | null
   dcsBiosFieldCatalogs: Record<string, DcsBiosFieldCatalogState>
   dcsBiosCommandCatalogs: Record<string, DcsBiosCommandCatalogState>
@@ -147,11 +148,11 @@ interface DashboardStore {
   // Result of the most recent "Test" send from a Send DCS command action's
   // editor (see PropertiesPanel.tsx) — transient UI feedback, not persisted.
   dcsBiosSendCommandResult: { ok: boolean; error?: string } | null
-  // "Enabled data sources" gate (see appSettings.ts) — null until first
-  // requested. EventsModal's add-picker filters EVENT_SOURCE_TYPES by this.
-  enabledDataSources: string[] | null
+  // "Enabled plugins" gate (see appSettings.ts) — null until first
+  // requested. EventSourcesModal's add-picker filters PLUGIN_TYPES by this.
+  enabledPlugins: string[] | null
   // App-wide, user-created REST data sources (see main/restDataSources.ts) —
-  // empty until first requested. Settings' RestDataSourcesSettingsPanel
+  // empty until first requested. PluginsModal's RestDataSourcesSettingsPanel
   // manages the full list; PropertiesPanel's ActionFields reads it to offer
   // a "Call <name>" action per enabled, outgoing-configured source.
   restDataSources: RestDataSourceStatus[]
@@ -160,8 +161,8 @@ interface DashboardStore {
   // first synced. Unlike restDataSources, arrives unasked as part of
   // sendInitialState (see its own comment in main/index.ts), so it's rarely
   // actually empty in practice; requestCustomFonts below exists mainly for
-  // the settings modal to have something to call on mount, matching every
-  // other panel's own convention.
+  // FontsModal to have something to call on mount, matching every other
+  // panel's own convention.
   customFonts: CustomFont[]
   // ScreenCaptureWidget's Properties monitor dropdown — null until first
   // requested (see PropertiesPanel.tsx, fetched once its Region section
@@ -173,10 +174,11 @@ interface DashboardStore {
   // as background-image:upload's result does (see screen-capture:pick-region's
   // own comment in shared/types.ts).
   pickScreenCaptureRegion: (widgetId: string, displayId: number) => void
-  // Same shape as pickScreenCaptureRegion above, but for an 'ocrRegion'
-  // event source's own config.region/config.displayId (see EventsModal.tsx)
-  // instead of a widget.
-  pickEventSourceRegion: (sourceId: string, displayId: number) => void
+  // Same shape as pickScreenCaptureRegion above, but for the 'screenCapture'
+  // plugin's own config.region/config.displayId (see
+  // renderer/src/plugins/ScreenCaptureConfigPanel.tsx, rendered inside
+  // EventSourcesModal.tsx) instead of a widget.
+  pickPluginRegion: (sourceId: string, displayId: number) => void
   requestDcsBiosAircraftList: () => void
   requestDcsBiosFieldCatalog: (aircraft: string) => void
   requestDcsBiosCommandCatalog: (aircraft: string) => void
@@ -185,8 +187,21 @@ interface DashboardStore {
   updateDcsBiosSettings: (settings: Partial<DcsBiosSettings>) => void
   requestDcsBiosDocsDirValidation: (docsDir: string) => void
   pickDcsBiosDocsFolder: () => void
+  dcsViewportsSettings: DcsViewportsSettings | null
+  dcsViewportsStatus: DcsViewportsStatus | null
+  dcsViewportsDcsInstallDirValidation: { dir: string; valid: boolean } | null
+  dcsViewportsSavedGamesDirValidation: { dir: string; valid: boolean } | null
+  dcsViewportsPickedDcsInstallFolder: string | null
+  dcsViewportsPickedSavedGamesFolder: string | null
+  requestDcsViewportsSettings: () => void
+  requestDcsViewportsStatus: () => void
+  updateDcsViewportsSettings: (settings: Partial<DcsViewportsSettings>) => void
+  requestDcsViewportsDcsInstallDirValidation: (dir: string) => void
+  requestDcsViewportsSavedGamesDirValidation: (dir: string) => void
+  pickDcsViewportsDcsInstallFolder: () => void
+  pickDcsViewportsSavedGamesFolder: () => void
   requestAppSettings: () => void
-  updateEnabledDataSources: (enabledDataSources: string[]) => void
+  updateEnabledPlugins: (enabledPlugins: string[]) => void
   requestRestDataSources: () => void
   createRestDataSource: (name: string) => void
   updateRestDataSources: (sources: RestDataSource[]) => void
@@ -194,7 +209,7 @@ interface DashboardStore {
   deleteRestDataSource: (sourceId: string) => void
   requestCustomFonts: () => void
   // dataUrl comes from a plain <input type="file"> + FileReader.readAsDataURL
-  // (see SettingsModal.tsx), same client-reads-the-file-itself shape as
+  // (see FontsModal.tsx), same client-reads-the-file-itself shape as
   // uploadBackgroundImage below — necessary here for the same reason: an
   // Android view client (no filesystem-picker main process to hand this to)
   // could eventually get a font-upload UI of its own without touching this
@@ -226,7 +241,7 @@ interface DashboardStore {
   updateWidgets: (widgets: Widget[], options?: { final?: boolean }) => void
   updateDashboardMeta: (
     fields: Partial<
-      Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundColorExpr' | 'backgroundFit' | 'backgroundAnchor' | 'variables' | 'eventSources'>
+      Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundColorExpr' | 'backgroundFit' | 'backgroundAnchor' | 'variables' | 'plugins'>
     >
   ) => void
   uploadBackgroundImage: (dataUrl: string) => void
@@ -406,7 +421,13 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   dcsBiosDocsDirValidation: null,
   dcsBiosPickedFolder: null,
   dcsBiosSendCommandResult: null,
-  enabledDataSources: null,
+  dcsViewportsSettings: null,
+  dcsViewportsStatus: null,
+  dcsViewportsDcsInstallDirValidation: null,
+  dcsViewportsSavedGamesDirValidation: null,
+  dcsViewportsPickedDcsInstallFolder: null,
+  dcsViewportsPickedSavedGamesFolder: null,
+  enabledPlugins: null,
   restDataSources: [],
   restDataSourcesLanAddress: null,
   customFonts: [],
@@ -420,8 +441,8 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     send({ type: 'screen-capture:pick-region', widgetId, displayId })
   },
 
-  pickEventSourceRegion: (sourceId, displayId) => {
-    send({ type: 'event-source:pick-region', sourceId, displayId })
+  pickPluginRegion: (sourceId, displayId) => {
+    send({ type: 'plugin:pick-region', sourceId, displayId })
   },
 
   requestDcsBiosAircraftList: () => {
@@ -458,12 +479,40 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     send({ type: 'dcsbios:pick-docs-folder' })
   },
 
+  requestDcsViewportsSettings: () => {
+    send({ type: 'dcsViewports:get-settings' })
+  },
+
+  requestDcsViewportsStatus: () => {
+    send({ type: 'dcsViewports:get-status' })
+  },
+
+  updateDcsViewportsSettings: (settings) => {
+    send({ type: 'dcsViewports:update-settings', settings })
+  },
+
+  requestDcsViewportsDcsInstallDirValidation: (dir) => {
+    send({ type: 'dcsViewports:validate-dcs-install-dir', dir })
+  },
+
+  requestDcsViewportsSavedGamesDirValidation: (dir) => {
+    send({ type: 'dcsViewports:validate-saved-games-dir', dir })
+  },
+
+  pickDcsViewportsDcsInstallFolder: () => {
+    send({ type: 'dcsViewports:pick-dcs-install-folder' })
+  },
+
+  pickDcsViewportsSavedGamesFolder: () => {
+    send({ type: 'dcsViewports:pick-saved-games-folder' })
+  },
+
   requestAppSettings: () => {
     send({ type: 'app-settings:get' })
   },
 
-  updateEnabledDataSources: (enabledDataSources) => {
-    send({ type: 'app-settings:update', enabledDataSources })
+  updateEnabledPlugins: (enabledPlugins) => {
+    send({ type: 'app-settings:update', enabledPlugins })
   },
 
   requestRestDataSources: () => {
@@ -579,7 +628,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set({ approvedDevices: message.devices })
       } else if (message.type === 'variables:sync') {
         // Same effect as a dashboard:sync as far as `dashboard.variables` is
-        // concerned, but leaves `dashboard.widgets`/`eventSources`/`devices`
+        // concerned, but leaves `dashboard.widgets`/`plugins`/`devices`
         // etc. at their existing references instead of replacing the whole
         // object graph — see ServerToClient's own comment on this message.
         set((s) => ({ dashboard: { ...s.dashboard, variables: message.variables } }))
@@ -638,8 +687,22 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set((s) => ({ dcsBiosCommandCatalogs: { ...s.dcsBiosCommandCatalogs, [message.aircraft]: { error: message.message } } }))
       } else if (message.type === 'dcsbios:send-command-result') {
         set({ dcsBiosSendCommandResult: { ok: message.ok, error: message.error } })
+      } else if (message.type === 'dcsViewports:settings') {
+        const { type: _type, ...settings } = message
+        set({ dcsViewportsSettings: settings })
+      } else if (message.type === 'dcsViewports:status') {
+        const { type: _type, ...status } = message
+        set({ dcsViewportsStatus: status })
+      } else if (message.type === 'dcsViewports:dcs-install-dir-validation') {
+        set({ dcsViewportsDcsInstallDirValidation: { dir: message.dir, valid: message.valid } })
+      } else if (message.type === 'dcsViewports:saved-games-dir-validation') {
+        set({ dcsViewportsSavedGamesDirValidation: { dir: message.dir, valid: message.valid } })
+      } else if (message.type === 'dcsViewports:dcs-install-folder-picked') {
+        set({ dcsViewportsPickedDcsInstallFolder: message.path })
+      } else if (message.type === 'dcsViewports:saved-games-folder-picked') {
+        set({ dcsViewportsPickedSavedGamesFolder: message.path })
       } else if (message.type === 'app-settings:settings') {
-        set({ enabledDataSources: message.enabledDataSources })
+        set({ enabledPlugins: message.enabledPlugins })
       } else if (message.type === 'rest-sources:list') {
         set({ restDataSources: message.sources, restDataSourcesLanAddress: message.lanAddress })
       } else if (message.type === 'fonts:list') {

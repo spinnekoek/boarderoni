@@ -7,7 +7,7 @@ import { extractPlaceholders } from '@shared/restPlaceholders'
 import { SERVER_PORT } from '@shared/constants'
 import type { DeckSummary, RestDataSourceStatus, RestIncomingMapping } from '@shared/types'
 
-// Kept to a single line deliberately, same reasoning as EventsModal's own
+// Kept to a single line deliberately, same reasoning as EventSourcesModal's own
 // EXPR_PLACEHOLDER — CodeMirror's placeholder extension renders an embedded
 // "\n" as a real second visual row.
 const EXPR_PLACEHOLDER = 'return variables.$value;'
@@ -18,7 +18,7 @@ function apiUrl(path: string): string {
 }
 
 // One incoming mapping row — same fx → inline panel → expand-to-modal
-// interaction as EventsModal.tsx's own MappingRow (reusing its exact CSS
+// interaction as EventSourcesModal.tsx's own MappingRow (reusing its exact CSS
 // classes), except `field` is a free-text dot/index path (see
 // shared/flattenJson.ts) rather than a `<select>` over a static/catalog
 // field list, since a REST body has no fixed field set.
@@ -110,10 +110,10 @@ function RestMappingRow({
 
 // App-wide, user-created REST data sources (see main/restDataSources.ts) —
 // rendered as its own standalone Settings section (like "Approved devices"),
-// not through EVENT_SOURCE_TYPES/DATA_SOURCE_SETTINGS_PANELS, since these
+// not through PLUGIN_TYPES/DATA_SOURCE_SETTINGS_PANELS, since these
 // are user-created multiple instances rather than one of a small fixed set
 // of kinds. Every field edit round-trips immediately via updateRestDataSources
-// (whole-list replace), same "no separate Save step" style EventsModal
+// (whole-list replace), same "no separate Save step" style EventSourcesModal
 // already uses for its own list-of-instances editing — except `port`,
 // `field`, and `variableName`, which commit on blur instead of onChange (see
 // their own comments) to avoid restarting a listener or creating a phantom

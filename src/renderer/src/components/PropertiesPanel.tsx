@@ -37,6 +37,7 @@ import type {
   EventfulWidget,
   GaugeTickSet,
   GaugeWidget,
+  DcsViewportWidget,
   HorizontalAlign,
   KeypressAction,
   LabelWidget,
@@ -64,6 +65,7 @@ import type {
 } from '@shared/types'
 import { extractPlaceholders } from '@shared/restPlaceholders'
 import type { DcsBiosCommandCatalogEntry, DcsBiosInputInterface } from '@shared/dcsBiosTypes'
+import { DCS_AIRCRAFT_CATALOG } from '@shared/dcsViewportsCatalog'
 
 const ACTIVE_STATE_EXPR_PLACEHOLDER = "return variables.BATTERY_SW === 0 ? 'Default' : 'Active';"
 const ACTIVE_POSITION_EXPR_PLACEHOLDER = "return variables.GEAR_HANDLE === 1 ? 'Down' : 'Up';"
@@ -85,6 +87,7 @@ const WIDGET_TYPE_LABELS: Record<Widget['type'], string> = {
   'switch-toggle': 'Toggle switch',
   dropdown: 'Dropdown',
   'screen-capture': 'Screen capture',
+  'dcs-viewport': 'DCS viewport',
   label: 'Label',
   line: 'Line'
 }
@@ -1661,10 +1664,10 @@ function groupCommandsByCategory(entries: DcsBiosCommandCatalogEntry[]): { categ
 
 // Editor for a ButtonWidget's SendDcsCommandAction — aircraft picker, then a
 // searchable single-select command browser (same category-grouped list
-// pattern as EventsModal's field browser, just single-select since a button
+// pattern as EventSourcesModal's field browser, just single-select since a button
 // fires exactly one command), then a value box with the same fx/expression
 // toggle every other bindable value in this app uses (see MappingRow in
-// EventsModal.tsx). A "Test" button sends the CURRENTLY configured value
+// EventSourcesModal.tsx). A "Test" button sends the CURRENTLY configured value
 // immediately, using this editor's own live dashboard.variables for
 // argumentExpr — useful for confirming a command actually does what's
 // expected before wiring it to a real button click.
@@ -1901,7 +1904,7 @@ function SendDcsCommandActionEditor({
               setBrowserOpen((o) => !o)
             }}
           >
-            {selected ? `${selected.label} — ${interfaceLabel(selected.interface)}` : 'Pick a command…'}
+            {selected ? `${selected.category} — ${selected.label} — ${interfaceLabel(selected.interface)}` : 'Pick a command…'}
           </button>
         </label>
       )}
@@ -2022,7 +2025,7 @@ const CALL_REST_EXPR_PLACEHOLDER = 'return variables.my_variable;'
 
 // One placeholder's value row for a CallRestAction — same fx → inline panel
 // → expand-to-modal interaction as SendDcsCommandActionEditor's own Value/
-// argumentExpr field above (and MappingRow's expr toggle in EventsModal.tsx).
+// argumentExpr field above (and MappingRow's expr toggle in EventSourcesModal.tsx).
 function CallRestPlaceholderRow({
   entry,
   onPatch,
@@ -2510,24 +2513,24 @@ export function PropertiesPanel(): React.JSX.Element {
   // while the real setting is still loading (opt-out, not opt-in, matching
   // appSettings.ts's own default), rather than flashing the option away and
   // back once the fetch resolves.
-  const enabledDataSources = useDashboardStore((s) => s.enabledDataSources)
+  const enabledPlugins = useDashboardStore((s) => s.enabledPlugins)
   const requestAppSettings = useDashboardStore((s) => s.requestAppSettings)
   useEffect(() => {
-    if (enabledDataSources === null) requestAppSettings()
-  }, [enabledDataSources, requestAppSettings])
-  const dcsBiosActionEnabled = enabledDataSources === null || enabledDataSources.includes('dcsbios')
+    if (enabledPlugins === null) requestAppSettings()
+  }, [enabledPlugins, requestAppSettings])
+  const dcsBiosActionEnabled = enabledPlugins === null || enabledPlugins.includes('dcsbios')
 
   // Populates ActionFields' own restDataSources selector (see its comment)
   // without requiring the Settings modal to have been opened first this
   // session — same "fetch once per PropertiesPanel mount" shape as
-  // enabledDataSources above, just with no null-vs-empty distinction to
+  // enabledPlugins above, just with no null-vs-empty distinction to
   // guard on (restDataSources starts at [], same as approvedDevices).
   const requestRestDataSources = useDashboardStore((s) => s.requestRestDataSources)
   useEffect(() => {
     requestRestDataSources()
   }, [requestRestDataSources])
 
-  // Same "fetch once if null" shape as enabledDataSources above, for
+  // Same "fetch once if null" shape as enabledPlugins above, for
   // ScreenCaptureWidget's monitor dropdown — plus `connected` in the deps:
   // this component mounts (and this effect first fires) the instant a deck
   // id is set, which is synchronous and happens before the WebSocket's own
@@ -6108,6 +6111,289 @@ export function PropertiesPanel(): React.JSX.Element {
         </PropertiesSection>
 
         <button className="properties__delete" onClick={handleDeleteScreenCapture}>
+          Delete widget
+        </button>
+      </aside>
+    )
+  }
+
+  if (widget.type === 'dcs-viewport') {
+    const dv = widget
+    const minSize = snapToGrid ? gridSize : 1
+    const isBorderExpr = dv.borderColorExpr !== undefined
+    const [selectedAircraft, selectedComponent] = dv.componentKey?.split(':') ?? [Object.keys(DCS_AIRCRAFT_CATALOG)[0], undefined]
+    const aircraftProfile = DCS_AIRCRAFT_CATALOG[selectedAircraft]
+
+    function patchDcsViewport(fields: Partial<DcsViewportWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === dv.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    async function handleDeleteDcsViewport(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(dv.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[dv.type]}</p>
+
+        <PropertiesSection title="Component">
+          <label className="properties__field">
+            <span>Aircraft</span>
+            <select
+              value={selectedAircraft}
+              onChange={(e) => {
+                const firstComponent = DCS_AIRCRAFT_CATALOG[e.target.value]?.components[0]?.id
+                patchDcsViewport({ componentKey: firstComponent ? `${e.target.value}:${firstComponent}` : undefined })
+              }}
+            >
+              {Object.entries(DCS_AIRCRAFT_CATALOG).map(([id, aircraft]) => (
+                <option key={id} value={id}>
+                  {aircraft.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="properties__field">
+            <span>Component</span>
+            <select
+              value={selectedComponent ?? ''}
+              onChange={(e) => patchDcsViewport({ componentKey: `${selectedAircraft}:${e.target.value}` })}
+            >
+              <option value="" disabled>
+                Select a component…
+              </option>
+              {(aircraftProfile?.components ?? []).map((component) => (
+                <option key={component.id} value={component.id}>
+                  {component.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </PropertiesSection>
+
+        <PropertiesSection title="Crop">
+          <span className="properties__hint-inline">
+            Percent to trim off each edge before Fit — use this to crop out DCS's own cockpit-instrument bezel if the
+            default automatic inset isn't quite right for this component. Negative values expand back out past that
+            default inset instead.
+          </span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Top</span>
+              <input
+                type="number"
+                min={-50}
+                max={49}
+                step={0.5}
+                value={dv.cropTop ?? 0}
+                onChange={(e) => patchDcsViewport({ cropTop: Math.min(49, Math.max(-50, Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Right</span>
+              <input
+                type="number"
+                min={-50}
+                max={49}
+                step={0.5}
+                value={dv.cropRight ?? 0}
+                onChange={(e) => patchDcsViewport({ cropRight: Math.min(49, Math.max(-50, Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Bottom</span>
+              <input
+                type="number"
+                min={-50}
+                max={49}
+                step={0.5}
+                value={dv.cropBottom ?? 0}
+                onChange={(e) => patchDcsViewport({ cropBottom: Math.min(49, Math.max(-50, Number(e.target.value))) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Left</span>
+              <input
+                type="number"
+                min={-50}
+                max={49}
+                step={0.5}
+                value={dv.cropLeft ?? 0}
+                onChange={(e) => patchDcsViewport({ cropLeft: Math.min(49, Math.max(-50, Number(e.target.value))) })}
+              />
+            </label>
+          </div>
+        </PropertiesSection>
+
+        <PropertiesSection title="Stream">
+          <label className="properties__field">
+            <span>Mode</span>
+            <select value={dv.streamMode ?? 'poll'} onChange={(e) => patchDcsViewport({ streamMode: e.target.value as DcsViewportWidget['streamMode'] })}>
+              <option value="poll">Poll (simple, one request per frame)</option>
+              <option value="mjpeg">Live (persistent stream)</option>
+            </select>
+          </label>
+          <label className="properties__field">
+            <span>FPS</span>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={dv.fps ?? 5}
+              onChange={(e) => patchDcsViewport({ fps: Math.min(60, Math.max(1, Number(e.target.value))) })}
+            />
+          </label>
+          <label className="properties__field">
+            <span>Quality</span>
+            <input
+              type="number"
+              min={10}
+              max={100}
+              value={dv.quality ?? 70}
+              onChange={(e) => patchDcsViewport({ quality: Math.min(100, Math.max(10, Number(e.target.value))) })}
+            />
+          </label>
+          <label className="properties__checkbox">
+            <input
+              type="checkbox"
+              checked={dv.tapToStream ?? true}
+              onChange={(e) => patchDcsViewport({ tapToStream: e.target.checked })}
+            />
+            Tap to start streaming
+          </label>
+          <p className="properties__hint">
+            Loads showing a tap prompt instead of streaming immediately — lets a dashboard with several of these stay
+            idle until you actually want a given one live.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Fit">
+          <label className="properties__field">
+            <span>Fit</span>
+            <select value={dv.fit ?? 'cover'} onChange={(e) => patchDcsViewport({ fit: e.target.value as BackgroundFit })}>
+              {BACKGROUND_FITS.filter((f) => f.value !== 'tile').map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </PropertiesSection>
+
+        <PropertiesSection title="Adjustments">
+          <label className="properties__field">
+            <span>Brightness</span>
+            <input
+              type="number"
+              step={0.05}
+              min={0}
+              value={dv.brightness ?? 1}
+              onChange={(e) => patchDcsViewport({ brightness: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <label className="properties__field">
+            <span>Contrast</span>
+            <input
+              type="number"
+              step={0.05}
+              min={0}
+              value={dv.contrast ?? 1}
+              onChange={(e) => patchDcsViewport({ contrast: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <label className="properties__field">
+            <span>Saturation</span>
+            <input
+              type="number"
+              step={0.05}
+              min={0}
+              value={dv.saturation ?? 1}
+              onChange={(e) => patchDcsViewport({ saturation: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <label className="properties__checkbox">
+            <input type="checkbox" checked={dv.sharpen ?? false} onChange={(e) => patchDcsViewport({ sharpen: e.target.checked })} />
+            Sharpen
+          </label>
+          <p className="properties__hint">Costs real CPU on the desktop per captured frame — off by default.</p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Border">
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={dv.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchDcsViewport({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={dv.borderColorExpr ?? ''}
+              onExprChange={(code) => patchDcsViewport({ borderColorExpr: code })}
+              onEnterExpr={() => patchDcsViewport({ borderColorExpr: dv.borderColorExpr ?? '' })}
+              onClearExpr={() => patchDcsViewport({ borderColorExpr: undefined })}
+              opacity={dv.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchDcsViewport({ borderOpacity: v })}
+            />
+          </div>
+          <label className="properties__field">
+            <span>Border width</span>
+            <input
+              type="number"
+              min={0}
+              value={dv.borderWidth ?? 2}
+              onChange={(e) => patchDcsViewport({ borderWidth: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+        </PropertiesSection>
+
+        <PropertiesSection title="Advanced">
+          <span className="properties__section-label">Position & Size</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={dv.x} onChange={(e) => patchDcsViewport({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={dv.y} onChange={(e) => patchDcsViewport({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>W</span>
+              <input type="number" min={minSize} value={dv.w} onChange={(e) => patchDcsViewport({ w: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+            <label className="properties__field">
+              <span>H</span>
+              <input type="number" min={minSize} value={dv.h} onChange={(e) => patchDcsViewport({ h: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={dv.zIndex ?? 0} onChange={(e) => patchDcsViewport({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={dv.visible} visibleExpr={dv.visibleExpr} onChange={patchDcsViewport} />
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteDcsViewport}>
           Delete widget
         </button>
       </aside>

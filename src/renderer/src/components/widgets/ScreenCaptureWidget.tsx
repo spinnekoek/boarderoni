@@ -3,6 +3,7 @@ import { withOpacity } from '@shared/color'
 import { resolveBorderColor, type VariableMap } from '@shared/expr'
 import type { ScreenCaptureWidget } from '@shared/types'
 import { screenCaptureFrameUrl, screenCaptureStreamUrl } from '../../screenCapture'
+import { useDashboardStore } from '../../store'
 
 // CSS object-fit's vocabulary doesn't exactly match BackgroundFit's — this
 // widget reuses that type/UI for consistency with the background image
@@ -37,7 +38,11 @@ export function ScreenCaptureWidgetContent({
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
   const streamMode = widget.streamMode ?? 'poll'
   const fps = widget.fps ?? 5
-  const configured = deckId !== null && widget.region !== undefined
+  // null (not yet arrived — see main/index.ts's sendInitialState) reads as
+  // enabled, so this doesn't flash a disabled state before that first
+  // message lands.
+  const pluginEnabled = useDashboardStore((s) => s.enabledPlugins === null || s.enabledPlugins.includes('screenCapture'))
+  const configured = deckId !== null && widget.region !== undefined && pluginEnabled
 
   // Poll mode: re-fetch a fresh frame on a client-side timer, cache-busted
   // via the URL's own query param. MJPEG mode needs no such loop — the
@@ -61,6 +66,14 @@ export function ScreenCaptureWidgetContent({
     borderWidth: 2,
     borderColor,
     ...(widget.zIndex !== undefined && { zIndex: widget.zIndex })
+  }
+
+  if (!pluginEnabled) {
+    return (
+      <div className="deck-screen-capture deck-screen-capture--empty" style={outerStyle}>
+        <span className="deck-screen-capture__hint">Screen Capture plugin is disabled — enable it in Settings</span>
+      </div>
+    )
   }
 
   if (!configured) {

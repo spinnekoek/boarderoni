@@ -29,42 +29,44 @@ interface EditorSettings {
   // dashed bounding box currently previews. Falls back to the first preset
   // if it names a device that's since disconnected.
   selectedDeviceId: string
-  // Not persisted (see the `partialize` option below) — purely runtime UI
-  // state so any component (not just Toolbar, which renders the modal) can
-  // trigger it. `settingsFocusKind` lets a caller (e.g. EventsModal's
-  // DCS-BIOS status banner) deep-link straight to one kind's settings panel
-  // instead of just telling the user where to look.
-  settingsModalOpen: boolean
-  settingsFocusKind: string | null
   // Shows editor-only layout aids (currently: each position label's own
   // alignment box, red-outlined — see .deck-toggle-switch__label / .debug-mode
   // in styles.css) that are otherwise invisible, to make align/anchor
   // settings' actual effect easier to reason about. Never affects the
   // deployed view client, only the editor canvas.
   debugMode: boolean
-  // Canvas pan/zoom — not persisted (see partialize below), same as
-  // settingsModalOpen: reopening the app centered on wherever the camera
-  // last was would be a surprise, not a convenience. Lives here rather than
-  // as Canvas's own local state so other components (e.g. Palette, to spawn
-  // a new widget under the currently-visible corner rather than the board's
-  // origin) can read it too.
+  // Canvas pan/zoom — not persisted (see partialize below): reopening the
+  // app centered on wherever the camera last was would be a surprise, not a
+  // convenience. Lives here rather than as Canvas's own local state so
+  // other components (e.g. Palette, to spawn a new widget under the
+  // currently-visible corner rather than the board's origin) can read it
+  // too.
   camera: Camera
-  // The Events modal's own last-active source tab (an EventSource.id) —
+  // The Event Sources modal's own last-active source tab (a Plugin.id) —
   // lives here, not the modal's local state, since the modal fully unmounts
-  // on close (see Toolbar.tsx's `{eventsOpen && <EventsModal .../>}`), which
-  // would otherwise discard it every time. A stale id (source deleted, or
-  // this dashboard has none) is already handled by EventsModal's own
-  // fallback-to-first-source effect, so persisting it across dashboards/
-  // restarts is harmless even though it's only really meaningful within one.
-  eventsModalActiveSourceId: string | null
+  // on close (see Toolbar.tsx's `{eventSourcesOpen && <EventSourcesModal .../>}`),
+  // which would otherwise discard it every time. A stale id (source
+  // deleted, or this dashboard has none) is already handled by
+  // EventSourcesModal's own fallback-to-first-source effect, so persisting
+  // it across dashboards/restarts is harmless even though it's only really
+  // meaningful within one.
+  eventSourcesModalActiveSourceId: string | null
+  // Not persisted (see `partialize` below) — purely runtime UI state so any
+  // component (not just Toolbar, which renders the modal) can trigger it.
+  // EventSourcesModal's own "this plugin is disabled"/"configure it" links
+  // use `openPluginsModal(kind)` to jump straight to and expand that kind's
+  // row in the (separate) Plugins modal, instead of just telling the user
+  // where to look.
+  pluginsModalOpen: boolean
+  pluginsModalFocusKind: string | null
   setSnapToGrid: (value: boolean) => void
   setPropertiesWidth: (value: number) => void
   setSelectedDeviceId: (id: string) => void
-  openSettings: (focusKind?: string) => void
-  closeSettings: () => void
   setDebugMode: (value: boolean) => void
   setCamera: (updater: Camera | ((camera: Camera) => Camera)) => void
-  setEventsModalActiveSourceId: (id: string | null) => void
+  setEventSourcesModalActiveSourceId: (id: string | null) => void
+  openPluginsModal: (focusKind?: string) => void
+  closePluginsModal: () => void
 }
 
 // Editor-only preferences (not part of the synced dashboard data), persisted
@@ -76,30 +78,30 @@ export const useEditorSettings = create<EditorSettings>()(
       snapToGrid: true,
       propertiesWidth: 260,
       selectedDeviceId: DEVICE_PRESETS[0].id,
-      settingsModalOpen: false,
-      settingsFocusKind: null,
       debugMode: false,
       camera: INITIAL_CAMERA,
-      eventsModalActiveSourceId: null,
+      eventSourcesModalActiveSourceId: null,
+      pluginsModalOpen: false,
+      pluginsModalFocusKind: null,
       setSnapToGrid: (value) => set({ snapToGrid: value }),
       setPropertiesWidth: (value) =>
         set({ propertiesWidth: Math.min(MAX_PROPERTIES_WIDTH, Math.max(MIN_PROPERTIES_WIDTH, Math.round(value))) }),
       setSelectedDeviceId: (id) => set({ selectedDeviceId: id }),
-      openSettings: (focusKind) => set({ settingsModalOpen: true, settingsFocusKind: focusKind ?? null }),
-      closeSettings: () => set({ settingsModalOpen: false, settingsFocusKind: null }),
       setDebugMode: (value) => set({ debugMode: value }),
       setCamera: (updater) => set((s) => ({ camera: typeof updater === 'function' ? updater(s.camera) : updater })),
-      setEventsModalActiveSourceId: (id) => set({ eventsModalActiveSourceId: id })
+      setEventSourcesModalActiveSourceId: (id) => set({ eventSourcesModalActiveSourceId: id }),
+      openPluginsModal: (focusKind) => set({ pluginsModalOpen: true, pluginsModalFocusKind: focusKind ?? null }),
+      closePluginsModal: () => set({ pluginsModalOpen: false, pluginsModalFocusKind: null })
     }),
     {
       name: 'boarderoni-editor-settings',
-      // Transient UI state — reopening the app with the settings modal
+      // Transient UI state — reopening the app with the Plugins modal
       // already open (or focused on whatever kind it last was), or centered
       // on wherever the canvas was last panned/zoomed to, would be a
       // surprise, not a convenience, so these are excluded from the
       // persisted snapshot.
       partialize: (state) => {
-        const { settingsModalOpen: _open, settingsFocusKind: _focus, camera: _camera, ...rest } = state
+        const { camera: _camera, pluginsModalOpen: _open, pluginsModalFocusKind: _focus, ...rest } = state
         return rest
       }
     }

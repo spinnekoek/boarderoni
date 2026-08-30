@@ -152,8 +152,7 @@ export const DEFAULT_FONT_ID = "inter";
 // (see CustomFont.lineHeight/FontOption.lineHeight above) always has a real
 // number to fall back to/reset to, the same default every built-in font
 // already renders fine with. Used by labels.tsx's own render path and by
-// SettingsModal's Custom fonts line-height input (its placeholder/blank
-// value).
+// FontsModal's line-height input (its placeholder/blank value).
 export const DEFAULT_LABEL_LINE_HEIGHT = 0.9;
 
 // A custom font's id is self-describing (see customFontCssFamily above) —

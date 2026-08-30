@@ -531,7 +531,7 @@ export function addMjpegViewer(widgetId: string, res: ServerResponse, getConfig:
     const viewers = new Set<ServerResponse>()
     const newState: StreamState = { timeout: setTimeout(tick, 0), viewers }
     // Same failure<->success edge-triggered logging as the OCR event
-    // source's own tick (see eventSourceProducers.ts) — a missing display
+    // source's own tick (see main/plugins/index.ts) — a missing display
     // fails identically on every frame at up to 60fps otherwise.
     let lastFrameFailed = false
 

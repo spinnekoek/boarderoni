@@ -1,4 +1,4 @@
-// Shared between EventsModal.tsx (adding new mappings) and VariablesModal.tsx
+// Shared between EventSourcesModal.tsx (adding new mappings) and VariablesModal.tsx
 // (adding a manual variable) — anywhere a new variable name gets generated
 // needs to avoid silently colliding with one that already exists anywhere
 // in the dashboard (another mapping, another source, or a manual variable),

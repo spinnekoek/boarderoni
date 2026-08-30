@@ -97,7 +97,7 @@ describe('WorkerHost', () => {
   })
 
   it('does not misfire a respawn when release() is immediately followed by acquire(), before the old worker actually exits', async () => {
-    // Reproduces the exact pattern syncEventSources uses when a producer's
+    // Reproduces the exact pattern syncPlugins uses when a producer's
     // signature changes: stop() (release) then immediately start()
     // (acquire) again, synchronously — well before the old worker's async
     // terminate() has actually completed. A shared "was this deliberate"

@@ -6,6 +6,7 @@ import type {
   DcsBiosStatus,
   DcsBiosWorkerStats
 } from './dcsBiosTypes'
+import type { DcsViewportsSettings, DcsViewportsStatus } from './dcsViewportsTypes'
 import type { CustomFont } from './fonts'
 
 export interface KeypressAction {
@@ -37,7 +38,7 @@ export interface UpdateStateAction {
 // Settings (see appSettings.ts) — or if a widget already has one configured,
 // so disabling the kind later doesn't silently break existing buttons.
 // `aircraft` scopes which aircraft's command catalog this was picked from
-// (independent of any EventSource — a button isn't tied to one), so
+// (independent of any Plugin — a button isn't tied to one), so
 // re-opening the editor can re-fetch/highlight the same command.
 // `interface` is carried alongside `identifier` since the same identifier
 // can expose more than one interface (e.g. a switch commonly has both
@@ -46,7 +47,7 @@ export interface UpdateStateAction {
 // `argument` is the static value sent unless `argumentExpr` is set, in which
 // case that's evaluated (see shared/expr.ts's tryEvaluateExpression, same
 // mechanism as UpdateStateAction.code) with `variables` in scope and the
-// result sent instead — same fx-toggle pattern as an EventSourceMapping's
+// result sent instead — same fx-toggle pattern as an PluginMapping's
 // own `expr`.
 export interface SendDcsCommandAction {
   kind: 'send-dcs-command'
@@ -618,10 +619,10 @@ export interface GaugeWidget extends WidgetVisibility {
 // A drag-to-set-a-value control — a slider (linear drag) or knob (rotary
 // drag). Reuses the exact same WidgetAction kinds/editor as ButtonWidget
 // (keypress/update-state/send-dcs-command are all equally available —
-// nothing here is specific to any one data source), just with the live drag
+// nothing here is specific to any one plugin), just with the live drag
 // position additionally exposed as `variables.$value` while dragging (see
 // evaluateMappingExpression in shared/expr.ts, the same convention an
-// EventSourceMapping's own `expr` already uses) for whichever expression
+// PluginMapping's own `expr` already uses) for whichever expression
 // field the chosen action kind reads.
 export interface AdjusterWidget extends DialShapeStyle, WidgetVisibility {
   id: string
@@ -1477,6 +1478,58 @@ export interface ScreenCaptureWidget extends WidgetVisibility {
   zIndex?: number
 }
 
+// A DCS Viewports plugin widget — reuses ScreenCaptureWidget's exact
+// streaming pipeline (same /screen-capture/frame|stream HTTP routes, keyed
+// by deck+widget id, see main/index.ts's resolveStreamableWidget) but with
+// the region LOCKED: instead of a user-drawn `region`/`displayId`, the user
+// picks a named component (e.g. "hornet:LEFT_MFCD") and the server resolves
+// its rect from the live virtual display's bounds + the shared tiling
+// function in dcsViewportsCatalog.ts — so it can never point at an
+// arbitrary region the way ScreenCaptureWidget can. `componentKey` is
+// `${aircraftId}:${componentId}`, unset until first chosen in Properties.
+export interface DcsViewportWidget extends WidgetVisibility {
+  id: string
+  type: 'dcs-viewport'
+  x: number
+  y: number
+  w: number
+  h: number
+  componentKey?: string
+  // Percent of the resolved component region to crop off each edge BEFORE
+  // fit/scaling — lets a widget trim DCS's own cockpit-instrument bezel (see
+  // dcsViewports/index.ts's resolveComponentRegion, which already applies a
+  // small default inset; these stack on top of that per-widget, since the
+  // exact bezel size can differ enough between components that one fixed
+  // global percentage doesn't fit all of them precisely). Negative expands
+  // back out past that default inset instead. Unset = 0.
+  cropTop?: number
+  cropRight?: number
+  cropBottom?: number
+  cropLeft?: number
+  streamMode?: 'poll' | 'mjpeg'
+  // When not explicitly false, the widget loads showing a "tap to start
+  // streaming" prompt instead of immediately polling/opening an mjpeg
+  // connection — lets a dashboard with many DCS Viewport widgets stay idle
+  // until the user actually wants a given one live, rather than every one of
+  // them pulling frames the moment the dashboard loads. Defaults ON (tap
+  // required); set false for the old always-streams-immediately behavior.
+  // Purely a renderer-side gate — resets on remount (dashboard
+  // reload/switch), not persisted per session.
+  tapToStream?: boolean
+  fps?: number
+  quality?: number
+  fit?: BackgroundFit
+  brightness?: number
+  contrast?: number
+  saturation?: number
+  sharpen?: boolean
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+  borderWidth?: number
+  zIndex?: number
+}
+
 // The simplest widget there is — just one WidgetLabel, full-bleed over its
 // own x/y/w/h box. Deliberately a single `label`, not the flat `labels[]`
 // every other widget type carries alongside its own shape (a switch's
@@ -1538,6 +1591,7 @@ export type Widget =
   | ToggleSwitchWidget
   | DropdownWidget
   | ScreenCaptureWidget
+  | DcsViewportWidget
   | LabelWidget
   | LineWidget
 
@@ -1554,6 +1608,7 @@ export type BoxWidget =
   | ToggleSwitchWidget
   | DropdownWidget
   | ScreenCaptureWidget
+  | DcsViewportWidget
   | LabelWidget
   | LineWidget
 
@@ -1648,22 +1703,21 @@ export interface DeckExportFile {
   backgroundImage?: { mime: string; dataBase64: string }
 }
 
-// One field of an event source's output routed into a Variable. `field` is
-// a key from that source kind's metadata (see EVENT_SOURCE_TYPES in
-// shared/eventSources.ts) — the raw value for it comes from the matching
-// main-process producer (see main/eventSourceProducers.ts). `expr`, if set,
-// is evaluated (see evaluateMappingExpression in shared/expr.ts) with the
-// raw value exposed as `variables.$value`, alongside every existing
-// Variable — same expression mechanism as everywhere else in the app, just
-// with one extra reserved key in scope.
-export interface EventSourceMapping {
+// One field of a plugin's output routed into a Variable. `field` is a key
+// from that plugin kind's metadata (see PLUGIN_TYPES in shared/plugins) —
+// the raw value for it comes from the matching main-process producer (see
+// main/plugins/). `expr`, if set, is evaluated (see evaluateMappingExpression
+// in shared/expr.ts) with the raw value exposed as `variables.$value`,
+// alongside every existing Variable — same expression mechanism as
+// everywhere else in the app, just with one extra reserved key in scope.
+export interface PluginMapping {
   id: string
   field: string
   variableName: string
   expr?: string
 }
 
-// A configured, persistent instance of an event source (e.g. "the clock"),
+// A configured, persistent instance of a plugin (e.g. "the clock"),
 // continuously producing named fields and feeding a subset of them into
 // Variables via `mappings`. `kind` is deliberately an open string rather
 // than a union — every kind shares this exact shape (mappings + opaque
@@ -1671,23 +1725,25 @@ export interface EventSourceMapping {
 // unlike WidgetAction where each kind's payload actually differs. `config`
 // is unused by the only kind implemented so far ('datetime') — reserved for
 // a future kind's own settings, e.g. a webhook's path or a poller's
-// interval.
-export interface EventSource {
+// interval. Disabling a kind entirely (see PLUGIN_TYPES/enabledPlugins) not
+// only stops its producer but, for a kind that declares `widgetTypes` (see
+// PluginTypeMeta), also renders every widget of those types inert.
+export interface Plugin {
   id: string
   kind: string
   name: string
-  mappings: EventSourceMapping[]
+  mappings: PluginMapping[]
   config?: Record<string, unknown>
 }
 
-// Reuses the exact {id, field, variableName, expr} shape EventSourceMapping
+// Reuses the exact {id, field, variableName, expr} shape PluginMapping
 // already has — `field` here is a flattened dot/index path into the incoming
 // JSON body (e.g. "data.temperature", "items.0.value"; see
-// shared/flattenJson.ts), not a catalog key from EVENT_SOURCE_TYPES.
-export type RestIncomingMapping = EventSourceMapping
+// shared/flattenJson.ts), not a catalog key from PLUGIN_TYPES.
+export type RestIncomingMapping = PluginMapping
 
-// A configured, persistent, app-wide REST integration — unlike EventSource,
-// this is NOT per-Dashboard and NOT one of EVENT_SOURCE_TYPES' fixed kinds:
+// A configured, persistent, app-wide REST integration — unlike Plugin,
+// this is NOT per-Dashboard and NOT one of PLUGIN_TYPES' fixed kinds:
 // the user creates any number of these from the Settings page (see
 // main/restDataSources.ts), each independently named, ported, and tokened.
 export interface RestDataSource {
@@ -1728,7 +1784,7 @@ export type RestDataSourceStatus = RestDataSource & { listening: boolean; listen
 // only: a SubDeck has no subDecks of its own, so SubDeckTarget/
 // OpenOverlayAction's subDeckId can never point at anything but 'main-deck'
 // or one of Dashboard.subDecks's own entries. Shares the parent deck's
-// background/variables/eventSources — only the widget list differs per
+// background/variables/plugins — only the widget list differs per
 // view. Widget ids stay globally unique across the whole Dashboard (every
 // widget everywhere is minted from the same nextId()/randomUUID() pool),
 // so a widget can be found by id without knowing which view owns it — see
@@ -1789,12 +1845,12 @@ export interface Dashboard {
   // Same optional-for-old-dashboards treatment as `variables` above —
   // normalized to [] once at load time (see loadDeckDashboard in
   // main/index.ts).
-  eventSources?: EventSource[]
+  plugins?: Plugin[]
   widgets: Widget[]
-  // Same optional-for-old-dashboards treatment as `variables`/`eventSources`
+  // Same optional-for-old-dashboards treatment as `variables`/`plugins`
   // above — normalized to [] once at load time (see loadDeckDashboard in
   // main/index.ts). See SubDeck's own comment for the one-level-deep and
-  // shared-background/variables/eventSources rules.
+  // shared-background/variables/plugins rules.
   subDecks?: SubDeck[]
   // The main view's own grid size — see SubDeck.gridSize's own comment for
   // why this is per-screen rather than shared across every screen in the
@@ -1871,7 +1927,7 @@ export type ClientToServer =
   // drag's own final 'move' tick — see runUpdateState's immediate/debounced
   // save split, which this drives: an in-flight tick's variable update
   // still broadcasts live but its disk save is debounced rather than
-  // synchronous, the same way an event-source tick's already is, so a fast
+  // synchronous, the same way an event source tick's already is, so a fast
   // drag isn't doing a blocking disk write on every single frame. Omitted
   // (rather than defaulted to false) is treated the same as true.
   | { type: 'action:trigger'; widgetId: string; event: WidgetEventKind; value?: number; final?: boolean }
@@ -1895,8 +1951,15 @@ export type ClientToServer =
   | { type: 'dcsbios:pick-docs-folder' }
   | { type: 'dcsbios:command-catalog'; aircraft: string }
   | { type: 'dcsbios:send-command'; identifier: string; argument: string }
+  | { type: 'dcsViewports:get-settings' }
+  | { type: 'dcsViewports:update-settings'; settings: Partial<DcsViewportsSettings> }
+  | { type: 'dcsViewports:validate-dcs-install-dir'; dir: string }
+  | { type: 'dcsViewports:validate-saved-games-dir'; dir: string }
+  | { type: 'dcsViewports:pick-dcs-install-folder' }
+  | { type: 'dcsViewports:pick-saved-games-folder' }
+  | { type: 'dcsViewports:get-status' }
   | { type: 'app-settings:get' }
-  | { type: 'app-settings:update'; enabledDataSources: string[] }
+  | { type: 'app-settings:update'; enabledPlugins: string[] }
   // Settings modal only, edit-role only (enforced server-side) — same
   // admin-action reasoning as device:list-approved/revoke above.
   | { type: 'rest-sources:get' }
@@ -1929,10 +1992,10 @@ export type ClientToServer =
   // than a dedicated reply.
   | { type: 'screen-capture:pick-region'; widgetId: string; displayId: number }
   // Same picker, same no-dedicated-reply shape as screen-capture:pick-region
-  // above, but writes into the matching entry of
-  // room.dashboard.eventSources (by id) instead of a widget — an
-  // 'ocrRegion' source's config.region/config.displayId, specifically.
-  | { type: 'event-source:pick-region'; sourceId: string; displayId: number }
+  // above, but writes into the matching entry of room.dashboard.plugins (by
+  // id) instead of a widget — the 'screenCapture' plugin's own
+  // config.region/config.displayId, specifically.
+  | { type: 'plugin:pick-region'; sourceId: string; displayId: number }
   // Sent by the desktop editor once the user confirms a dashboard:external-
   // change notification (see ServerToClient's own comment on that) — re-reads
   // the deck's dashboard.json from disk, replacing the in-memory copy, and
@@ -1945,10 +2008,10 @@ export type ServerToClient =
   | { type: 'dashboard:sync'; dashboard: Dashboard }
   // Lighter-weight alternative to dashboard:sync for a variables-only change
   // (an update-state action — including every in-flight AdjusterWidget drag
-  // tick — or an event-source tick, see applyVariableUpdates in
+  // tick — or an event source tick, see applyVariableUpdates in
   // main/index.ts). Carries the full variables array (not just the changed
   // keys) so a brand-new variable's server-assigned id round-trips correctly
-  // without the client having to invent one — but skips widgets/eventSources/
+  // without the client having to invent one — but skips widgets/plugins/
   // devices/background image, which don't change here and would otherwise
   // get re-serialized and re-diffed on every single tick for no reason.
   | { type: 'variables:sync'; variables: Variable[] }
@@ -1989,7 +2052,13 @@ export type ServerToClient =
   | { type: 'dcsbios:command-catalog'; aircraft: string; commands: DcsBiosCommandCatalogEntry[] }
   | { type: 'dcsbios:command-catalog-error'; aircraft: string; message: string }
   | { type: 'dcsbios:send-command-result'; ok: boolean; error?: string }
-  | { type: 'app-settings:settings'; enabledDataSources: string[] }
+  | ({ type: 'dcsViewports:settings' } & DcsViewportsSettings)
+  | ({ type: 'dcsViewports:status' } & DcsViewportsStatus)
+  | { type: 'dcsViewports:dcs-install-dir-validation'; dir: string; valid: boolean }
+  | { type: 'dcsViewports:saved-games-dir-validation'; dir: string; valid: boolean }
+  | { type: 'dcsViewports:dcs-install-folder-picked'; path: string | null }
+  | { type: 'dcsViewports:saved-games-folder-picked'; path: string | null }
+  | { type: 'app-settings:settings'; enabledPlugins: string[] }
   // Reply to rest-sources:get/create/update/regenerate-token/delete — the
   // full current list either way, same "don't make the client locally patch
   // its own copy" reasoning as device:approved-list. `listening`/
@@ -2035,7 +2104,7 @@ export const DEFAULT_DASHBOARD: Dashboard = {
   backgroundFit: 'cover',
   backgroundAnchor: 'center',
   variables: [],
-  eventSources: [],
+  plugins: [],
   widgets: [],
   subDecks: []
 }

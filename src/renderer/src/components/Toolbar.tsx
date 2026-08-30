@@ -5,15 +5,25 @@ import { useDashboardStore, useGridSize, useCanvasSize } from '../store'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
 import { VariablesModal } from './VariablesModal'
-import { EventsModal } from './EventsModal'
-import { SettingsModal } from './SettingsModal'
+import { PluginsModal } from './PluginsModal'
+import { EventSourcesModal } from './EventSourcesModal'
+import { FontsModal } from './FontsModal'
+import { DevicesModal } from './DevicesModal'
 import { MobileAppModal } from './MobileAppModal'
 import { ScreenSwitcher } from './ScreenSwitcher'
 
 export function Toolbar(): React.JSX.Element {
   const [variablesOpen, setVariablesOpen] = useState(false)
-  const [eventsOpen, setEventsOpen] = useState(false)
+  const [eventSourcesOpen, setEventSourcesOpen] = useState(false)
+  const [fontsOpen, setFontsOpen] = useState(false)
+  const [devicesOpen, setDevicesOpen] = useState(false)
   const [mobileAppOpen, setMobileAppOpen] = useState(false)
+  // Store-backed, not local state — see settingsStore.ts's openPluginsModal
+  // comment for why: EventSourcesModal's own "this plugin is disabled" hint
+  // needs to open (and focus) this modal from outside Toolbar's own tree.
+  const pluginsOpen = useEditorSettings((s) => s.pluginsModalOpen)
+  const openPluginsModal = useEditorSettings((s) => s.openPluginsModal)
+  const closePluginsModal = useEditorSettings((s) => s.closePluginsModal)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useGridSize()
   const setSnapToGrid = useEditorSettings((s) => s.setSnapToGrid)
@@ -22,12 +32,6 @@ export function Toolbar(): React.JSX.Element {
   const setCanvasSize = useDashboardStore((s) => s.setCanvasSize)
   const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
   const setSelectedDeviceId = useEditorSettings((s) => s.setSelectedDeviceId)
-  // Reads/writes the store, not local useState, so components other than
-  // this toolbar (e.g. EventsModal's DCS-BIOS status banner) can also open
-  // this modal, optionally focused on one data source's panel.
-  const settingsOpen = useEditorSettings((s) => s.settingsModalOpen)
-  const openSettings = useEditorSettings((s) => s.openSettings)
-  const closeSettings = useEditorSettings((s) => s.closeSettings)
   const debugMode = useEditorSettings((s) => s.debugMode)
   const setDebugMode = useEditorSettings((s) => s.setDebugMode)
   const consoleOpen = useDebugConsoleStore((s) => s.open)
@@ -120,18 +124,26 @@ export function Toolbar(): React.JSX.Element {
       <button type="button" className="toolbar__button" onClick={() => setMobileAppOpen(true)}>
         Mobile app
       </button>
-      <button type="button" className="toolbar__button" onClick={() => openSettings()}>
-        Settings
+      <button type="button" className="toolbar__button" onClick={() => openPluginsModal()}>
+        Plugins
       </button>
-      <button type="button" className="toolbar__button" onClick={() => setEventsOpen(true)}>
-        Events
+      <button type="button" className="toolbar__button" onClick={() => setEventSourcesOpen(true)}>
+        Event Sources
+      </button>
+      <button type="button" className="toolbar__button" onClick={() => setFontsOpen(true)}>
+        Fonts
+      </button>
+      <button type="button" className="toolbar__button" onClick={() => setDevicesOpen(true)}>
+        Devices
       </button>
       <button type="button" className="toolbar__button" onClick={() => setVariablesOpen(true)}>
         Variables
       </button>
       {mobileAppOpen && <MobileAppModal onClose={() => setMobileAppOpen(false)} />}
-      {settingsOpen && <SettingsModal onClose={closeSettings} />}
-      {eventsOpen && <EventsModal onClose={() => setEventsOpen(false)} />}
+      {pluginsOpen && <PluginsModal onClose={closePluginsModal} />}
+      {eventSourcesOpen && <EventSourcesModal onClose={() => setEventSourcesOpen(false)} />}
+      {fontsOpen && <FontsModal onClose={() => setFontsOpen(false)} />}
+      {devicesOpen && <DevicesModal onClose={() => setDevicesOpen(false)} />}
       {variablesOpen && <VariablesModal onClose={() => setVariablesOpen(false)} />}
     </div>
   )

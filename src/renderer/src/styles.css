@@ -1040,6 +1040,11 @@ button.deck-button:focus-visible {
 	box-sizing: border-box;
 	overflow: hidden;
 	background: #000;
+	/* Without this, background-clip defaults to border-box and the black
+	   backdrop paints underneath the border too — so a transparent border
+	   shows this black fill instead of whatever's actually behind the
+	   widget. */
+	background-clip: padding-box;
 }
 
 .deck-screen-capture--empty {
@@ -1047,6 +1052,10 @@ button.deck-button:focus-visible {
 	align-items: center;
 	justify-content: center;
 	text-align: center;
+}
+
+.deck-screen-capture--tap {
+	cursor: pointer;
 }
 
 .deck-screen-capture__hint {
@@ -3491,25 +3500,11 @@ button.deck-morph-cell:focus-visible {
 	gap: 8px;
 }
 
+/* Shared by FontsModal/DevicesModal (their device/font list rows below) —
+   wider than the base .variables-modal so a font's line-height field or a
+   device's revoke button doesn't cramp against a long name. */
 .settings-modal {
-	/* Wide enough for two comfortable columns (see .settings-modal__columns
-	   below) — REST data sources/Custom fonts and Approved devices used to
-	   stack single-file all the way down this modal's old 520px width, which
-	   made for a lot of scrolling once Custom fonts was added on top of
-	   everything already there. */
-	width: 880px;
-}
-
-/* REST data sources + Custom fonts on the left, Approved devices on the
-   right — the "Enabled data sources" list above and the Close button below
-   both stay full-width, outside this grid. align-items:start so a taller
-   left column (REST sources can have several expanded entries) doesn't
-   stretch the shorter right column's own box to match. */
-.settings-modal__columns {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 0 32px;
-	align-items: start;
+	width: 640px;
 }
 
 .settings-modal__sources {

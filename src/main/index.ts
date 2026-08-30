@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import {
   readFile,
@@ -32,14 +32,14 @@ import {
   type Dashboard,
   type DeckExportFile,
   type DeckSummary,
+  type DcsViewportWidget,
   type DeviceInfo,
   type DialSwitchWidget,
   type DropdownWidget,
   type ToggleSwitchWidget,
-  type EventSource,
+  type Plugin,
   type KeypressAction,
   type RockerSwitchWidget,
-  type ScreenCaptureWidget,
   type ScreenRegion,
   type SendDcsCommandAction,
   type SequenceStep,
@@ -56,7 +56,7 @@ import { FONT_MIME_BY_EXTENSION, fontExtension } from '../shared/fonts'
 import { findSubDeck, findWidgetAnywhere, allDeckWidgets } from '../shared/subDecks'
 import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression } from '../shared/expr'
 import { extractPlaceholders } from '../shared/restPlaceholders'
-import { EVENT_SOURCE_PRODUCERS } from './eventSourceProducers'
+import { PLUGIN_PRODUCERS } from './plugins'
 import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuality, addMjpegViewer } from './screenCapture'
 import { getAppSettings, updateAppSettings } from './appSettings'
 import { getCustomFonts, addCustomFont, deleteCustomFont, updateCustomFontLineHeight, customFontFile } from './customFonts'
@@ -77,6 +77,16 @@ import {
   getWorkerStats as getDcsBiosWorkerStats,
   onStatsChange as onDcsBiosStatsChange
 } from './dcsBios/connectionManager'
+import {
+  getSettings as getDcsViewportsSettings,
+  updateSettings as updateDcsViewportsSettings,
+  validateDcsInstallDir as validateDcsViewportsInstallDir,
+  validateSavedGamesDir as validateDcsViewportsSavedGamesDir,
+  getStatus as getDcsViewportsStatus,
+  refreshStatus as refreshDcsViewportsStatus,
+  onStatusChange as onDcsViewportsStatusChange,
+  resolveComponentRegion as resolveDcsViewportComponentRegion
+} from './dcsViewports'
 
 // Pre-multi-label shape: a single flat `label` string plus its own styling
 // fields (including a widget-level `padding`), before they moved into
@@ -187,7 +197,7 @@ function migrateDialSwitchLabelAnchor(widget: DialSwitchWidget & LegacyDialSwitc
 // DialSwitchWidget/ToggleSwitchWidget/RockerSwitchWidget gained their own
 // flat, whole-widget `labels[]` (same convention as Gauge/Adjuster/Encoder)
 // after already shipping with only per-position labels — a dashboard saved
-// before that needs the field backfilled, same as `variables`/`eventSources`
+// before that needs the field backfilled, same as `variables`/`plugins`
 // get defaulted in loadDeckDashboard, just per-widget instead of per-dashboard.
 function migrateSwitchWidgetTopLevelLabels<T extends DialSwitchWidget | ToggleSwitchWidget | RockerSwitchWidget>(widget: T): T {
   return Array.isArray(widget.labels) ? widget : { ...widget, labels: [] }
@@ -395,7 +405,7 @@ function deckBackgroundImageFile(deckId: string): string {
 // (handleDecksApi) — previously the first two duplicated this inline, which
 // meant a new migration step had to be remembered in two places; now it's
 // one function all three share.
-function normalizeDashboard(loaded: Dashboard & { backgroundImage?: string }): Dashboard {
+function normalizeDashboard(loaded: Dashboard & { backgroundImage?: string; eventSources?: Plugin[] }): Dashboard {
   // Migrate off the old shape, which embedded the image as a data URL
   // directly in the dashboard JSON (re-sent over the WebSocket on every
   // single change — see backgroundImageVersion in shared/types.ts).
@@ -404,7 +414,15 @@ function normalizeDashboard(loaded: Dashboard & { backgroundImage?: string }): D
   // Dashboards saved before Variable existed have no `variables` key at
   // all — normalize once here so nothing downstream needs `?? []`.
   loaded.variables = loaded.variables ?? []
-  loaded.eventSources = loaded.eventSources ?? []
+  // Dashboards saved before the event-source → plugin rename carry this
+  // array under the old `eventSources` key instead of `plugins` — read that
+  // instead of silently losing every configured plugin on first load after
+  // upgrading. Also renames the old 'ocrRegion' kind (now merged into
+  // 'screenCapture' — see shared/plugins/screenCapture.ts) wherever it
+  // still appears.
+  const rawPlugins = loaded.plugins ?? loaded.eventSources ?? []
+  delete loaded.eventSources
+  loaded.plugins = rawPlugins.map((p) => (p.kind === 'ocrRegion' ? { ...p, kind: 'screenCapture' } : p))
   // Same normalization for sub-decks, saved before SubDeck existed — and
   // each sub-deck's own widgets need the same migrateWidget treatment the
   // main deck's widgets just got above.
@@ -441,7 +459,7 @@ function saveDeckDashboard(room: DeckRoom): void {
 const DASHBOARD_SAVE_DEBOUNCE_MS = 500
 
 // Debounced counterpart to saveDeckDashboard — used for saves that repeat on
-// a tight cadence (event-source ticks, as often as once a second) rather
+// a tight cadence (plugin ticks, as often as once a second) rather
 // than a one-off user action, so an idle deck with a running clock source
 // isn't rewriting dashboard.json to disk every second forever.
 function scheduleDebouncedSave(room: DeckRoom): void {
@@ -613,26 +631,108 @@ function updateWidgetById(dashboard: Dashboard, widgetId: string, update: (widge
   }
 }
 
-// Shared by both routes below — a screen-capture widget with no region
-// picked yet (or one that's been deleted since a client last saw it) has
-// nothing to serve.
-function findScreenCaptureWidget(room: DeckRoom, widgetId: string): (ScreenCaptureWidget & { region: ScreenRegion; displayId: number }) | null {
+interface StreamableCaptureConfig {
+  region: ScreenRegion
+  displayId: number
+  quality: number
+  sharpen: boolean
+  fps: number
+}
+
+// Shared by both routes below — resolves EITHER a 'screen-capture' widget's
+// own user-drawn region/displayId, OR a 'dcs-viewport' widget's LOCKED
+// region (resolved server-side from its componentKey against the live
+// virtual display — see resolveDcsViewportComponentRegion and
+// DcsViewportWidget's own comment in shared/types.ts). Both widget types
+// share this one resolver and the same two HTTP routes below it — the
+// request is keyed purely by deck+widget id either way, so there's no need
+// for a second, parallel set of routes.
+function resolveStreamableWidget(room: DeckRoom, widgetId: string): StreamableCaptureConfig | null {
   const widget = findWidgetAnywhere(room.dashboard, widgetId)
-  if (!widget || widget.type !== 'screen-capture' || !widget.region || widget.displayId === undefined) return null
-  return widget as ScreenCaptureWidget & { region: ScreenRegion; displayId: number }
+  if (!widget) return null
+  if (widget.type === 'screen-capture') {
+    if (!widget.region || widget.displayId === undefined) return null
+    return { region: widget.region, displayId: widget.displayId, quality: clampQuality(widget.quality), sharpen: widget.sharpen ?? false, fps: clampFps(widget.fps) }
+  }
+  if (widget.type === 'dcs-viewport') {
+    const resolved = resolveDcsViewportComponentRegion(widget.componentKey)
+    if (!resolved) return null
+    return {
+      region: applyDcsViewportCrop(resolved.region, widget),
+      displayId: resolved.displayId,
+      quality: clampQuality(widget.quality),
+      sharpen: widget.sharpen ?? false,
+      fps: clampFps(widget.fps)
+    }
+  }
+  return null
+}
+
+// Per-widget fine-tune on top of resolveComponentRegion's own default bezel
+// inset (see its comment) — the exact bezel size varies enough between
+// components that a single fixed percentage doesn't fit all of them
+// precisely, so this lets each widget trim further. Percentages are of the
+// ALREADY-inset region, same edge-relative meaning as CSS padding. Negative
+// values expand the region back out past that default inset (e.g. if it
+// over-cropped for a particular component); clamped well short of ±100 so
+// opposite edges can't cross and invert the region regardless of combination.
+function clampCropPercent(value: number | undefined): number {
+  return Math.min(49, Math.max(-50, value ?? 0))
+}
+
+function applyDcsViewportCrop(region: ScreenRegion, widget: DcsViewportWidget): ScreenRegion {
+  const top = clampCropPercent(widget.cropTop)
+  const right = clampCropPercent(widget.cropRight)
+  const bottom = clampCropPercent(widget.cropBottom)
+  const left = clampCropPercent(widget.cropLeft)
+  if (top === 0 && right === 0 && bottom === 0 && left === 0) return region
+  const insetLeft = Math.round((region.width * left) / 100)
+  const insetRight = Math.round((region.width * right) / 100)
+  const insetTop = Math.round((region.height * top) / 100)
+  const insetBottom = Math.round((region.height * bottom) / 100)
+  return {
+    x: region.x + insetLeft,
+    y: region.y + insetTop,
+    width: Math.max(1, region.width - insetLeft - insetRight),
+    height: Math.max(1, region.height - insetTop - insetBottom)
+  }
+}
+
+// Both HTTP capture routes below (and the 'screenCapture' plugin's own OCR
+// producer, gated the same way in syncPlugins) share this one on/off switch
+// per widget type — see shared/plugins/screenCapture.ts's widgetTypes for
+// why a 'screen-capture' widget is gated by the same plugin as its OCR
+// sibling. 'dcs-viewport' has no widgetTypes entry (see
+// shared/plugins/dcsViewports.ts) since it needs a second condition beyond
+// just "plugin enabled" — the virtual display also has to actually be
+// ready, or there's nothing valid to stream regardless of the toggle.
+function streamableWidgetEnabled(widgetType: 'screen-capture' | 'dcs-viewport'): boolean {
+  if (widgetType === 'screen-capture') return getAppSettings().enabledPlugins.includes('screenCapture')
+  return getAppSettings().enabledPlugins.includes('dcsViewports') && getDcsViewportsStatus().displayReady
+}
+
+function widgetTypeForCaptureRoute(room: DeckRoom, widgetId: string): 'screen-capture' | 'dcs-viewport' | null {
+  const widget = findWidgetAnywhere(room.dashboard, widgetId)
+  return widget && (widget.type === 'screen-capture' || widget.type === 'dcs-viewport') ? widget.type : null
 }
 
 // Poll mode — one capture per request, fully stateless (see
 // ScreenCaptureWidget.streamMode in shared/types.ts).
 function serveScreenCaptureFrame(res: ServerResponse, deckId: string, widgetId: string): void {
   const room = getOrLoadRoom(deckId)
-  const widget = room && findScreenCaptureWidget(room, widgetId)
-  if (!widget) {
+  const widgetType = room && widgetTypeForCaptureRoute(room, widgetId)
+  if (!widgetType || !streamableWidgetEnabled(widgetType)) {
+    res.writeHead(403)
+    res.end('Capture plugin is disabled')
+    return
+  }
+  const config = room && resolveStreamableWidget(room, widgetId)
+  if (!config) {
     res.writeHead(404)
     res.end('No region configured')
     return
   }
-  captureRegionJpeg(widget.region, widget.displayId, clampQuality(widget.quality), widget.sharpen ?? false)
+  captureRegionJpeg(config.region, config.displayId, config.quality, config.sharpen)
     .then((frame) => {
       res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' })
       res.end(frame)
@@ -649,18 +749,19 @@ function serveScreenCaptureFrame(res: ServerResponse, deckId: string, widgetId: 
 // screenCapture.ts's addMjpegViewer).
 function serveScreenCaptureStream(res: ServerResponse, deckId: string, widgetId: string): void {
   const room = getOrLoadRoom(deckId)
-  const widget = room && findScreenCaptureWidget(room, widgetId)
-  if (!widget) {
+  const widgetType = room && widgetTypeForCaptureRoute(room, widgetId)
+  if (!widgetType || !streamableWidgetEnabled(widgetType)) {
+    res.writeHead(403)
+    res.end('Capture plugin is disabled')
+    return
+  }
+  const config = room && resolveStreamableWidget(room, widgetId)
+  if (!config) {
     res.writeHead(404)
     res.end('No region configured')
     return
   }
-  addMjpegViewer(widgetId, res, () => {
-    const current = room && findScreenCaptureWidget(room, widgetId)
-    return current
-      ? { region: current.region, displayId: current.displayId, quality: clampQuality(current.quality), sharpen: current.sharpen ?? false, fps: clampFps(current.fps) }
-      : null
-  })
+  addMjpegViewer(widgetId, res, () => (room ? resolveStreamableWidget(room, widgetId) : null))
 }
 
 // dist/boarderoni-latest.apk itself stays a fixed filename (see APK_PATH's
@@ -703,12 +804,12 @@ interface DeckRoom {
   dashboard: Dashboard
   devices: Map<string, DeviceInfo>
   sockets: Set<WebSocket>
-  // Running event-source producers for this room, keyed by EventSource.id.
+  // Running plugin producers for this room, keyed by Plugin.id.
   // `signature` is `JSON.stringify({kind, config})` of the instance that's
-  // currently running — see syncEventSources, which restarts a producer
+  // currently running — see syncPlugins, which restarts a producer
   // whenever this changes (mappings are excluded on purpose: they're
   // re-read fresh on every tick, so editing them never needs a restart).
-  eventSourceStops: Map<string, { stop: () => void; signature: string }>
+  pluginStops: Map<string, { stop: () => void; signature: string }>
   // Debounce handle for saveDeckDashboard — see scheduleDebouncedSave. Event
   // source ticks (as often as once a second) go through this instead of
   // saving synchronously on every tick.
@@ -762,7 +863,7 @@ function getOrLoadRoom(deckId: string): DeckRoom | null {
   if (!dashboard) return null
   // The RAW file content, not JSON.stringify(dashboard, null, 2) — loadDeckDashboard
   // normalizes the parsed object (migrateWidget, defaulting `variables`/
-  // `eventSources`, etc.), which can differ from what's still literally on
+  // `plugins`, etc.), which can differ from what's still literally on
   // disk until the next save. Baselining off the re-serialized normalized
   // object here would make watchDeckFile see that difference as a false
   // "changed externally" the very first time the file watcher fires, even
@@ -778,13 +879,13 @@ function getOrLoadRoom(deckId: string): DeckRoom | null {
     dashboard,
     devices: new Map(),
     sockets: new Set(),
-    eventSourceStops: new Map(),
+    pluginStops: new Map(),
     dashboardSaveTimeout: null,
     lastWrittenJson,
     fileWatcher: null
   }
   rooms.set(deckId, room)
-  syncEventSources(room)
+  syncPlugins(room)
   watchDeckFile(room)
   return room
 }
@@ -850,7 +951,7 @@ function collectImportWarnings(dashboard: Dashboard): string[] {
 }
 
 // Clears the one field that isn't just "possibly wrong" (like the REST
-// data source ids collectImportWarnings flags above) but actively
+// plugin ids collectImportWarnings flags above) but actively
 // meaningless on a different machine: a ScreenCaptureWidget's region/
 // displayId, tied to the exporting machine's own monitor arrangement.
 // SendDcsCommandAction is left untouched — it's pure DCS-BIOS protocol
@@ -908,7 +1009,7 @@ function sendJson(res: ServerResponse, status: number, body?: unknown): void {
 // whole discriminated union here would just duplicate that tolerance, not
 // add safety. `.passthrough()` on the dashboard object keeps every field
 // this doesn't explicitly name (backgroundColor, subDecks, variables,
-// eventSources, ...) rather than stripping them.
+// plugins, ...) rather than stripping them.
 const deckExportFileSchema = z.object({
   boarderoniExport: z.literal(true),
   formatVersion: z.number(),
@@ -1083,7 +1184,7 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
     const room = rooms.get(deckId)
     if (room) {
       for (const socket of room.sockets) socket.close(DECK_CLOSE_CODE_UNKNOWN, 'Deck deleted')
-      for (const { stop } of room.eventSourceStops.values()) stop()
+      for (const { stop } of room.pluginStops.values()) stop()
       // Also load-bearing, same reasoning as cancelScheduledSave below — an
       // fs.watch callback firing on the file this delete is about to remove
       // would otherwise try to readFileSync a file that's either gone or
@@ -1092,7 +1193,7 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
       // time its debounce timer would fire.
       room.fileWatcher?.close()
       // Load-bearing, not decorative: a pending debounced save from an
-      // active event source firing ~500ms after this point would recreate
+      // active plugin firing ~500ms after this point would recreate
       // deckDir(deckId) via saveDeckDashboard's mkdirSync, silently
       // resurrecting the deck's dashboard.json right after this deletes it.
       cancelScheduledSave(room)
@@ -1196,9 +1297,21 @@ function sendInitialState(ws: WebSocket, room: DeckRoom): void {
   // dashboard:sync instead of a brief flash of fallback font until a later
   // fonts:get.
   ws.send(JSON.stringify({ type: 'fonts:list', fonts: getCustomFonts() } satisfies ServerToClient))
+  // Also unasked — a deployed view client never opens Settings/Plugins (the
+  // only places that otherwise request this), but still needs
+  // enabledPlugins to render a disabled-plugin's widget (e.g. Screen
+  // Capture) as inert instead of trying to load a feed the server would
+  // 403 anyway (see screenCapturePluginEnabled's own callers).
+  ws.send(JSON.stringify({ type: 'app-settings:settings', ...getAppSettings() } satisfies ServerToClient))
   ws.send(JSON.stringify({ type: 'dcsbios:status', ...getDcsBiosStatus() } satisfies ServerToClient))
   const stats = getDcsBiosWorkerStats()
   if (stats) ws.send(JSON.stringify({ type: 'dcsbios:stats', ...stats } satisfies ServerToClient))
+  // Same reasoning as app-settings just above — a deployed view device (the
+  // Android app) never opens the DCS Viewports settings panel, the only
+  // other place that requests this, so without this it'd only ever learn
+  // the status from a future onDcsViewportsStatusChange broadcast, which by
+  // the time it connects may never fire again (status already settled).
+  ws.send(JSON.stringify({ type: 'dcsViewports:status', ...getDcsViewportsStatus() } satisfies ServerToClient))
 }
 
 // A socket earns the right to approve/deny other devices (and receive
@@ -1325,14 +1438,14 @@ function coerceVariableValue(value: unknown): VariableValue {
 // yet, same as assigning a new variable in a loose scripting language — then
 // broadcasts and saves. `immediate: true` (button clicks, via
 // runUpdateState) saves synchronously right away, same as before this was
-// extracted; `immediate: false` (event-source ticks, via syncEventSources)
+// extracted; `immediate: false` (plugin ticks, via syncPlugins)
 // debounces instead — see scheduleDebouncedSave.
 function applyVariableUpdates(room: DeckRoom, updates: Record<string, unknown>, options: { immediate: boolean }): void {
   const existing = room.dashboard.variables ?? []
   const existingByName = new Map(existing.map((v) => [v.name, v]))
   const coercedUpdates = new Map(Object.entries(updates).map(([name, value]) => [name, coerceVariableValue(value)]))
 
-  // Most event-source ticks (a DCS-BIOS field, a REST poll, ...) report the
+  // Most plugin ticks (a DCS-BIOS field, a REST poll, ...) report the
   // same value again rather than something new — skip rebuilding (and
   // broadcasting/saving) unless at least one value actually differs from
   // what's already there, or every tick would replace `variables` with a
@@ -1354,8 +1467,8 @@ function applyVariableUpdates(room: DeckRoom, updates: Record<string, unknown>, 
 
   room.dashboard = { ...room.dashboard, variables }
   // variables:sync, not dashboard:sync — this can fire many times a second
-  // (every in-flight AdjusterWidget drag tick, or a fast event-source), and
-  // widgets/eventSources/devices never change here, so re-sending the whole
+  // (every in-flight AdjusterWidget drag tick, or a fast plugin), and
+  // widgets/plugins/devices never change here, so re-sending the whole
   // dashboard every time would mean every connected client re-serializing
   // and re-diffing all of that for nothing.
   broadcastToRoom(room, { type: 'variables:sync', variables })
@@ -1398,7 +1511,7 @@ function runUpdateState(room: DeckRoom, code: string, trigger: TriggerValue | un
   // trigger is only set while an AdjusterWidget is being dragged, or for a
   // switch/dropdown position select — exposed as variables.$value (plus
   // variables.$index for a position select), same convention an
-  // EventSourceMapping's own `expr` already uses (see
+  // PluginMapping's own `expr` already uses (see
   // evaluateMappingExpression). A plain button/morph click
   // has no value, so it evaluates exactly as before.
   const result = trigger ? evaluateMappingExpression(code, trigger.value, variableMap, trigger.index) : tryEvaluateExpression(code, variableMap)
@@ -1424,10 +1537,10 @@ function runUpdateState(room: DeckRoom, code: string, trigger: TriggerValue | un
 // arrives to the currently active aircraft, silently ignoring it if that
 // identifier doesn't exist for that aircraft.
 async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction, trigger?: TriggerValue): Promise<void> {
-  // Same enabledDataSources gate syncEventSources already applies to the
+  // Same enabledPlugins gate syncPlugins already applies to the
   // read side (see its own comment) — disabling DCS-BIOS in Settings should
   // stop a button from firing commands too, not just stop reading fields.
-  if (!getAppSettings().enabledDataSources.includes('dcsbios')) {
+  if (!getAppSettings().enabledPlugins.includes('dcsbios')) {
     throw new Error('DCS-BIOS is disabled in Settings')
   }
 
@@ -1499,7 +1612,7 @@ async function runCallRestAction(room: DeckRoom, action: CallRestAction, trigger
 // The `emit` callback passed to syncRestIncomingServers (see
 // main/restIncoming.ts) — turns one incoming REST request's already-
 // flattened body into variable updates on its source's configured target
-// deck. Mirrors syncEventSources' own per-tick mapping loop almost exactly,
+// deck. Mirrors syncPlugins' own per-tick mapping loop almost exactly,
 // just triggered by a request instead of a producer tick, and against a
 // single source instead of every currently-loaded room's instances.
 function applyRestIncoming(sourceId: string, flattened: Record<string, unknown>): void {
@@ -1554,12 +1667,12 @@ function broadcastCustomFonts(): void {
   }
 }
 
-function eventSourceSignature(source: EventSource): string {
+function pluginSignature(source: Plugin): string {
   return JSON.stringify({ kind: source.kind, config: source.config ?? null })
 }
 
-// Starts/stops per-room event-source producers to match
-// room.dashboard.eventSources, and wires each running producer's emitted
+// Starts/stops per-room plugin producers to match
+// room.dashboard.plugins, and wires each running producer's emitted
 // field values through its instance's mappings into variables. Called
 // whenever room.dashboard might have gained/lost/changed an event source —
 // see call sites at getOrLoadRoom and the 'dashboard:update' handler below.
@@ -1568,34 +1681,34 @@ function eventSourceSignature(source: EventSource): string {
 // mappings are deliberately excluded from the signature since the emit
 // closure below re-reads them fresh off room.dashboard on every tick, so
 // editing a mapping never needs a restart.
-function syncEventSources(room: DeckRoom): void {
-  const instances = room.dashboard.eventSources ?? []
+function syncPlugins(room: DeckRoom): void {
+  const instances = room.dashboard.plugins ?? []
   const instanceIds = new Set(instances.map((s) => s.id))
 
-  for (const [id, running] of room.eventSourceStops) {
+  for (const [id, running] of room.pluginStops) {
     if (!instanceIds.has(id)) {
       running.stop()
-      room.eventSourceStops.delete(id)
+      room.pluginStops.delete(id)
     }
   }
 
   for (const instance of instances) {
-    const signature = eventSourceSignature(instance)
-    const running = room.eventSourceStops.get(instance.id)
+    const signature = pluginSignature(instance)
+    const running = room.pluginStops.get(instance.id)
     if (running && running.signature === signature) continue
     running?.stop()
 
-    const producer = EVENT_SOURCE_PRODUCERS[instance.kind]
+    const producer = PLUGIN_PRODUCERS[instance.kind]
     if (!producer) continue
-    // Disabling a kind in the Settings page (see appSettings.ts) stops its
-    // producer entirely rather than just hiding it from EventsModal's add-
-    // picker — this is what actually frees a high-intensity kind's
+    // Disabling a kind in PluginsModal (see appSettings.ts) stops its
+    // producer entirely rather than just hiding it from EventSourcesModal's
+    // add-picker — this is what actually frees a high-intensity kind's
     // underlying worker thread when nobody wants it running. The source's
     // own configuration is untouched, so re-enabling resumes it as-is.
-    if (!getAppSettings().enabledDataSources.includes(instance.kind)) continue
+    if (!getAppSettings().enabledPlugins.includes(instance.kind)) continue
 
     // Per-field values from this instance's previous tick, captured by this
-    // closure (not stored on the eventSourceStops entry — that's only set
+    // closure (not stored on the pluginStops entry — that's only set
     // below, after producer.start's own synchronous first tick has already
     // run once). Starts empty, so every field looks "changed" on the very
     // first tick — that's what seeds each mapping's variable with a real
@@ -1608,9 +1721,9 @@ function syncEventSources(room: DeckRoom): void {
       // try/catch), an uncaught exception here becomes a Node
       // uncaughtException and can take down the whole Electron main
       // process, so the entire body is guarded.
-      let current: EventSource | undefined
+      let current: Plugin | undefined
       try {
-        current = room.dashboard.eventSources?.find((s) => s.id === instance.id)
+        current = room.dashboard.plugins?.find((s) => s.id === instance.id)
         if (!current) return
         const variableMap = toVariableMap(room.dashboard.variables ?? [])
         const updates: Record<string, unknown> = {}
@@ -1624,7 +1737,7 @@ function syncEventSources(room: DeckRoom): void {
           if (mapping.expr && mapping.expr.trim()) {
             const result = evaluateMappingExpression(mapping.expr, coerceVariableValue(rawValue), variableMap)
             if (!result.ok) {
-              console.error(`[boarderoni] event source mapping expression failed (${current.name} -> ${mapping.variableName})`, result.error)
+              console.error(`[boarderoni] plugin mapping expression failed (${current.name} -> ${mapping.variableName})`, result.error)
               continue
             }
             updates[mapping.variableName] = result.value
@@ -1635,19 +1748,19 @@ function syncEventSources(room: DeckRoom): void {
         previousValues = values
         if (Object.keys(updates).length > 0) applyVariableUpdates(room, updates, { immediate: false })
       } catch (err) {
-        console.error(`[boarderoni] event source tick failed (${current?.name ?? instance.id})`, err)
+        console.error(`[boarderoni] plugin tick failed (${current?.name ?? instance.id})`, err)
       }
     })
-    room.eventSourceStops.set(instance.id, { stop, signature })
+    room.pluginStops.set(instance.id, { stop, signature })
   }
 }
 
-// Re-evaluates every currently-loaded room's event sources against the
-// latest enabledDataSources gate — called after an app-settings:update so
+// Re-evaluates every currently-loaded room's plugins against the
+// latest enabledPlugins gate — called after an app-settings:update so
 // toggling a kind off/on in the Settings page takes effect immediately,
 // not just on the next unrelated dashboard:update.
-function resyncAllRoomsEventSources(): void {
-  for (const room of rooms.values()) syncEventSources(room)
+function resyncAllRoomsPlugins(): void {
+  for (const room of rooms.values()) syncPlugins(room)
 }
 
 function sleep(ms: number): Promise<void> {
@@ -1958,7 +2071,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
           scheduleDebouncedSave(activeRoom)
         }
         broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard }, ws)
-        syncEventSources(activeRoom)
+        syncPlugins(activeRoom)
         break
       case 'dashboard:reload': {
         if (!activeRoom) break
@@ -1978,7 +2091,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
           // still re-seeds this via saveDeckDashboard.
         }
         broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
-        syncEventSources(activeRoom)
+        syncPlugins(activeRoom)
         break
       }
       case 'action:trigger':
@@ -2206,16 +2319,81 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         }
         break
       }
+      case 'dcsViewports:get-settings': {
+        ws.send(JSON.stringify({ type: 'dcsViewports:settings', ...getDcsViewportsSettings() } satisfies ServerToClient))
+        break
+      }
+      case 'dcsViewports:update-settings': {
+        const settings = await updateDcsViewportsSettings(message.settings)
+        ws.send(JSON.stringify({ type: 'dcsViewports:settings', ...settings } satisfies ServerToClient))
+        ws.send(JSON.stringify({ type: 'dcsViewports:status', ...getDcsViewportsStatus() } satisfies ServerToClient))
+        break
+      }
+      case 'dcsViewports:get-status': {
+        ws.send(JSON.stringify({ type: 'dcsViewports:status', ...getDcsViewportsStatus() } satisfies ServerToClient))
+        // Answer from cache immediately above, then sanity-check against
+        // live display state in the background — covers rearranging
+        // screens while the app (or just this settings panel) was closed,
+        // which the display-change listener in app.whenReady can't have
+        // seen. Any change broadcasts via onDcsViewportsStatusChange below.
+        if (getAppSettings().enabledPlugins.includes('dcsViewports')) {
+          void refreshDcsViewportsStatus().catch((err: unknown) => {
+            console.error('[boarderoni] dcsViewports get-status refresh failed', err)
+          })
+        }
+        break
+      }
+      case 'dcsViewports:validate-dcs-install-dir': {
+        const result = validateDcsViewportsInstallDir(message.dir)
+        ws.send(
+          JSON.stringify({ type: 'dcsViewports:dcs-install-dir-validation', dir: message.dir, ...result } satisfies ServerToClient)
+        )
+        break
+      }
+      case 'dcsViewports:validate-saved-games-dir': {
+        const result = validateDcsViewportsSavedGamesDir(message.dir)
+        ws.send(
+          JSON.stringify({ type: 'dcsViewports:saved-games-dir-validation', dir: message.dir, ...result } satisfies ServerToClient)
+        )
+        break
+      }
+      case 'dcsViewports:pick-dcs-install-folder': {
+        const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+        const path = !result.canceled && result.filePaths.length > 0 ? result.filePaths[0] : null
+        ws.send(JSON.stringify({ type: 'dcsViewports:dcs-install-folder-picked', path } satisfies ServerToClient))
+        break
+      }
+      case 'dcsViewports:pick-saved-games-folder': {
+        const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+        const path = !result.canceled && result.filePaths.length > 0 ? result.filePaths[0] : null
+        ws.send(JSON.stringify({ type: 'dcsViewports:saved-games-folder-picked', path } satisfies ServerToClient))
+        break
+      }
       case 'app-settings:get': {
         ws.send(JSON.stringify({ type: 'app-settings:settings', ...getAppSettings() } satisfies ServerToClient))
         break
       }
       case 'app-settings:update': {
-        const settings = updateAppSettings({ enabledDataSources: message.enabledDataSources })
+        const wasDcsViewportsEnabled = getAppSettings().enabledPlugins.includes('dcsViewports')
+        const settings = updateAppSettings({ enabledPlugins: message.enabledPlugins })
         ws.send(JSON.stringify({ type: 'app-settings:settings', ...settings } satisfies ServerToClient))
         // Toggling a kind takes effect immediately, not just on the next
-        // unrelated dashboard:update — see resyncAllRoomsEventSources.
-        resyncAllRoomsEventSources()
+        // unrelated dashboard:update — see resyncAllRoomsPlugins. REST is a
+        // core plugin (see shared/plugins/rest.ts) with no per-dashboard
+        // instances for resyncAllRoomsPlugins to iterate, so its own master
+        // switch needs this separate call instead.
+        resyncAllRoomsPlugins()
+        syncRestIncomingServers(applyRestIncoming)
+        // dcsViewports is also core, same reasoning — only react on the
+        // false->true edge: disabling deliberately leaves the virtual
+        // display and Boarderoni.lua in place (harmless, no elevation
+        // needed to leave them alone) rather than tearing anything down.
+        const isDcsViewportsEnabled = settings.enabledPlugins.includes('dcsViewports')
+        if (isDcsViewportsEnabled && !wasDcsViewportsEnabled) {
+          void refreshDcsViewportsStatus().catch((err: unknown) => {
+            console.error('[boarderoni] dcsViewports enable-time refresh failed', err)
+          })
+        }
         break
       }
       case 'rest-sources:get': {
@@ -2309,20 +2487,20 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         }
         break
       }
-      case 'event-source:pick-region': {
+      case 'plugin:pick-region': {
         if (!activeRoom) break
         const region = await openRegionPicker(message.displayId)
         // Same no-dedicated-reply shape as screen-capture:pick-region above
         // — the picked region reaches every client via the normal
         // dashboard:sync broadcast below. null (cancelled) does nothing.
-        // eventSources is a flat array (unlike widgets, never nested in a
+        // plugins is a flat array (unlike widgets, never nested in a
         // sub-deck), so this patches it directly rather than through
         // updateWidgetById.
         if (region) {
           const { sourceId, displayId } = message
           activeRoom.dashboard = {
             ...activeRoom.dashboard,
-            eventSources: (activeRoom.dashboard.eventSources ?? []).map((s) =>
+            plugins: (activeRoom.dashboard.plugins ?? []).map((s) =>
               s.id === sourceId ? { ...s, config: { ...s.config, region, displayId } } : s
             )
           }
@@ -2333,7 +2511,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
           // the source starts ticking against the new region immediately,
           // not whenever the next unrelated dashboard:update happens to
           // arrive.
-          syncEventSources(activeRoom)
+          syncPlugins(activeRoom)
         }
         break
       }
@@ -2353,6 +2531,11 @@ onDcsBiosStatsChange((stats) => {
   const payload: ServerToClient = { type: 'dcsbios:stats', ...stats }
   for (const room of rooms.values()) broadcastToRoom(room, payload)
 })
+onDcsViewportsStatusChange((status) => {
+  const payload: ServerToClient = { type: 'dcsViewports:status', ...status }
+  for (const room of rooms.values()) broadcastToRoom(room, payload)
+})
+
 
 httpServer.listen(SERVER_PORT, () => {
   console.log(`[boarderoni] server listening on :${SERVER_PORT}`)
@@ -2489,6 +2672,42 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createEditorWindow()
   })
+
+  // dcsViewports is a core plugin (see shared/plugins/dcsViewports.ts) with
+  // no per-dashboard instances — same reasoning as REST elsewhere in this
+  // file, this re-checks the driver/virtual-display and rewrites
+  // Boarderoni.lua once at startup if already enabled from a previous
+  // session, so it's ready before any dashboard loads (an app restart
+  // doesn't otherwise re-trigger the false->true transition the
+  // app-settings:update handler reacts to). Needs `screen`, hence deferred
+  // until here rather than running at module load like the rest of this
+  // file's other startup wiring.
+  if (getAppSettings().enabledPlugins.includes('dcsViewports')) {
+    void refreshDcsViewportsStatus().catch((err: unknown) => {
+      console.error('[boarderoni] dcsViewports startup refresh failed', err)
+    })
+  }
+
+  // Windows fires 'display-metrics-changed' for resolution/orientation/
+  // arrangement changes and 'display-added'/'display-removed' for
+  // monitors (including the virtual one) coming and going — any of which
+  // can invalidate the bounds baked into Boarderoni.lua (see
+  // dcsViewports/index.ts's refreshStatus). Debounced since Windows can
+  // fire several of these in a burst for one physical change.
+  let dcsViewportsDisplayChangeTimer: NodeJS.Timeout | null = null
+  function scheduleDcsViewportsDisplayRefresh(): void {
+    if (!getAppSettings().enabledPlugins.includes('dcsViewports')) return
+    if (dcsViewportsDisplayChangeTimer) clearTimeout(dcsViewportsDisplayChangeTimer)
+    dcsViewportsDisplayChangeTimer = setTimeout(() => {
+      dcsViewportsDisplayChangeTimer = null
+      void refreshDcsViewportsStatus().catch((err: unknown) => {
+        console.error('[boarderoni] dcsViewports display-change refresh failed', err)
+      })
+    }, 1000)
+  }
+  screen.on('display-metrics-changed', scheduleDcsViewportsDisplayRefresh)
+  screen.on('display-added', scheduleDcsViewportsDisplayRefresh)
+  screen.on('display-removed', scheduleDcsViewportsDisplayRefresh)
 })
 
 app.on('window-all-closed', () => {

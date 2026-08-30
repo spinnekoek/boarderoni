@@ -2,10 +2,12 @@ import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { DEFAULT_FONT_ID } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR } from '@shared/color'
+import { isWidgetTypeGatedByDisabledPlugin } from '@shared/plugins'
 import { nextId } from '../id'
 import type {
   AdjusterWidget,
   ButtonWidget,
+  DcsViewportWidget,
   DialSwitchWidget,
   DropdownWidget,
   EncoderWidget,
@@ -22,6 +24,18 @@ export function Palette(): React.JSX.Element {
   const addWidget = useDashboardStore((s) => s.addWidget)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
   const camera = useEditorSettings((s) => s.camera)
+  // null (not yet arrived — see main/index.ts's sendInitialState) reads as
+  // enabled, same "don't flash a wrong state before the real one lands"
+  // convention as ScreenCaptureWidgetContent's own pluginEnabled.
+  const enabledPlugins = useDashboardStore((s) => s.enabledPlugins)
+  const screenCaptureAvailable = enabledPlugins === null || !isWidgetTypeGatedByDisabledPlugin('screen-capture', enabledPlugins)
+  // No widgetTypes entry for 'dcsViewports' (see shared/plugins/dcsViewports.ts)
+  // — its widget also needs the virtual display to be ready, not just the
+  // plugin toggle, which isWidgetTypeGatedByDisabledPlugin can't express. The
+  // add button only checks the toggle, same bar as screenCaptureAvailable;
+  // "not ready yet" shows as the widget's own placeholder once added (see
+  // DcsViewportWidgetContent), not as a hidden palette button.
+  const dcsViewportsAvailable = enabledPlugins === null || enabledPlugins.includes('dcsViewports')
 
   // Where a newly-added widget lands: just inside the canvas corner that's
   // currently visible, rather than a fixed board-origin spot that could be
@@ -303,6 +317,23 @@ export function Palette(): React.JSX.Element {
     selectWidget(widget.id)
   }
 
+  function handleAddDcsViewport(): void {
+    const pos = spawnPosition()
+    const widget: DcsViewportWidget = {
+      id: nextId(),
+      type: 'dcs-viewport',
+      x: pos.x,
+      y: pos.y,
+      w: 240,
+      h: 160,
+      streamMode: 'poll',
+      fps: 5,
+      quality: 70
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
   return (
     <aside className="palette">
       <h2 className="palette__title">Widgets</h2>
@@ -339,9 +370,16 @@ export function Palette(): React.JSX.Element {
       <button className="palette__item" onClick={handleAddDropdown}>
         + Dropdown
       </button>
-      <button className="palette__item" onClick={handleAddScreenCapture}>
-        + Screen capture
-      </button>
+      {screenCaptureAvailable && (
+        <button className="palette__item" onClick={handleAddScreenCapture}>
+          + Screen capture
+        </button>
+      )}
+      {dcsViewportsAvailable && (
+        <button className="palette__item" onClick={handleAddDcsViewport}>
+          + DCS viewport
+        </button>
+      )}
       <p className="palette__hint">Click a widget on the canvas to edit its label, keybind, and position in the properties panel.</p>
       <p className="palette__hint">
         Morph buttons: select one, then use the + handles on its edges to extend it into other base blocks — connected blocks act as

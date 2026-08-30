@@ -70,7 +70,7 @@ export const useDebugConsoleStore = create<DebugConsoleState>()(
       name: 'boarderoni-debug-console',
       // Transient — reopening the app with the panel already open (or full
       // of last session's logs) would be a surprise, not a convenience, same
-      // reasoning as settingsStore's own settingsModalOpen/camera exclusions.
+      // reasoning as settingsStore's own camera exclusion.
       partialize: (state) => {
         const { open: _open, logs: _logs, ...rest } = state
         return rest

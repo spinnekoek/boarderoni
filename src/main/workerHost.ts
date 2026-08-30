@@ -35,7 +35,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 5000
 // later) so none of them has to reimplement thread lifecycle, correlated
 // request/response, or crash recovery. One instance per distinct worker
 // *kind*, NOT one per consumer — callers ref-count via acquire()/release()
-// so N consumers (e.g. N EventSource instances across N rooms) share
+// so N consumers (e.g. N Plugin instances across N rooms) share
 // exactly one OS thread.
 export class WorkerHost<TReq, TRes, TPush> {
   private readonly scriptPath: string
@@ -47,7 +47,7 @@ export class WorkerHost<TReq, TRes, TPush> {
   // Tracked PER WORKER INSTANCE (not a single shared flag) — deliberately.
   // teardown()/restart() terminate() a worker asynchronously; if a fresh
   // worker gets spawned (e.g. an immediate release()-then-acquire(), which
-  // syncEventSources does when a producer's signature changes) before the
+  // syncPlugins does when a producer's signature changes) before the
   // OLD worker's 'exit' event actually arrives, a shared boolean would
   // already be reset by the new spawn by the time that stale exit fires —
   // misreading a deliberate teardown as a crash, respawning AGAIN on top of

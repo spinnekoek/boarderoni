@@ -1,5 +1,5 @@
-// Plain data shapes for the DCS-BIOS event source — no Node APIs, so the
-// renderer can import this directly (same reasoning as shared/eventSources.ts).
+// Plain data shapes for the DCS-BIOS plugin — no Node APIs, so the
+// renderer can import this directly (same reasoning as shared/plugins.ts).
 // Shared by the worker (src/main/dcsBios/worker.ts), the main-thread
 // connection manager, the WS message types (shared/types.ts), and the
 // renderer's store/UI.
@@ -13,7 +13,7 @@ export type DcsBiosValueType = 'integer' | 'string'
 export interface DcsBiosFieldCatalogEntry {
   // Control identifier, or "<identifier>.<suffix>" when a control has more
   // than one output — unique within an aircraft, used directly as
-  // EventSourceMapping.field.
+  // PluginMapping.field.
   key: string
   label: string
   category: string

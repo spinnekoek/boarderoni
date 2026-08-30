@@ -27,7 +27,7 @@ export type DcsBiosWorkerResponse =
 // Unsolicited, pushed from the worker at its own cadence — fields at a
 // ~20Hz ceiling (only while something changed), status on change, stats at
 // ~1Hz (a live meter, always). See connectionManager.ts for how these get
-// demuxed to individual EventSource-instance subscribers.
+// demuxed to individual Plugin-instance subscribers.
 export type DcsBiosWorkerPush =
   | { kind: 'fields'; activeAircraft: string; updates: Record<string, unknown> }
   | { kind: 'status'; status: DcsBiosStatus }

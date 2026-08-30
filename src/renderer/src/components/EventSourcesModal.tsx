@@ -7,9 +7,10 @@ import { useEscapeToClose } from '../useEscapeToClose'
 import { uniqueVariableName } from '../variableNaming'
 import { CodeEditor } from './CodeEditor'
 import { ExpressionEditorModal } from './ExpressionEditorModal'
-import { EVENT_SOURCE_TYPES, getEventSourceType, type EventSourceTypeMeta } from '@shared/eventSources'
-import type { EventSource, EventSourceMapping, ScreenRegion } from '@shared/types'
+import { getPluginType, instantiablePluginTypes, type PluginTypeMeta } from '@shared/plugins'
+import type { Plugin, PluginMapping } from '@shared/types'
 import type { DcsBiosFieldCatalogEntry } from '@shared/dcsBiosTypes'
+import { PLUGIN_CONFIG_PANELS, defaultDcsBiosConfig, DEFAULT_OCR_INTERVAL_MS } from '../plugins'
 
 // Kept to a single line deliberately — CodeMirror's placeholder extension
 // renders an embedded "\n" as an actual second visual row, so the empty
@@ -17,19 +18,17 @@ import type { DcsBiosFieldCatalogEntry } from '@shared/dcsBiosTypes'
 // moment real (single-line) text replaces the placeholder.
 const EXPR_PLACEHOLDER = 'return variables.$value;'
 
-const MIN_UPDATE_HZ = 1
-const MAX_UPDATE_HZ = 25
-const DEFAULT_UPDATE_HZ = 10
 const FIELD_VIRTUALIZE_THRESHOLD = 100
 const FIELD_ROW_HEIGHT = 40
 
-// Matches the clamp range in main/eventSourceProducers.ts's ocrRegion
-// producer — kept in sync manually since one's a renderer-side slider and
-// the other's the main-process tick scheduler, with no shared module
-// between them for a single small numeric range.
-const MIN_OCR_INTERVAL_MS = 200
-const MAX_OCR_INTERVAL_MS = 5000
-const DEFAULT_OCR_INTERVAL_MS = 1000
+// A per-dashboard instance's own display label — most kinds just use the
+// plugin's own name, but a kind whose instanceLabel diverges (Screen
+// Capture + OCR → "OCR") uses that instead, everywhere an instance (not the
+// plugin capability itself) is being talked about: the add-picker, a
+// source's own kind badge, its default name on creation.
+function instanceLabelFor(typeMeta: PluginTypeMeta | undefined, fallback: string): string {
+  return typeMeta?.instanceLabel ?? typeMeta?.label ?? fallback
+}
 
 // Matches DCS-BIOS's own identifier casing (ALL_CAPS_WITH_UNDERSCORES) —
 // its field keys are already exactly this shape, so this is a no-op for the
@@ -77,14 +76,14 @@ function MappingRow({
   onPatch,
   onRemove
 }: {
-  mapping: EventSourceMapping
-  typeMeta: EventSourceTypeMeta | undefined
+  mapping: PluginMapping
+  typeMeta: PluginTypeMeta | undefined
   // Only meaningful for a dynamicFields kind — the field's human label
   // looked up from its cached catalog, if loaded. Falls back to the raw
   // field key when the catalog isn't available (e.g. right after reload,
   // before this source's aircraft catalog has been re-fetched).
   fieldLabel?: string
-  onPatch: (fields: Partial<EventSourceMapping>) => void
+  onPatch: (fields: Partial<PluginMapping>) => void
   onRemove: () => void
 }): React.JSX.Element {
   const isExpr = mapping.expr !== undefined
@@ -123,7 +122,7 @@ function MappingRow({
           // room.dashboard and creates whatever variable that names, so a
           // live onChange would create a fresh, real Variable for every
           // partial name typed along the way (see main/index.ts's
-          // syncEventSources). Same pattern VariablesModal's own Value field
+          // syncPlugins). Same pattern VariablesModal's own Value field
           // already uses, for the same reason.
           defaultValue={mapping.variableName}
           key={`${mapping.id}-${mapping.variableName}`}
@@ -257,6 +256,12 @@ function DcsBiosFieldCategoryGroup({
 // grouping keeps a several-hundred-field aircraft navigable; checkbox
 // multi-select + one "Add N mappings" call means mapping a batch of fields
 // doesn't mean repeating add-mapping → pick-field once per field.
+//
+// DCS-BIOS-flavored (DcsBiosFieldCatalogEntry) rather than a fully generic
+// dynamicFields browser — DCS-BIOS is the only dynamicFields plugin today.
+// A future dynamicFields plugin currently means adding its own browser here
+// too; see CONTRIBUTING.md's "Adding a plugin" section for the line between
+// what's generic vs. DCS-BIOS-specific in this file.
 function DcsBiosFieldBrowser({
   catalogState,
   existingVariableNames,
@@ -266,7 +271,7 @@ function DcsBiosFieldBrowser({
   catalogState: DcsBiosFieldCatalogState | undefined
   existingVariableNames: Set<string>
   onClose: () => void
-  onAdd: (mappings: EventSourceMapping[]) => void
+  onAdd: (mappings: PluginMapping[]) => void
 }): React.JSX.Element {
   const [search, setSearch] = useState('')
   const [checked, setChecked] = useState<Set<string>>(new Set())
@@ -316,7 +321,7 @@ function DcsBiosFieldBrowser({
 
   function handleAdd(): void {
     const taken = new Set(existingVariableNames)
-    const mappings: EventSourceMapping[] = []
+    const mappings: PluginMapping[] = []
     for (const entry of entries) {
       if (!checked.has(entry.key)) continue
       const name = uniqueVariableName(deriveVariableName(entry.key), taken)
@@ -376,67 +381,24 @@ function DcsBiosFieldBrowser({
   )
 }
 
-function DcsBiosStatusBanner({ onConfigure }: { onConfigure: () => void }): React.JSX.Element {
-  const status = useDashboardStore((s) => s.dcsBiosStatus)
-  const stats = useDashboardStore((s) => s.dcsBiosStats)
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
-  // Self-scaling rather than pinned to an arbitrary absolute ceiling, which
-  // would make typical traffic look either empty or permanently maxed out.
-  const maxWritesSeenRef = useRef(1)
-  if (stats) maxWritesSeenRef.current = Math.max(maxWritesSeenRef.current, stats.writesPerSec)
-
-  let message: string
-  if (!status || !status.everConnected) {
-    message = 'DCS-BIOS: no data received yet — check DCS is running with DCS-BIOS installed and export enabled.'
-  } else if (!status.connected) {
-    message = 'DCS-BIOS: connection lost — is DCS still running?'
-  } else if (status.activeAircraft) {
-    message = `DCS-BIOS: connected — flying ${status.activeAircraft}`
-  } else {
-    message = 'DCS-BIOS: connected, no aircraft loaded'
-  }
-
-  const barPct = stats ? Math.min(100, Math.round((stats.writesPerSec / maxWritesSeenRef.current) * 100)) : 0
-  const laggy = stats ? stats.eventLoopDelayMeanMs > 20 : false
-
-  return (
-    <div className="events-modal__dcsbios-status">
-      <div className="events-modal__dcsbios-status-row">
-        <span className={`app__status app__status--${status?.connected ? 'on' : 'off'}`}>{status?.connected ? 'online' : 'offline'}</span>
-        <span>{message}</span>
-        <button type="button" className="events-modal__configure-link" onClick={onConfigure}>
-          Configure in Settings
-        </button>
-      </div>
-      <button type="button" className="events-modal__diagnostics-toggle" onClick={() => setDiagnosticsOpen((o) => !o)}>
-        {diagnosticsOpen ? 'Hide diagnostics' : 'Show diagnostics'}
-      </button>
-      {diagnosticsOpen && (
-        <div className="events-modal__diagnostics">
-          <p className="properties__hint-inline">Reflects DCS-BIOS's own output rate — not affected by any source's update-frequency slider below.</p>
-          <div className="events-modal__diagnostics-bar-track">
-            <div className="events-modal__diagnostics-bar-fill" style={{ width: `${barPct}%` }} />
-          </div>
-          <div className="events-modal__diagnostics-numbers">
-            <span>{stats ? stats.packetsPerSec.toFixed(1) : '0.0'} packets/sec</span>
-            <span>{stats ? stats.writesPerSec.toFixed(1) : '0.0'} writes/sec</span>
-            <span className={laggy ? 'dcsbios-settings__error' : undefined}>
-              event loop delay: {stats ? stats.eventLoopDelayMeanMs.toFixed(1) : '0.0'}ms avg / {stats ? stats.eventLoopDelayMaxMs.toFixed(1) : '0.0'}ms max
-            </span>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // Mirrors VariablesModal.tsx's structure: overlay/panel, mutates only
 // through updateDashboardMeta (no dedicated store actions), no new WS
 // message types needed since a full dashboard:update already round-trips
 // (the DCS-BIOS-specific WS messages this modal also uses — aircraft list,
 // field catalogs, status/stats — are separate, handled via the store's own
 // request actions/message branches, see store.ts).
-export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Element {
+//
+// Per-dashboard INSTANCES of a plugin, each producing fields you map into
+// variables — enabling/disabling the underlying plugin kind itself, and any
+// app-wide config it needs, lives in the separate PluginsModal.tsx (see
+// openPluginsModal in settingsStore.ts for how a disabled-kind hint here
+// jumps over there). Per-kind config UI beyond the generic mapping list
+// below is dispatched through PLUGIN_CONFIG_PANELS (see
+// renderer/src/plugins/index.ts) — this file itself has no DCS-BIOS/
+// Screen-Capture-specific config JSX, only the DCS-BIOS field browser
+// above, which is about ADDING mappings for any dynamicFields plugin, not
+// any one kind's own settings.
+export function EventSourcesModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   // Selected specifically (not the whole dashboard) — once a source is
   // ticking, dashboard:sync arrives about once a second, but a
   // variables-only tick leaves this array's reference untouched (see
@@ -444,26 +406,27 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
   // re-renders while someone's mid-edit here. Widening this to `s.dashboard`
   // would thrash the UI (and fight CodeEditor's cursor-preserving update
   // effect) every second.
-  const eventSources = useDashboardStore((s) => s.dashboard.eventSources) ?? []
+  const plugins = useDashboardStore((s) => s.dashboard.plugins) ?? []
   const variables = useDashboardStore((s) => s.dashboard.variables) ?? []
   const updateDashboardMeta = useDashboardStore((s) => s.updateDashboardMeta)
   const [addPickerOpen, setAddPickerOpen] = useState(false)
   const [browserOpenForSourceId, setBrowserOpenForSourceId] = useState<string | null>(null)
   // Lives in useEditorSettings, not local state — see that field's own
   // comment for why (this modal fully unmounts on close).
-  const activeSourceId = useEditorSettings((s) => s.eventsModalActiveSourceId)
-  const setActiveSourceId = useEditorSettings((s) => s.setEventsModalActiveSourceId)
+  const activeSourceId = useEditorSettings((s) => s.eventSourcesModalActiveSourceId)
+  const setActiveSourceId = useEditorSettings((s) => s.setEventSourcesModalActiveSourceId)
+  const openPluginsModal = useEditorSettings((s) => s.openPluginsModal)
   useEscapeToClose(onClose)
 
   // Falls back to the first remaining source if the active tab's source was
   // removed (or defaults to the first source on initial load).
   useEffect(() => {
-    if (eventSources.length === 0) {
+    if (plugins.length === 0) {
       setActiveSourceId(null)
       return
     }
-    if (!eventSources.some((s) => s.id === activeSourceId)) setActiveSourceId(eventSources[0].id)
-  }, [eventSources, activeSourceId])
+    if (!plugins.some((s) => s.id === activeSourceId)) setActiveSourceId(plugins[0].id)
+  }, [plugins, activeSourceId])
 
   // Dashboard-wide, not per-source — a new mapping's auto-generated name
   // must avoid colliding with ANY existing variable (another source's
@@ -472,100 +435,83 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
   // "update this existing variable," not "create a separate one."
   const usedVariableNames = useMemo(() => {
     const set = new Set(variables.map((v) => v.name))
-    for (const source of eventSources) {
+    for (const source of plugins) {
       for (const mapping of source.mappings) {
         if (mapping.variableName) set.add(mapping.variableName)
       }
     }
     return set
-  }, [variables, eventSources])
+  }, [variables, plugins])
 
-  const enabledDataSources = useDashboardStore((s) => s.enabledDataSources)
+  const enabledPlugins = useDashboardStore((s) => s.enabledPlugins)
   const requestAppSettings = useDashboardStore((s) => s.requestAppSettings)
-  const dcsBiosAircraft = useDashboardStore((s) => s.dcsBiosAircraft)
-  const requestDcsBiosAircraftList = useDashboardStore((s) => s.requestDcsBiosAircraftList)
   const dcsBiosFieldCatalogs = useDashboardStore((s) => s.dcsBiosFieldCatalogs)
   const requestDcsBiosFieldCatalog = useDashboardStore((s) => s.requestDcsBiosFieldCatalog)
   const dcsBiosSettings = useDashboardStore((s) => s.dcsBiosSettings)
-  const requestDcsBiosSettings = useDashboardStore((s) => s.requestDcsBiosSettings)
-  const openSettings = useEditorSettings((s) => s.openSettings)
-  const screenCaptureDisplays = useDashboardStore((s) => s.screenCaptureDisplays)
-  const requestScreenCaptureDisplays = useDashboardStore((s) => s.requestScreenCaptureDisplays)
-  const pickEventSourceRegion = useDashboardStore((s) => s.pickEventSourceRegion)
-
-  const usesDcsBios = eventSources.some((s) => s.kind === 'dcsbios')
-  const usesOcrRegion = eventSources.some((s) => s.kind === 'ocrRegion')
 
   useEffect(() => {
-    if (enabledDataSources === null) requestAppSettings()
-  }, [enabledDataSources, requestAppSettings])
+    if (enabledPlugins === null) requestAppSettings()
+  }, [enabledPlugins, requestAppSettings])
 
-  useEffect(() => {
-    if (usesDcsBios && dcsBiosAircraft === null) requestDcsBiosAircraftList()
-  }, [usesDcsBios, dcsBiosAircraft, requestDcsBiosAircraftList])
+  const enabledKinds = enabledPlugins ?? []
+  const addableTypes = instantiablePluginTypes(enabledKinds)
 
-  useEffect(() => {
-    if (usesDcsBios && dcsBiosSettings === null) requestDcsBiosSettings()
-  }, [usesDcsBios, dcsBiosSettings, requestDcsBiosSettings])
-
-  useEffect(() => {
-    if (usesOcrRegion && screenCaptureDisplays === null) requestScreenCaptureDisplays()
-  }, [usesOcrRegion, screenCaptureDisplays, requestScreenCaptureDisplays])
-
-  const enabledKinds = enabledDataSources ?? EVENT_SOURCE_TYPES.map((t) => t.kind)
-  const addableTypes = EVENT_SOURCE_TYPES.filter((t) => enabledKinds.includes(t.kind))
-
-  function patchSource(id: string, fields: Partial<EventSource>): void {
-    updateDashboardMeta({ eventSources: eventSources.map((s) => (s.id === id ? { ...s, ...fields } : s)) })
+  function patchSource(id: string, fields: Partial<Plugin>): void {
+    updateDashboardMeta({ plugins: plugins.map((s) => (s.id === id ? { ...s, ...fields } : s)) })
   }
 
   function removeSource(id: string): void {
-    updateDashboardMeta({ eventSources: eventSources.filter((s) => s.id !== id) })
+    updateDashboardMeta({ plugins: plugins.filter((s) => s.id !== id) })
+  }
+
+  // Per-kind default config on creation — deliberately left as a small
+  // switch here rather than a fully generic factory: only two kinds need
+  // anything beyond `undefined`, and both need live app state (DCS-BIOS's
+  // default update rate) that doesn't belong in shared/plugins' plain
+  // metadata. See CONTRIBUTING.md if a new plugin needs to join this list.
+  function defaultConfigFor(kind: string): Record<string, unknown> | undefined {
+    if (kind === 'dcsbios') return defaultDcsBiosConfig(dcsBiosSettings?.defaultUpdateHz)
+    if (kind === 'screenCapture') return { intervalMs: DEFAULT_OCR_INTERVAL_MS }
+    return undefined
   }
 
   function addSource(kind: string): void {
-    const typeMeta = getEventSourceType(kind)
+    const typeMeta = getPluginType(kind)
     if (!typeMeta) return
-    const config =
-      kind === 'dcsbios'
-        ? { aircraft: '', updateHz: dcsBiosSettings?.defaultUpdateHz ?? DEFAULT_UPDATE_HZ }
-        : kind === 'ocrRegion'
-          ? { intervalMs: DEFAULT_OCR_INTERVAL_MS }
-          : undefined
     const id = nextId()
     updateDashboardMeta({
-      eventSources: [...eventSources, { id, kind, name: typeMeta.label, mappings: [], config }]
+      plugins: [...plugins, { id, kind, name: instanceLabelFor(typeMeta, kind), mappings: [], config: defaultConfigFor(kind) }]
     })
     setActiveSourceId(id)
     setAddPickerOpen(false)
   }
 
-  function addMapping(source: EventSource): void {
-    const typeMeta = getEventSourceType(source.kind)
+  function addMapping(source: Plugin): void {
+    const typeMeta = getPluginType(source.kind)
     const firstField = typeMeta?.fields[0]?.key ?? ''
     const variableName = uniqueVariableName('new_variable', usedVariableNames)
-    const mapping: EventSourceMapping = { id: nextId(), field: firstField, variableName }
+    const mapping: PluginMapping = { id: nextId(), field: firstField, variableName }
     patchSource(source.id, { mappings: [...source.mappings, mapping] })
   }
 
-  function patchMapping(source: EventSource, mappingId: string, fields: Partial<EventSourceMapping>): void {
+  function patchMapping(source: Plugin, mappingId: string, fields: Partial<PluginMapping>): void {
     patchSource(source.id, {
       mappings: source.mappings.map((m) => (m.id === mappingId ? { ...m, ...fields } : m))
     })
   }
 
-  function removeMapping(source: EventSource, mappingId: string): void {
+  function removeMapping(source: Plugin, mappingId: string): void {
     patchSource(source.id, { mappings: source.mappings.filter((m) => m.id !== mappingId) })
   }
 
-  function openFieldBrowser(source: EventSource): void {
+  function openFieldBrowser(source: Plugin): void {
     const aircraft = typeof source.config?.aircraft === 'string' ? source.config.aircraft : ''
     if (!aircraft) return
     if (dcsBiosFieldCatalogs[aircraft] === undefined) requestDcsBiosFieldCatalog(aircraft)
     setBrowserOpenForSourceId(source.id)
   }
 
-  function handleAddMappings(source: EventSource, mappings: EventSourceMapping[]): void {
+  function handleAddMappings(source: Plugin, mappings: PluginMapping[]): void {
     if (mappings.length > 0) patchSource(source.id, { mappings: [...source.mappings, ...mappings] })
     setBrowserOpenForSourceId(null)
   }
@@ -574,7 +520,7 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
     <div className="variables-modal-overlay" onPointerDown={onClose}>
       <div className="variables-modal events-modal" onPointerDown={(e) => e.stopPropagation()}>
         <div className="variables-modal__header">
-          <h2 className="variables-modal__title">Events</h2>
+          <h2 className="variables-modal__title">Event Sources</h2>
           <button type="button" className="modal-close" title="Close" onClick={onClose}>
             ×
           </button>
@@ -582,15 +528,16 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
 
         <div className="variables-modal__body">
         <p className="properties__hint">
-          Continuously running sources of data (a clock, DCS-BIOS telemetry, and more to come) whose fields you can
-          map into <code>variables</code>, optionally through an expression.
+          Continuously running instances of a plugin (a clock, DCS-BIOS telemetry, OCR, and more to come) whose
+          fields you can map into <code>variables</code>, optionally through an expression. Enable/disable plugins
+          themselves from the Plugins toolbar button.
         </p>
 
-        {eventSources.length === 0 && <p className="properties__hint">No event sources yet.</p>}
+        {plugins.length === 0 && <p className="properties__hint">No event sources added yet.</p>}
 
-        {eventSources.length > 0 && (
+        {plugins.length > 0 && (
           <div className="variables-modal__tabs">
-            {eventSources.map((source) => (
+            {plugins.map((source) => (
               <button
                 key={source.id}
                 type="button"
@@ -606,25 +553,19 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
 
         <div className="variables-modal__scroll">
         {(() => {
-          const source = eventSources.find((s) => s.id === activeSourceId)
+          const source = plugins.find((s) => s.id === activeSourceId)
           if (!source) return null
 
-          const typeMeta = getEventSourceType(source.kind)
+          const typeMeta = getPluginType(source.kind)
           const isDynamic = !!typeMeta?.dynamicFields
           const kindEnabled = enabledKinds.includes(source.kind)
           const aircraft = typeof source.config?.aircraft === 'string' ? source.config.aircraft : ''
           const catalogState = isDynamic ? dcsBiosFieldCatalogs[aircraft] : undefined
           const catalogEntries = Array.isArray(catalogState) ? catalogState : []
           const catalogByKey = new Map(catalogEntries.map((e) => [e.key, e]))
-          const updateHz = typeof source.config?.updateHz === 'number' ? source.config.updateHz : DEFAULT_UPDATE_HZ
+          const kindLabel = instanceLabelFor(typeMeta, source.kind)
 
-          const isOcrRegion = source.kind === 'ocrRegion'
-          const ocrDisplayId = typeof source.config?.displayId === 'number' ? source.config.displayId : undefined
-          const ocrRegion = source.config?.region as ScreenRegion | undefined
-          const ocrRegionSummary = ocrRegion
-            ? `${Math.round(ocrRegion.width)}×${Math.round(ocrRegion.height)} at (${Math.round(ocrRegion.x)}, ${Math.round(ocrRegion.y)})`
-            : 'No region selected'
-          const ocrIntervalMs = typeof source.config?.intervalMs === 'number' ? source.config.intervalMs : DEFAULT_OCR_INTERVAL_MS
+          const ConfigPanel = PLUGIN_CONFIG_PANELS[source.kind]
 
           return (
             <div className="events-modal__source">
@@ -634,116 +575,28 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
                   value={source.name}
                   onChange={(e) => patchSource(source.id, { name: e.target.value })}
                 />
-                <span className="events-modal__source-kind">{typeMeta?.label ?? source.kind}</span>
-                <button
-                  type="button"
-                  className="variables-modal__remove"
-                  title="Delete event source"
-                  onClick={() => removeSource(source.id)}
-                >
+                <span className="events-modal__source-kind">{kindLabel}</span>
+                <button type="button" className="variables-modal__remove" title="Remove event source" onClick={() => removeSource(source.id)}>
                   ×
                 </button>
               </div>
 
-              {isDynamic && !kindEnabled && (
+              {!kindEnabled && (
                 <p className="properties__hint dcsbios-settings__error">
-                  Disabled — enable DCS-BIOS in Settings to resume; mapped variables are frozen at their last value.{' '}
-                  <button type="button" className="events-modal__configure-link" onClick={() => openSettings(source.kind)}>
-                    Open Settings
+                  Disabled — enable {typeMeta?.label ?? source.kind} to resume; mapped variables are frozen at their last value.{' '}
+                  <button type="button" className="events-modal__configure-link" onClick={() => openPluginsModal(source.kind)}>
+                    Open Plugins
                   </button>
                 </p>
               )}
 
-              {isDynamic && kindEnabled && <DcsBiosStatusBanner onConfigure={() => openSettings(source.kind)} />}
-
-              {isDynamic && (
-                <div className="events-modal__source-config">
-                  <label className="dcsbios-settings__field">
-                    <span>Aircraft</span>
-                    {dcsBiosAircraft === null ? (
-                      <span className="properties__hint-inline">Loading aircraft…</span>
-                    ) : dcsBiosAircraft.length === 0 ? (
-                      <span className="properties__hint-inline">
-                        No installed DCS-BIOS aircraft found — check the docs folder in Settings.
-                      </span>
-                    ) : (
-                      <select
-                        value={aircraft}
-                        onChange={(e) => patchSource(source.id, { config: { ...source.config, aircraft: e.target.value } })}
-                      >
-                        <option value="">Pick an aircraft…</option>
-                        {dcsBiosAircraft.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </label>
-                  <label className="dcsbios-settings__field">
-                    <span>Update frequency: {updateHz}/sec</span>
-                    <input
-                      type="range"
-                      min={MIN_UPDATE_HZ}
-                      max={MAX_UPDATE_HZ}
-                      value={updateHz}
-                      onChange={(e) => patchSource(source.id, { config: { ...source.config, updateHz: Number(e.target.value) } })}
-                    />
-                    <span className="properties__hint-inline">
-                      How often this source's mapped variables refresh — lower this if you don't need every change
-                      instantly and want to reduce broadcast/save load.
-                    </span>
-                  </label>
-                </div>
-              )}
-
-              {isOcrRegion && (
-                <div className="events-modal__source-config">
-                  <label className="dcsbios-settings__field">
-                    <span>Monitor</span>
-                    <select
-                      value={ocrDisplayId ?? ''}
-                      onChange={(e) =>
-                        patchSource(source.id, { config: { ...source.config, displayId: Number(e.target.value) } })
-                      }
-                    >
-                      <option value="">Pick a monitor…</option>
-                      {(screenCaptureDisplays ?? []).map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="dcsbios-settings__field">
-                    <span>Region: {ocrRegionSummary}</span>
-                    <button
-                      type="button"
-                      className="properties__file-button"
-                      disabled={(screenCaptureDisplays ?? []).length === 0}
-                      onClick={() => pickEventSourceRegion(source.id, ocrDisplayId ?? screenCaptureDisplays?.[0]?.id ?? 0)}
-                    >
-                      Pick region
-                    </button>
-                  </div>
-                  <label className="dcsbios-settings__field">
-                    <span>Poll interval: {ocrIntervalMs}ms</span>
-                    <input
-                      type="range"
-                      min={MIN_OCR_INTERVAL_MS}
-                      max={MAX_OCR_INTERVAL_MS}
-                      step={100}
-                      value={ocrIntervalMs}
-                      onChange={(e) =>
-                        patchSource(source.id, { config: { ...source.config, intervalMs: Number(e.target.value) } })
-                      }
-                    />
-                    <span className="properties__hint-inline">
-                      How often the region is re-captured and OCR'd. Recognition itself may take longer than this on
-                      a slow machine — ticks never overlap regardless of what this is set to.
-                    </span>
-                  </label>
-                </div>
+              {ConfigPanel && (
+                <ConfigPanel
+                  source={source}
+                  kindEnabled={kindEnabled}
+                  onPatchConfig={(config) => patchSource(source.id, { config })}
+                  onOpenSettings={() => openPluginsModal(source.kind)}
+                />
               )}
 
               {source.mappings.length === 0 && <p className="properties__hint">No mappings yet.</p>}
@@ -796,10 +649,18 @@ export function EventsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
               <div className="events-modal__add-picker">
                 {addableTypes.map((type) => (
                   <button key={type.kind} type="button" onClick={() => addSource(type.kind)}>
-                    {type.label}
+                    {type.instanceLabel ?? type.label}
                   </button>
                 ))}
-                {addableTypes.length === 0 && <p className="properties__hint">No data sources enabled — check Settings.</p>}
+                {addableTypes.length === 0 && (
+                  <p className="properties__hint">
+                    No plugins enabled —{' '}
+                    <button type="button" className="events-modal__configure-link" onClick={() => openPluginsModal()}>
+                      open Plugins
+                    </button>
+                    .
+                  </p>
+                )}
               </div>
             )}
           </div>

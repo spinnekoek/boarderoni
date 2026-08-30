@@ -12,6 +12,7 @@ import { DialSwitchWidgetContent } from './widgets/DialSwitchWidget'
 import { ToggleSwitchWidgetContent } from './widgets/ToggleSwitchWidget'
 import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { ScreenCaptureWidgetContent } from './widgets/ScreenCaptureWidget'
+import { DcsViewportWidgetContent } from './widgets/DcsViewportWidget'
 import { LabelWidgetContent } from './widgets/LabelWidget'
 import { LineWidgetContent } from './widgets/LineWidget'
 import { resolveActivePositionIndex } from '@shared/switchPosition'
@@ -191,6 +192,7 @@ export function CanvasWidget({
       {widget.type === 'label' && <LabelWidgetContent widget={widget} variables={variables} />}
       {widget.type === 'line' && <LineWidgetContent widget={widget} variables={variables} applyRotation={false} />}
       {widget.type === 'screen-capture' && <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />}
+      {widget.type === 'dcs-viewport' && <DcsViewportWidgetContent widget={widget} variables={variables} deckId={deckId} />}
       {widget.type === 'adjuster' && <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} />}
       {widget.type === 'encoder' && <EncoderWidgetContent widget={widget} variables={variables} interactive={false} />}
       {widget.type === 'switch-rocker' && (

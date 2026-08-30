@@ -2,7 +2,7 @@
 // ../workerHost.ts) — module-level state, same always-resident philosophy
 // as the `rooms` map in main/index.ts. DCS only ever streams one active
 // aircraft on one multicast group, so one process-wide listener demuxed to
-// however many EventSource instances/rooms care is correct; this is the
+// however many Plugin instances/rooms care is correct; this is the
 // only place in the app that talks to the underlying WorkerHost directly.
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -140,7 +140,7 @@ function clampUpdateHz(hz: number | undefined): number {
 // ~20Hz internal push ceiling (see worker.ts): that ceiling reflects DCS's
 // own output rate and isn't user-controllable, while `updateHz` here
 // controls how often *this app* re-broadcasts to its own WS clients and
-// re-saves to disk, which is a downstream concern each EventSource
+// re-saves to disk, which is a downstream concern each Plugin
 // instance may want tuned differently. Multiple subscribers to the same
 // aircraft each get their own independent timer off the same worker pushes.
 export function subscribeAircraft(

@@ -49,7 +49,7 @@ export function tryEvaluateExpression(code: string, variables: VariableMap): Exp
   }
 }
 
-// Evaluates an event-source mapping's transform expression with the raw
+// Evaluates an event source mapping's transform expression with the raw
 // field value exposed as `variables.$value`, alongside every existing
 // Variable. `$value` is a reserved key deliberately unlikely to collide with
 // a real variable name — a bare `value` key would silently shadow an actual

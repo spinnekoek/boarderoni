@@ -3,8 +3,8 @@
 // shared/types.ts's own comment on RestIncomingMapping) instead of a real
 // JSONPath engine: main/restIncoming.ts flattens each incoming request body
 // once per request, then reuses the exact same `field in values` /
-// `values[field]` lookup syncEventSources already does for every other
-// event-source kind.
+// `values[field]` lookup syncPlugins already does for every other
+// plugin kind.
 export function flattenJson(value: unknown, prefix = '', out: Record<string, unknown> = {}): Record<string, unknown> {
   if (Array.isArray(value)) {
     if (value.length === 0) out[prefix] = value

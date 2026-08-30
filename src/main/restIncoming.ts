@@ -1,12 +1,12 @@
 // Starts/stops one http.createServer per enabled RestDataSource — this is
-// the "webhook producer" eventSourceProducers.ts's own comment already
+// the "webhook producer" main/plugins/index.ts's own comment already
 // anticipated ("register a route on start and deregister on stop via a
 // small shared route-registry the HTTP server consults"), except each REST
 // source is user-ported rather than sharing the app's one fixed SERVER_PORT,
 // so it gets its own listener instead of a route on the existing server.
 //
 // Deliberately has no idea what a "room" or "variable" is — like
-// EventSourceProducer.start(instance, emit), this module's only job is
+// PluginProducer.start(instance, emit), this module's only job is
 // "authenticate + parse + flatten a request body, then hand it off." Turning
 // that into variable updates on some deck's room is main/index.ts's job (see
 // applyRestIncoming there), same producer/emit split every other event
@@ -17,6 +17,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { flattenJson } from '../shared/flattenJson'
 import type { RestDataSource } from '../shared/types'
 import { getRestDataSources } from './restDataSources'
+import { getAppSettings } from './appSettings'
 
 interface RunningServer {
   server: Server
@@ -30,10 +31,20 @@ export function getRestListenStatus(sourceId: string): { listening: boolean; lis
   return listenStatus.get(sourceId) ?? { listening: false }
 }
 
+// REST Data Sources' own master switch — a core plugin (see
+// PluginTypeMeta.core in shared/plugins/rest.ts), toggled from the same
+// Settings enable-list every other plugin uses. Off means every listener
+// below tears down regardless of each individual source's own `enabled`
+// flag, same layering DCS-BIOS's kind-level gate already gives its own
+// per-instance config.
+function restPluginEnabled(): boolean {
+  return getAppSettings().enabledPlugins.includes('rest')
+}
+
 // Only {enabled, port, bearerToken} matter here — a mapping/target-deck/
 // outgoing edit doesn't need a restart since the request handler re-fetches
 // the live source on every request (see below), same "no restart needed for
-// mapping edits" reasoning syncEventSources' own eventSourceSignature
+// mapping edits" reasoning syncPlugins' own pluginSignature
 // already documents.
 function signatureOf(source: RestDataSource): string {
   return JSON.stringify({ enabled: source.enabled, port: source.incoming.port, bearerToken: source.incoming.bearerToken })
@@ -58,7 +69,7 @@ async function handleRequest(
   // so a mapping/target-deck/outgoing edit takes effect on the very next
   // request with no restart.
   const source = getRestDataSources().find((s) => s.id === sourceId)
-  if (!source || !source.enabled) {
+  if (!source || !source.enabled || !restPluginEnabled()) {
     res.writeHead(503, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Data source unavailable' }))
     return
@@ -93,16 +104,25 @@ async function handleRequest(
 }
 
 export function syncRestIncomingServers(emit: (sourceId: string, flattened: Record<string, unknown>) => void): void {
+  const pluginEnabled = restPluginEnabled()
   const sources = getRestDataSources()
   const byId = new Map(sources.map((s) => [s.id, s]))
 
   for (const [id, running] of runningServers) {
     const source = byId.get(id)
-    if (!source || !source.enabled || signatureOf(source) !== running.signature) {
+    if (!source || !source.enabled || !pluginEnabled || signatureOf(source) !== running.signature) {
       running.server.close()
       runningServers.delete(id)
       if (!source) listenStatus.delete(id)
     }
+  }
+
+  // Master switch off — every listener above has already been torn down;
+  // nothing below should start back up regardless of each source's own
+  // `enabled` flag.
+  if (!pluginEnabled) {
+    for (const source of sources) listenStatus.set(source.id, { listening: false })
+    return
   }
 
   for (const source of sources) {

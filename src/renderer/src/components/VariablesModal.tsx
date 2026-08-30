@@ -9,7 +9,7 @@ import type { Variable, VariableValue } from '@shared/types'
 // Above this row count, a list renders through @tanstack/react-virtual
 // instead of a plain .map() — small dashboards (the common case: a handful
 // of manual variables, maybe a clock source) never pay any virtualization
-// cost at all. Same threshold/library used by EventsModal's field browser,
+// cost at all. Same threshold/library used by EventSourcesModal's field browser,
 // so there's exactly one virtualization approach in the app, not two.
 const VIRTUALIZE_THRESHOLD = 100
 // Matches .variables-modal__row's natural rendered height (see styles.css)
@@ -20,7 +20,7 @@ const ROW_HEIGHT = 34
 // VariableRows' boundaryIndex/estimateSize for why this needs to be exact,
 // not just a rough guess like ROW_HEIGHT above.
 const DIVIDER_HEIGHT = 21
-// Not a real EventSource id — the tab for variables with no mapping.
+// Not a real Plugin id — the tab for variables with no mapping.
 const CUSTOM_TAB = 'custom'
 // How long a variable counts as "recently changed" for 'recent' sort mode,
 // and the cadence of the countdown shown on the Recent button (see
@@ -296,7 +296,7 @@ function VariableRows({
 
 export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   const variables = useDashboardStore((s) => s.dashboard.variables) ?? []
-  const eventSources = useDashboardStore((s) => s.dashboard.eventSources) ?? []
+  const plugins = useDashboardStore((s) => s.dashboard.plugins) ?? []
   const updateDashboardMeta = useDashboardStore((s) => s.updateDashboardMeta)
   useEscapeToClose(onClose)
 
@@ -406,25 +406,25 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
     if (sortMode === 'recent') recomputeRecentIds()
   }, [ignoredIds, sortMode, recomputeRecentIds])
 
-  // Renaming/removing a variable here wouldn't affect the event source
+  // Renaming/removing a variable here wouldn't affect the plugin
   // mapping that targets it by name — the mapping would just keep
   // recreating a variable under the old name next tick. Rename/remove it
   // from the mapping itself (Events, in the toolbar) instead.
   const mappedFromSource = useMemo(() => {
     const map = new Map<string, { sourceId: string; sourceName: string }>()
-    for (const source of eventSources) {
+    for (const source of plugins) {
       for (const mapping of source.mappings) {
         const name = mapping.variableName.trim()
         if (name && !map.has(name)) map.set(name, { sourceId: source.id, sourceName: source.name })
       }
     }
     return map
-  }, [eventSources])
+  }, [plugins])
 
-  // One tab per event source INSTANCE with at least one mapping — not per
+  // One tab per plugin INSTANCE with at least one mapping — not per
   // kind, so two separate DCS-BIOS sources (e.g. one per aircraft) each get
   // their own tab rather than being bundled together.
-  const sourceTabs = useMemo(() => eventSources.filter((s) => s.mappings.length > 0), [eventSources])
+  const sourceTabs = useMemo(() => plugins.filter((s) => s.mappings.length > 0), [plugins])
 
   const tabs = useMemo(() => {
     const counts = new Map<string, number>()
@@ -506,7 +506,7 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
         <div className="variables-modal__body">
           <p className="properties__hint">
             Referenced in expressions as <code>variables.&lt;name&gt;</code>. Set by any widget whose action is "Update
-            state", or by an event source's mapping (see "Events" in the toolbar).
+            state", or by an event source's mapping (see "Event Sources" in the toolbar).
           </p>
 
           {variables.length === 0 && <p className="properties__hint">No variables yet.</p>}
