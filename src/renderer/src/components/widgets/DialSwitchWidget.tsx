@@ -153,16 +153,6 @@ export function DialSwitchWidgetContent({
       <div className="deck-dial-switch__rotated" style={rotateAngle ? { transform: `rotate(${rotateAngle}deg)` } : undefined}>
       <svg className="deck-dial-switch__dial" viewBox="0 0 100 100">
         <circle cx={50} cy={50} r={45} fill={trackColor} stroke={borderColor} strokeWidth={2} />
-        <DialShapeGraphic
-          style={widget}
-          angle={needleAngle}
-          fillColor={needleColor}
-          trackColor={trackColor}
-          needleLength={NEEDLE_LENGTH}
-          needleHalfWidth={2}
-          needleTipLength={10}
-          needleCenterRadius={4}
-        />
         {detentShape === 'triangle' &&
           positionMarkers.map(({ position, angle, dotVb, dotColor, handleSelect }) => {
             const halfW = baseDetentSize.width / 2
@@ -186,7 +176,6 @@ export function DialSwitchWidgetContent({
             )
           })}
       </svg>
-      <SquareIndicatorOverlay style={widget} angle={needleAngle} shapeColor={shapeColor} w={widget.w} h={widget.h} />
       {positionMarkers.map(({ position, angle, dotVb, dot, dotColor, handleSelect }) => (
         // The dot and each label are independently-positioned elements, not
         // parent/child — each centered (translate -50%,-50%) on its own
@@ -230,6 +219,27 @@ export function DialSwitchWidgetContent({
           })}
         </div>
       ))}
+      {/* Needle/square/circle dial-shape indicator, layered above every
+          detent marker (drawn above, both in DOM order and — for the
+          triangle/track svg above — the separate layer) so the pointer
+          reads as sitting on top of the dial the way a real switch's knob
+          covers the panel markings it passes over, instead of being hidden
+          under them. pointer-events: none (see styles.css) so it stays
+          purely decorative and never steals a tap/click meant for whichever
+          detent it happens to visually overlap. */}
+      <svg className="deck-dial-switch__dial deck-dial-switch__dial--indicator" viewBox="0 0 100 100">
+        <DialShapeGraphic
+          style={widget}
+          angle={needleAngle}
+          fillColor={needleColor}
+          trackColor={trackColor}
+          needleLength={NEEDLE_LENGTH}
+          needleHalfWidth={2}
+          needleTipLength={10}
+          needleCenterRadius={4}
+        />
+      </svg>
+      <SquareIndicatorOverlay style={widget} angle={needleAngle} shapeColor={shapeColor} w={widget.w} h={widget.h} />
       {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
       </div>
     </div>

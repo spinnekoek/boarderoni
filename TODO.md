@@ -67,3 +67,19 @@ off as they're fixed; add new ones as they come up.
       lines/thin widgets are a known trouble spot at non-native scale, see
       the letterbox-thin-widgets note) and whether per-widget or
       per-resolution overrides are needed on top of straight scaling.
+- [ ] Widget grouping — group/ungroup selected widgets via the canvas
+      right-click menu. Scoped to NOT support resizing a group (moving only)
+      to keep this tractable. Feasibility check (2026-09-03): selection,
+      multi-widget drag-as-a-unit, multi-delete/z-order, and context menu
+      wiring already exist and are directly reusable (`selectedWidgetIds`,
+      `removeWidgets`/`bringToFront`/`sendToBack` already take arrays,
+      `useWidgetDrag` already moves a whole selection by one delta). The
+      widget model (`shared/types.ts`) is currently strictly flat — no
+      parent/child/group concept anywhere — so this needs a data-model
+      addition (`groupId` tag vs. a real container entity) threaded through
+      `types.ts`, save/load migration, export, and subdeck logic
+      (`shared/subDecks.ts`). Undo/history should come for free via the
+      existing `updateWidgets`/`recordBeforeMutation` path. Resize stays
+      hard-gated to a single selected widget with no bounding-box
+      abstraction — deliberately out of scope here since building that is
+      the one piece that isn't a reuse of existing code.

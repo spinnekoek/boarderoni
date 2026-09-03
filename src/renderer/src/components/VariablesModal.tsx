@@ -4,6 +4,7 @@ import { useDashboardStore } from '../store'
 import { getIgnoredVariableIds, getVariablesFilter, nextId, setIgnoredVariableIds, setVariablesFilter } from '../id'
 import { useEscapeToClose } from '../useEscapeToClose'
 import { uniqueVariableName } from '../variableNaming'
+import { fuzzyScore } from '../fuzzyMatch'
 import type { Variable, VariableValue } from '@shared/types'
 
 // Above this row count, a list renders through @tanstack/react-virtual
@@ -462,7 +463,7 @@ export function VariablesModal({ onClose }: { onClose: () => void }): React.JSX.
     if (words.length === 0) return tabVariables
     return tabVariables.filter((v) => {
       const haystack = `${v.name.toLowerCase()} ${String(v.value).toLowerCase()}`
-      return words.every((word) => haystack.includes(word))
+      return words.every((word) => fuzzyScore(word, haystack) >= 0)
     })
   }, [tabVariables, search])
 

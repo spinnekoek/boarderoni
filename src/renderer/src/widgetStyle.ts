@@ -124,6 +124,7 @@ const DIAL_SHAPE_KEYS = [
   'circleIndentCount',
   'circleIndentSize',
   'circleIndentColor',
+  'circleIndentOpacity',
   'circleIndentDistance',
   'circleIndentShape',
   'indicatorShape',

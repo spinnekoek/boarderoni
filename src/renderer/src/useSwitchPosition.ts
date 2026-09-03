@@ -64,6 +64,12 @@ export function useSwitchPosition(
 
   const activeIndex = pending ?? exprIndex ?? (localIndex === null ? null : Math.min(localIndex, widget.positions.length - 1))
 
+  // DialSwitchWidget-only (see its own comment in shared/types.ts) — skips
+  // the optimistic `pending` hold below entirely, so a select() never makes
+  // activeIndex jump ahead of exprIndex; the needle only moves once the
+  // live expression itself catches up.
+  const waitForStateConfirm = widget.type === 'switch-dial' && (widget.waitForStateConfirm ?? false)
+
   function select(index: number): void {
     const previousIndex = activeIndex
     setLocalIndex(settleToInactive ? null : index)
@@ -71,7 +77,7 @@ export function useSwitchPosition(
     // plain manually-driven switch has no stale readback to race against,
     // so localIndex above already takes effect immediately with nothing to
     // hold against.
-    if (widget.activePositionExpr) {
+    if (widget.activePositionExpr && !waitForStateConfirm) {
       clearTimeout(pendingTimeoutRef.current)
       setPending(index)
       pendingTimeoutRef.current = setTimeout(() => setPending(null), PENDING_CONFIRM_TIMEOUT_MS)

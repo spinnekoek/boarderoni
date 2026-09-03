@@ -1123,6 +1123,9 @@ button.deck-button:focus-visible {
 	inset: 0;
 	width: 100%;
 	height: 100%;
+	/* Same SVG-clips-its-own-viewport fix as .deck-dial-switch__dial — this
+	   svg renders the exact same dialDistance-driven DialShapeGraphic. */
+	overflow: visible;
 }
 
 .deck-rocker-switch {
@@ -1353,6 +1356,19 @@ button.deck-button:focus-visible {
 	inset: 0;
 	width: 100%;
 	height: 100%;
+	/* SVG clips to its own viewport by default — without this, a dialShape
+	   pushed out far enough by dialDistance (e.g. to sit outside the ring of
+	   detents) gets cut off at the 0-100 viewBox edge instead of just
+	   overflowing past the track circle like it visually should. */
+	overflow: visible;
+}
+
+/* The needle/square/circle dial-shape's own top layer (see
+   DialSwitchWidget.tsx) — reuses .deck-dial-switch__dial's positioning but
+   stays click-through, since it's purely decorative and sits visually above
+   the actual clickable detent markers underneath it. */
+.deck-dial-switch__dial--indicator {
+	pointer-events: none;
 }
 
 .deck-dial-switch__detent {
@@ -1403,6 +1419,7 @@ button.deck-button:focus-visible {
    at the render site. */
 .deck-dial-shape__square-indicator {
 	position: absolute;
+	pointer-events: none;
 }
 
 .deck-dial-switch__detent-label {

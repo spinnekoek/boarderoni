@@ -13,7 +13,7 @@ import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
 
 const MIN_ZOOM = 0.1
-const MAX_ZOOM = 5
+const MAX_ZOOM = 7
 const PAN_THRESHOLD = 3
 
 interface PanState {

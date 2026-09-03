@@ -1,4 +1,5 @@
 import type { DialShapeStyle } from '@shared/types'
+import { withOpacity } from '@shared/color'
 import { needlePoints, polarToCartesian, roundedPolygonPath, viewBoxToPixel } from './arcPath'
 
 // Box size (viewBox units) for each detent/indicator shape — 'tick'/
@@ -214,7 +215,7 @@ export function DialShapeGraphic({
   const circleBorderColor = style.circleBorderColor ?? 'transparent'
   const circleIndentCount = style.circleIndentCount ?? 0
   const circleIndentSize = style.circleIndentSize ?? circleSize / 6
-  const circleIndentColor = style.circleIndentColor ?? trackColor
+  const circleIndentColor = withOpacity(style.circleIndentColor ?? trackColor, style.circleIndentOpacity ?? 1)
   const circleIndentDistance = style.circleIndentDistance ?? circleSize / 2
   const circleIndentShape = style.circleIndentShape ?? 'circle'
   const dialCenter = polarToCartesian(50, 50, dialDistance, angle)

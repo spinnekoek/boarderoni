@@ -1275,8 +1275,14 @@ export interface DialShapeStyle {
   // Radius, in the same 0-100 viewBox units as circleSize, of each notch.
   circleIndentSize?: number
   // Defaults to the dial face/track color, so a notch reads as the face
-  // showing through a bite taken out of the knob rather than a flat dot.
+  // showing through a bite taken out of the knob rather than a flat dot —
+  // but is a real, independently-settable color/opacity pair, not forced to
+  // track: pick any color to make the notch read as its own mark instead.
   circleIndentColor?: string
+  // Opacity for circleIndentColor. Unset defaults to fully opaque (1) —
+  // lower it to let the knob color show through the notch instead of a flat
+  // fill, e.g. a soft shadow-like bite rather than a hard-edged one.
+  circleIndentOpacity?: number
   // Distance from the (possibly dialDistance-offset) shape's own center to
   // each indent, same 0-100 viewBox convention as indicatorDistance. Unset
   // defaults to circleSize/2 (the knob's own rim) — where indents sat before
@@ -1386,6 +1392,22 @@ export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle, Widg
   // exception, since DialSwitchWidget's positions have no momentary concept
   // (see SwitchPosition.momentary's own comment).
   fireWhileDragging?: boolean
+  // 'drag' interactionMode only. Off by default (undefined ?? false —
+  // preserves the original behavior for every dial switch saved before this
+  // existed, no migration needed). Normally the needle previews live during
+  // a drag (see dragIndex in useDialSwitchDrag.ts/DialSwitchWidgetContent)
+  // and then optimistically holds the just-picked position (see `pending`
+  // in useSwitchPosition.ts) until activePositionExpr's own live value
+  // confirms it or PENDING_CONFIRM_TIMEOUT_MS gives up — both are local
+  // predictions of where the needle SHOULD end up. With this on, neither
+  // prediction happens: the drag still fires 'select'/positionChange (and
+  // increment/decrement) exactly like fireWhileDragging already does, but
+  // the needle itself only moves once activePositionExpr's bound variable
+  // actually changes — i.e. once whatever external system owns the real
+  // position (DCS-BIOS, a REST source, ...) confirms it. Meaningless
+  // without activePositionExpr set — with no live expr there's nothing for
+  // the needle to wait on, so it'd just never move.
+  waitForStateConfirm?: boolean
   track: ColorAppearance // dial face
   fill: ColorAppearance // needle/pointer color
   // Per-label label anchor — see WidgetLabel.labelAnchor.

@@ -87,7 +87,12 @@ export function useDialSwitchDrag(
     const rect = e.currentTarget.getBoundingClientRect()
     const angle = angleFromEvent(e, rect, rotateAngle)
     const index = nearestPositionIndex(widget, angle)
-    setDragIndex(index)
+    // waitForStateConfirm skips this local preview entirely — the needle is
+    // only supposed to move once activePositionExpr's own live value does,
+    // not the instant the drag passes a position (see its own comment in
+    // shared/types.ts). Firing below still happens exactly the same either
+    // way.
+    if (!widget.waitForStateConfirm) setDragIndex(index)
     // Defaults on — see fireWhileDragging's own comment in shared/types.ts.
     if ((widget.fireWhileDragging ?? true) && lastFiredIndexRef.current !== index) fireSelect(index)
     return index

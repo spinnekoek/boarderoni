@@ -4,6 +4,7 @@ import { useEditorSettings } from '../settingsStore'
 import { useConfirmStore } from '../confirmStore'
 import { nextId, isSectionOpen, setSectionOpen, getLastDcsAircraft, setLastDcsAircraft } from '../id'
 import { usePropertiesExpansionStore, expandAllSections, collapseAllSections } from '../propertiesExpansionStore'
+import { fuzzyScore } from '../fuzzyMatch'
 import { FONT_OPTIONS, resolveFont, customFontToOption } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, pickAutoBorderColor, pickLegibleTextColor } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING, DCS_COMMAND_VALUE_SHORTHAND } from '@shared/constants'
@@ -858,12 +859,18 @@ function DialShapeFields({
   onChange,
   fill,
   onFillChange,
+  track,
   needleColorLabel
 }: {
   value: DialShapeStyle
   onChange: (patch: Partial<DialShapeStyle>) => void
   fill: ColorAppearance
   onFillChange: (fill: ColorAppearance) => void
+  // Read-only — just the auto-fallback preview/value for Indent color (see
+  // circleIndentColor above), same role fill.color plays for circleColor's
+  // own auto fallback. No onTrackChange: this section never edits track
+  // itself, that lives in each widget's own "Colors" section.
+  track: ColorAppearance
   needleColorLabel: string
 }): React.JSX.Element {
   const isFillExpr = fill.colorExpr !== undefined
@@ -1035,6 +1042,18 @@ function DialShapeFields({
                 </select>
               </label>
             </div>
+            <div className="properties__field">
+              <span>Indent color</span>
+              <ColorPickerButton
+                value={value.circleIndentColor ?? track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => onChange({ circleIndentColor: color })}
+                auto={value.circleIndentColor === undefined}
+                onAuto={() => onChange({ circleIndentColor: undefined })}
+                opacity={value.circleIndentOpacity ?? 1}
+                onOpacityChange={(v) => onChange({ circleIndentOpacity: v })}
+              />
+            </div>
+            <p className="properties__hint">Auto matches the dial face/track color, so a notch reads as the face showing through. Pick a color to give it its own look instead.</p>
           </>
         )}
       </PropertiesSection>
@@ -1648,16 +1667,24 @@ function defaultArgumentFor(entry: DcsBiosCommandCatalogEntry): string {
   }
 }
 
-function groupCommandsByCategory(entries: DcsBiosCommandCatalogEntry[]): { category: string; entries: DcsBiosCommandCatalogEntry[] }[] {
+// When `entries` is already relevance-sorted (a search is active), groups
+// are left in the order their best entry first appears — a Map's keys
+// iterate in insertion order, so the category containing the top-scoring
+// entry (inserted first) naturally sorts first — instead of alphabetically,
+// so the group holding a search's best/exact match is the one shown at the
+// top rather than wherever its name happens to fall alphabetically.
+function groupCommandsByCategory(
+  entries: DcsBiosCommandCatalogEntry[],
+  sortAlphabetically = true
+): { category: string; entries: DcsBiosCommandCatalogEntry[] }[] {
   const byCategory = new Map<string, DcsBiosCommandCatalogEntry[]>()
   for (const entry of entries) {
     const list = byCategory.get(entry.category)
     if (list) list.push(entry)
     else byCategory.set(entry.category, [entry])
   }
-  return Array.from(byCategory, ([category, categoryEntries]) => ({ category, entries: categoryEntries })).sort((a, b) =>
-    a.category.localeCompare(b.category)
-  )
+  const groups = Array.from(byCategory, ([category, categoryEntries]) => ({ category, entries: categoryEntries }))
+  return sortAlphabetically ? groups.sort((a, b) => a.category.localeCompare(b.category)) : groups
 }
 
 // Editor for a ButtonWidget's SendDcsCommandAction — aircraft picker, then a
@@ -1808,12 +1835,31 @@ function SendDcsCommandActionEditor({
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase()
     if (!needle) return catalogEntries
-    return catalogEntries.filter(
-      (e) => e.label.toLowerCase().includes(needle) || e.identifier.toLowerCase().includes(needle) || e.category.toLowerCase().includes(needle)
-    )
+    return catalogEntries
+      .map((e) => ({
+        entry: e,
+        // Typing a DCS-BIOS identifier verbatim (e.g. "INS_SW") should
+        // always surface that exact command first, even over a fuzzy match
+        // against some longer identifier/label that happens to score just
+        // as well otherwise (a plain substring run scores identically
+        // whether it's the whole identifier or just part of a longer one —
+        // see fuzzyScore) — so an exact identifier match is forced above
+        // every fuzzy one instead of relying on score alone.
+        score:
+          e.identifier.toLowerCase() === needle
+            ? Infinity
+            : Math.max(
+                fuzzyScore(needle, e.label.toLowerCase()),
+                fuzzyScore(needle, e.identifier.toLowerCase()),
+                fuzzyScore(needle, e.category.toLowerCase())
+              )
+      }))
+      .filter((x) => x.score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .map((x) => x.entry)
   }, [catalogEntries, search])
-  const groups = useMemo(() => groupCommandsByCategory(filtered), [filtered])
   const hasSearch = search.trim().length > 0
+  const groups = useMemo(() => groupCommandsByCategory(filtered, !hasSearch), [filtered, hasSearch])
 
   const isExpr = action.argumentExpr !== undefined
   const draftRef = useRef(action.argumentExpr ?? '')
@@ -3894,6 +3940,7 @@ export function PropertiesPanel(): React.JSX.Element {
             onChange={patchAdjuster}
             fill={adjuster.fill}
             onFillChange={(fill) => patchAdjuster({ fill })}
+            track={adjuster.track}
             needleColorLabel="Needle color"
           />
         )}
@@ -4284,6 +4331,7 @@ export function PropertiesPanel(): React.JSX.Element {
           onChange={patchEncoder}
           fill={encoder.fill}
           onFillChange={(fill) => patchEncoder({ fill })}
+          track={encoder.track}
           needleColorLabel="Needle color"
         />
 
@@ -5601,6 +5649,21 @@ export function PropertiesPanel(): React.JSX.Element {
                   ? "Position Change (and that position's own actions, and Turn CW/CCW) fires the instant the drag reaches it, not just when you let go — the default. Turn this off to fire it once, only on release."
                   : 'Position Change fires once, when you release, instead of live as the needle crosses into each position during the drag.'}
               </p>
+              <label className="properties__checkbox">
+                <input
+                  type="checkbox"
+                  checked={sw.waitForStateConfirm ?? false}
+                  onChange={(e) => patchSwitch({ waitForStateConfirm: e.target.checked })}
+                />
+                Wait for state to confirm
+              </label>
+              <p className="properties__hint">
+                {sw.activePositionExpr === undefined
+                  ? 'Needs an Active position expression (below) to have anything to wait on — with none set, this has no effect.'
+                  : (sw.waitForStateConfirm ?? false)
+                    ? "The needle no longer previews or snaps to a position during the drag — it only moves once Active position's own live value actually changes, i.e. once whatever external system owns the real position confirms it. Position Change/Turn CW/CCW above still fire live exactly as configured; only the needle's own visible position waits."
+                    : "The needle previews live during the drag and holds the picked position until Active position's own value confirms it (or briefly reverts if it doesn't). Turn this on to have the needle wait for that confirmation instead of predicting it."}
+              </p>
             </>
           )}
 
@@ -5628,6 +5691,7 @@ export function PropertiesPanel(): React.JSX.Element {
             onChange={patchSwitch}
             fill={sw.fill}
             onFillChange={(fill) => patchSwitch({ fill })}
+            track={sw.track}
             needleColorLabel="Needle color"
           />
         </PropertiesSection>
