@@ -660,6 +660,21 @@ export interface AdjusterWidget extends DialShapeStyle, WidgetVisibility {
   fill: ColorAppearance
   track: ColorAppearance
   labels: WidgetLabel[]
+  // Slider style only — the little draggable handle. 'none' hides it
+  // entirely (e.g. a board that wants just the fill level to read as
+  // position, no separate knob). handleColor unset falls back to `fill`'s
+  // own resolved color (what every existing dashboard already looks like),
+  // and handleBorderColor unset means no visible border (0 width/transparent,
+  // same "always present, defaults to invisible" convention as
+  // innerBezelBorderColor above) — so a dashboard saved before these fields
+  // existed renders completely unchanged.
+  handleShape?: 'circle' | 'square' | 'none'
+  handleSize?: number
+  handleColor?: string
+  handleOpacity?: number
+  handleBorderColor?: string
+  handleBorderWidth?: number
+  handleBorderOpacity?: number
   // Slider style only — a knob has no rectangular box to round/border, same
   // reasoning as GaugeWidget's own radius/border fields above.
   radiusTopLeft?: number
@@ -2143,6 +2158,16 @@ export type ServerToClient =
   // dashboard with hundreds of variables would otherwise re-send all of them
   // on every single tick just because one changed.
   | { type: 'variables:delta'; variables: Variable[] }
+  // Edit-clients-only (see broadcastToEditClients in main/index.ts), fired
+  // whenever a view device presses/releases a ButtonWidget/MorphButtonWidget
+  // — see triggerAction's own comment for why only those two types. Lets the
+  // editor's own canvas preview (CanvasWidget.tsx) show a button's Clicked
+  // state live while a real device is physically holding it down, which it
+  // otherwise has no way to know at all: pressed/released is purely local
+  // client-side state on whichever device is touching it (usePressRelease in
+  // ViewCanvas.tsx) — the server only ever hears about a press to run its
+  // sequence, never broadcasts it back out, until now.
+  | { type: 'widget:live-press'; widgetId: string; pressed: boolean }
   // detail is only present when the failure happened mid-sequence (a
   // DelayStep/ActionStep threw inside runSequence) — omitted (not a
   // sentinel value) for a pre-sequence error like "Widget not found" or

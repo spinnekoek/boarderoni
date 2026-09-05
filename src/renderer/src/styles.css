@@ -775,17 +775,38 @@ needs to stretch or round at all. */
 	color: #6b7280;
 }
 
+/* The infinite pannable void outside the deck's own configured canvas size
+(see .canvas-page below) — plain dark fill, deliberately NOT the deck's own
+background color, so it reads as clearly "outside" no matter what a given
+deck's background happens to be. */
 .canvas-background {
 	flex: 1;
 	position: relative;
 	overflow: hidden;
 	cursor: grab;
-	background-image: radial-gradient(circle, #23262e 1px, transparent 1px);
-	background-size: 24px 24px;
+	background-color: #0b0c0f;
 }
 
 .canvas-background:active {
 	cursor: grabbing;
+}
+
+/* The deck's actual canvas — sized to Canvas size (Properties Panel, no
+widget selected) rather than the viewport, so panning/zooming past its edges
+visibly enters the dark void above instead of the deck's own background
+color filling the whole infinite viewport the way it used to. Lives inside
+.canvas-layer (already scale+translate transformed for zoom/pan), so its own
+background-size below is in plain world-space px — no manual zoom
+multiplication needed the way .canvas-background's old inline style once
+did. */
+.canvas-page {
+	position: absolute;
+	top: 0;
+	left: 0;
+	background-image: radial-gradient(circle, #23262e 1px, transparent 1px);
+	box-shadow:
+		0 0 0 1px rgba(255, 255, 255, 0.08),
+		0 8px 40px rgba(0, 0, 0, 0.55);
 }
 
 .dashboard-wallpaper {
@@ -1294,10 +1315,10 @@ button.deck-button:focus-visible {
 	border-radius: inherit;
 }
 
+/* size/shape/color/border are all set inline per-widget (see AdjusterBar in
+AdjusterWidget.tsx) — only the shadow (not itself a configurable field) lives
+here. */
 .deck-adjuster__handle {
-	width: 14px;
-	height: 14px;
-	border-radius: 50%;
 	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 

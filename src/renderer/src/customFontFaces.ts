@@ -33,7 +33,18 @@ export function syncCustomFontFaces(fonts: CustomFont[]): void {
     .map((font) => {
       const format = fontFormatHint(font.filename)
       const src = `url("${customFontUrl(font.id)}")${format ? ` format("${format}")` : ''}`
-      return `@font-face { font-family: ${JSON.stringify(customFontFieldValue(font.id))}; src: ${src}; }`
+      // font-display: block (not the default `auto`, which behaves like
+      // `swap` once its own brief block period elapses) — a multi-line label
+      // whose line-height is tuned for THIS font specifically (see
+      // CustomFont.lineHeight's own comment) can overlap when painted in
+      // whatever fallback font the browser substitutes while this is still
+      // downloading, since the fallback's own glyph metrics don't
+      // necessarily fit that tuning. `block` shows nothing for a brief
+      // moment instead of the mismatched fallback, then always swaps in
+      // this font once it arrives (served from localhost, so that's
+      // normally on the order of milliseconds) rather than giving up and
+      // keeping the fallback the way `swap`'s failure mode can.
+      return `@font-face { font-family: ${JSON.stringify(customFontFieldValue(font.id))}; src: ${src}; font-display: block; }`
     })
     .join('\n')
   styleElement().textContent = css

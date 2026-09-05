@@ -30,9 +30,13 @@ export function OverlayPanel({
   edge,
   size,
   sizeUnit,
+  scale,
+  canvasWidth,
+  canvasHeight,
   variables,
   deckId,
   errors,
+  customFonts,
   backgroundColor,
   backgroundImageVersion,
   backgroundFit,
@@ -43,9 +47,24 @@ export function OverlayPanel({
   edge: OverlayEdge
   size: number
   sizeUnit: OverlaySizeUnit
+  // The main canvas's own current letterbox scale-to-fit factor (see
+  // ViewCanvas's mainScale) — applied to the panel's own px-based edge size
+  // below (a raw device-pixel sizeCss would be a completely different
+  // proportion of the screen on a phone than on the design resolution it
+  // was authored against; 'percent' is already a fraction of the real
+  // screen, correct as-is) AND, unconditionally regardless of sizeUnit, to
+  // the widget content below — see its own comment for why that can't just
+  // reuse LetterboxedCanvas.
+  scale: number
+  // This sub-deck's own reference resolution (see getSubDeckCanvasSize in
+  // shared/subDecks.ts) — widgets below are authored against this, not the
+  // panel's own real on-screen box.
+  canvasWidth: number
+  canvasHeight: number
   variables: VariableMap
   deckId: string | null
   errors: Record<string, string>
+  customFonts: unknown
   backgroundColor: string
   backgroundImageVersion?: number
   backgroundFit?: BackgroundFit
@@ -58,7 +77,7 @@ export function OverlayPanel({
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  const sizeCss = sizeUnit === 'px' ? `${size}px` : `${size}%`
+  const sizeCss = sizeUnit === 'px' ? `${size * scale}px` : `${size}%`
 
   return (
     <>
@@ -68,16 +87,37 @@ export function OverlayPanel({
         style={{ ...panelStyle(edge, sizeCss, open), backgroundColor }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {backgroundImageVersion && deckId && (
-          <div
-            className="dashboard-wallpaper"
-            style={{
-              backgroundImage: `url(${backgroundImageUrl(deckId, backgroundImageVersion)})`,
-              ...backgroundImageStyle(backgroundFit ?? 'cover', backgroundAnchor ?? 'center')
-            }}
-          />
-        )}
-        <ScreenWidgetsLayer widgets={subDeck.widgets} variables={variables} deckId={deckId} errors={errors} />
+        {/* Deliberately NOT a LetterboxedCanvas — that fits its content to
+        whatever real pixel box it's actually measured inside of, but this
+        panel's own box is already sized as `scale` fraction of its design
+        size (sizeCss above), so independently re-fitting content to that
+        (already-scaled-down) box would scale it down a SECOND time. This
+        widget content instead gets the exact same `scale` factor applied
+        directly, at its own true canvasWidth/canvasHeight size — one
+        global scale, matching how the main canvas's own widgets are scaled,
+        not a second independently-computed fit-to-container ratio. */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: canvasWidth,
+            height: canvasHeight,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left'
+          }}
+        >
+          {backgroundImageVersion && deckId && (
+            <div
+              className="dashboard-wallpaper"
+              style={{
+                backgroundImage: `url(${backgroundImageUrl(deckId, backgroundImageVersion)})`,
+                ...backgroundImageStyle(backgroundFit ?? 'cover', backgroundAnchor ?? 'center')
+              }}
+            />
+          )}
+          <ScreenWidgetsLayer widgets={subDeck.widgets} variables={variables} deckId={deckId} errors={errors} customFonts={customFonts} />
+        </div>
       </div>
     </>
   )

@@ -1473,10 +1473,18 @@ function broadcastToRoom(room: DeckRoom, message: ServerToClient, exclude?: WebS
 // use for and shouldn't be bothered with.
 function broadcastToEditClients(room: DeckRoom, message: ServerToClient): void {
   const payload = JSON.stringify(message)
+  // widget:live-press is per-widget, unlike every other type here (each of
+  // which has exactly one live value per room/socket) — coalescing it under
+  // the bare type would let a queued press for one button get silently
+  // replaced by a queued release for a totally different one, same failure
+  // shape queueSend's own comment on QUEUE_MERGE describes for
+  // variables:delta. Scoping the coalescing key to this widget specifically
+  // keeps "only the latest matters" true per-widget instead of per-type.
+  const coalesceKey = message.type === 'widget:live-press' ? `${message.type}:${message.widgetId}` : message.type
   for (const client of room.sockets) {
     const ctx = socketContext.get(client)
     if (client.readyState === WebSocket.OPEN && ctx?.role === 'edit') {
-      queueSend(client, message.type, payload)
+      queueSend(client, coalesceKey, payload)
     }
   }
 }
@@ -2061,6 +2069,18 @@ async function triggerAction(
   if (widget.type === 'gauge' || widget.type === 'screen-capture' || widget.type === 'label') {
     sendError(ws, widgetId, 'This widget cannot be triggered')
     return
+  }
+
+  // Only the two StatefulWidget types (see getEffectiveStates in
+  // shared/states.ts) have a Clicked state the editor's own canvas preview
+  // could show — every other widget type's press/release below has no such
+  // concept, so there's nothing for this to drive there. Not tracked
+  // per-device: a device vanishing mid-press without ever sending 'release'
+  // would leave this stuck true in the (rare) worst case, self-correcting on
+  // this widget's next real press/release — deliberately not worth guarding
+  // against with per-device bookkeeping for a purely cosmetic editor preview.
+  if ((widget.type === 'button' || widget.type === 'morph') && (event === 'press' || event === 'release')) {
+    broadcastToEditClients(room, { type: 'widget:live-press', widgetId, pressed: event === 'press' })
   }
 
   // The switch widgets (RockerSwitchWidget/DialSwitchWidget/

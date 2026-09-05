@@ -522,6 +522,13 @@ interface ViewWidgetProps {
   variables: VariableMap
   deckId: string | null
   error?: string
+  // Not read by any widget content component — purely a memo-invalidation
+  // signal (the store's `customFonts` array reference, see
+  // viewWidgetPropsEqual's own comment on why it's compared below). Threaded
+  // through as a prop rather than read from the store here so this stays a
+  // plain function with no store subscription of its own, same as every
+  // other widget content component.
+  customFonts: unknown
 }
 
 // Only re-render if a variable this SPECIFIC widget's own expressions
@@ -534,8 +541,24 @@ interface ViewWidgetProps {
 // Object.is per prop) can't tell "variables changed" from "a variable this
 // widget doesn't even use changed" apart, which was exactly the cause of a
 // reported adjuster-drag stutter recurring on a steady ~1s cadence.
+//
+// customFonts is checked separately, unconditionally — a label using a
+// custom font (WidgetLabel.fontFamily) reads that font's own lineHeight
+// override via a plain module-level lookup (registerCustomFonts in
+// shared/fonts.ts), not a store subscription, so it's invisible to a normal
+// props-equal check. If this widget's very first render lands before that
+// font's own fonts:list message is processed (a real race right after
+// connect), it bakes in the wrong (default) line-height and then — being
+// otherwise fully memoized, correctly, against re-rendering for no reason —
+// never gets a second chance to recompute it, staying visibly wrong (a
+// multi-line label's lines overlapping) until something else entirely
+// happens to force this specific widget to re-render. Comparing customFonts
+// here forces exactly the one corrective re-render every widget needs
+// whenever that list actually changes, without giving up fine-grained
+// memoization the rest of the time.
 function viewWidgetPropsEqual(prev: ViewWidgetProps, next: ViewWidgetProps): boolean {
   if (prev.widget !== next.widget || prev.deckId !== next.deckId || prev.error !== next.error) return false
+  if (prev.customFonts !== next.customFonts) return false
   if (prev.variables === next.variables) return true
   const deps = widgetVariableDependencies(next.widget)
   if (deps === null) return false
@@ -566,6 +589,8 @@ const ViewWidget = memo(function ViewWidget({
   deckId,
   error
 }: ViewWidgetProps): React.JSX.Element {
+  // customFonts itself isn't used here — see ViewWidgetProps' own comment,
+  // it's only present so viewWidgetPropsEqual can see it change.
   if (widget.type === 'gauge') return <GaugeWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'label') return <LabelWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'line') return <LineWidgetContent widget={widget} variables={variables} />
@@ -596,7 +621,7 @@ const ViewWidget = memo(function ViewWidget({
 // traffic despite a small, infrequent message stream (buf staying at 0B
 // rules out the network/server side entirely — see StatusBar.tsx's own
 // device:lag-report tooltip for what buf actually measures).
-const ViewWidgetSlot = memo(function ViewWidgetSlot({ widget, variables, deckId, error }: ViewWidgetProps): React.JSX.Element | null {
+const ViewWidgetSlot = memo(function ViewWidgetSlot({ widget, variables, deckId, error, customFonts }: ViewWidgetProps): React.JSX.Element | null {
   if (!resolveWidgetVisible(widget, variables)) return null
   const rendered = widget.type === 'morph' ? morphFootprint(widget) : widget
   return (
@@ -604,7 +629,7 @@ const ViewWidgetSlot = memo(function ViewWidgetSlot({ widget, variables, deckId,
       className={`view-canvas__widget${widget.type === 'morph' ? ' view-canvas__widget--morph' : ''}`}
       style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
     >
-      <ViewWidget widget={widget} variables={variables} deckId={deckId} error={error} />
+      <ViewWidget widget={widget} variables={variables} deckId={deckId} error={error} customFonts={customFonts} />
     </div>
   )
 }, viewWidgetPropsEqual)
@@ -617,17 +642,19 @@ export function ScreenWidgetsLayer({
   widgets,
   variables,
   deckId,
-  errors
+  errors,
+  customFonts
 }: {
   widgets: Widget[]
   variables: VariableMap
   deckId: string | null
   errors: Record<string, string>
+  customFonts: unknown
 }): React.JSX.Element {
   return (
     <>
       {widgets.map((widget) => (
-        <ViewWidgetSlot key={widget.id} widget={widget} variables={variables} deckId={deckId} error={errors[widget.id]} />
+        <ViewWidgetSlot key={widget.id} widget={widget} variables={variables} deckId={deckId} error={errors[widget.id]} customFonts={customFonts} />
       ))}
     </>
   )
@@ -656,6 +683,21 @@ export function ViewCanvas(): React.JSX.Element {
   // Guards against a stale reference — the sub-deck an open overlay names
   // may have been deleted (from the editor) while it was showing.
   const overlaySubDeck = activeOverlay ? findSubDeck({ subDecks }, activeOverlay.subDeckId) : undefined
+  // The overlay's own reference resolution (a sub-deck can set its own,
+  // independent of the root deck's — see getSubDeckCanvasSize's own
+  // comment), so OverlayPanel can letterbox-scale its widgets the exact same
+  // way the main canvas below does. Without this, an overlay's widgets
+  // rendered at their raw authored x/y/w/h against whatever the panel's own
+  // real on-screen box happens to be — correct only by coincidence on a
+  // screen that happens to match the design resolution, comically oversized
+  // on anything smaller (a phone in particular).
+  const overlayCanvasSize = useMemo(
+    () =>
+      activeOverlay
+        ? getSubDeckCanvasSize({ canvasWidth: rootCanvasWidth, canvasHeight: rootCanvasHeight, subDecks }, activeOverlay.subDeckId)
+        : null,
+    [activeOverlay, rootCanvasWidth, rootCanvasHeight, subDecks]
+  )
   const variables = useDashboardStore((s) => s.dashboard.variables)
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
   const backgroundColorExpr = useDashboardStore((s) => s.dashboard.backgroundColorExpr)
@@ -664,6 +706,15 @@ export function ViewCanvas(): React.JSX.Element {
   const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
   const backgroundAnchor = useDashboardStore((s) => s.dashboard.backgroundAnchor)
   const errors = useDashboardStore((s) => s.errors)
+  // See ViewWidgetProps' own comment — purely a memo-invalidation signal
+  // threaded down to every widget, not read directly here.
+  const customFonts = useDashboardStore((s) => s.customFonts)
+  // The main canvas's own current scale-to-fit factor (see
+  // LetterboxedCanvas's onScaleChange) — an open overlay's own px-based edge
+  // size (OpenOverlayAction.size/sizeUnit) is authored against the same
+  // design resolution the main canvas is, so it needs the same factor
+  // applied rather than being a raw device-pixel measurement.
+  const [mainScale, setMainScale] = useState(1)
 
   const variableMap = useMemo(() => toVariableMap(variables ?? []), [variables])
   const resolvedBackgroundColor =
@@ -716,7 +767,7 @@ export function ViewCanvas(): React.JSX.Element {
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
     >
-      <LetterboxedCanvas canvasWidth={canvasSize.width} canvasHeight={canvasSize.height}>
+      <LetterboxedCanvas canvasWidth={canvasSize.width} canvasHeight={canvasSize.height} onScaleChange={setMainScale}>
         {backgroundImageVersion && deckId && (
           <div
             className="dashboard-wallpaper"
@@ -726,17 +777,21 @@ export function ViewCanvas(): React.JSX.Element {
             }}
           />
         )}
-        <ScreenWidgetsLayer widgets={widgets} variables={variableMap} deckId={deckId} errors={errors} />
+        <ScreenWidgetsLayer widgets={widgets} variables={variableMap} deckId={deckId} errors={errors} customFonts={customFonts} />
       </LetterboxedCanvas>
-      {activeOverlay && overlaySubDeck && (
+      {activeOverlay && overlaySubDeck && overlayCanvasSize && (
         <OverlayPanel
           subDeck={overlaySubDeck}
           edge={activeOverlay.edge}
           size={activeOverlay.size}
           sizeUnit={activeOverlay.sizeUnit}
+          scale={mainScale}
+          canvasWidth={overlayCanvasSize.width}
+          canvasHeight={overlayCanvasSize.height}
           variables={variableMap}
           deckId={deckId}
           errors={errors}
+          customFonts={customFonts}
           backgroundColor={resolvedBackgroundColor}
           backgroundImageVersion={backgroundImageVersion}
           backgroundFit={backgroundFit}

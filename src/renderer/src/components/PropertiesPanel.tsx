@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useDashboardStore, useGridSize } from '../store'
+import { useDashboardStore, useGridSize, useCanvasSize } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useConfirmStore } from '../confirmStore'
 import { nextId, isSectionOpen, setSectionOpen, getLastDcsAircraft, setLastDcsAircraft } from '../id'
@@ -2559,6 +2559,8 @@ export function PropertiesPanel(): React.JSX.Element {
   const selectedWidgetIds = useDashboardStore((s) => s.selectedWidgetIds)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
   const updateDashboardMeta = useDashboardStore((s) => s.updateDashboardMeta)
+  const canvasSize = useCanvasSize()
+  const setCanvasSize = useDashboardStore((s) => s.setCanvasSize)
   const uploadBackgroundImage = useDashboardStore((s) => s.uploadBackgroundImage)
   const clearBackgroundImage = useDashboardStore((s) => s.clearBackgroundImage)
   const removeWidget = useDashboardStore((s) => s.removeWidget)
@@ -2733,6 +2735,28 @@ export function PropertiesPanel(): React.JSX.Element {
         <label className="properties__field">
           <span>Deck name</span>
           <input value={dashboard.name} onChange={(e) => updateDashboardMeta({ name: e.target.value })} />
+        </label>
+
+        <label
+          className="properties__field"
+          title="The reference resolution this screen's widgets are positioned against. Deployed clients (Chrome, tablet) scale/letterbox to this size rather than stretching to their own actual viewport — its own value per screen, same as grid size."
+        >
+          <span>Canvas size</span>
+          <div className="color-picker-button__row">
+            <input
+              type="number"
+              min={1}
+              value={canvasSize.width}
+              onChange={(e) => setCanvasSize(Number(e.target.value), canvasSize.height)}
+            />
+            <span>×</span>
+            <input
+              type="number"
+              min={1}
+              value={canvasSize.height}
+              onChange={(e) => setCanvasSize(canvasSize.width, Number(e.target.value))}
+            />
+          </div>
         </label>
 
         <div className="properties__field">
@@ -3878,6 +3902,65 @@ export function PropertiesPanel(): React.JSX.Element {
             />
           </div>
         </PropertiesSection>
+
+        {adjuster.style === 'slider' && (
+          <PropertiesSection title="Handle">
+            <label className="properties__field">
+              <span>Shape</span>
+              <select
+                value={adjuster.handleShape ?? 'circle'}
+                onChange={(e) => patchAdjuster({ handleShape: e.target.value as NonNullable<AdjusterWidget['handleShape']> })}
+              >
+                <option value="circle">Circle</option>
+                <option value="square">Square</option>
+                <option value="none">None</option>
+              </select>
+            </label>
+
+            {(adjuster.handleShape ?? 'circle') !== 'none' && (
+              <>
+                <label className="properties__field">
+                  <span>Size</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={adjuster.handleSize ?? 14}
+                    onChange={(e) => patchAdjuster({ handleSize: Math.max(1, Number(e.target.value)) })}
+                  />
+                </label>
+                <div className="properties__field">
+                  <span>Color</span>
+                  <ColorPickerButton
+                    value={adjuster.handleColor ?? adjuster.fill.color ?? DEFAULT_WIDGET_COLOR}
+                    onChange={(color) => patchAdjuster({ handleColor: color })}
+                    auto={adjuster.handleColor === undefined}
+                    onAuto={() => patchAdjuster({ handleColor: undefined })}
+                    opacity={adjuster.handleOpacity ?? 1}
+                    onOpacityChange={(v) => patchAdjuster({ handleOpacity: v })}
+                  />
+                </div>
+                <label className="properties__field">
+                  <span>Border width</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={adjuster.handleBorderWidth ?? 0}
+                    onChange={(e) => patchAdjuster({ handleBorderWidth: Math.max(0, Number(e.target.value)) })}
+                  />
+                </label>
+                <div className="properties__field">
+                  <span>Border color</span>
+                  <ColorPickerButton
+                    value={adjuster.handleBorderColor ?? DEFAULT_WIDGET_COLOR}
+                    onChange={(color) => patchAdjuster({ handleBorderColor: color })}
+                    opacity={adjuster.handleBorderOpacity ?? 1}
+                    onOpacityChange={(v) => patchAdjuster({ handleBorderOpacity: v })}
+                  />
+                </div>
+              </>
+            )}
+          </PropertiesSection>
+        )}
 
         {adjuster.style === 'knob' && (
           <PropertiesSection title="Base circle">

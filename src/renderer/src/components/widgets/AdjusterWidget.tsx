@@ -16,12 +16,14 @@ function AdjusterBar({
   fraction,
   fillColor,
   trackColor,
-  orientation
+  orientation,
+  widget
 }: {
   fraction: number
   fillColor: string
   trackColor: string
   orientation: 'horizontal' | 'vertical'
+  widget: AdjusterWidget
 }): React.JSX.Element {
   const fillStyle: React.CSSProperties =
     orientation === 'vertical'
@@ -32,12 +34,32 @@ function AdjusterBar({
       ? { position: 'absolute', left: '50%', bottom: `${fraction * 100}%`, transform: 'translate(-50%, 50%)' }
       : { position: 'absolute', top: '50%', left: `${fraction * 100}%`, transform: 'translate(-50%, -50%)' }
 
+  const handleShape = widget.handleShape ?? 'circle'
+  const handleSize = widget.handleSize ?? 14
+  const handleColor = withOpacity(widget.handleColor ?? fillColor, widget.handleOpacity ?? 1)
+  const handleBorderWidth = widget.handleBorderWidth ?? 0
+  const handleBorderColor = withOpacity(widget.handleBorderColor ?? 'transparent', widget.handleBorderOpacity ?? 1)
+
   return (
     <>
       <div className="deck-adjuster__track" style={{ backgroundColor: trackColor }}>
         <div style={fillStyle} />
       </div>
-      <div className="deck-adjuster__handle" style={{ ...handleStyle, backgroundColor: fillColor }} />
+      {handleShape !== 'none' && (
+        <div
+          className="deck-adjuster__handle"
+          style={{
+            ...handleStyle,
+            width: handleSize,
+            height: handleSize,
+            borderRadius: handleShape === 'circle' ? '50%' : 0,
+            backgroundColor: handleColor,
+            borderStyle: handleBorderWidth > 0 ? 'solid' : undefined,
+            borderWidth: handleBorderWidth > 0 ? handleBorderWidth : undefined,
+            borderColor: handleBorderWidth > 0 ? handleBorderColor : undefined
+          }}
+        />
+      )}
     </>
   )
 }
@@ -220,7 +242,13 @@ export function AdjusterWidgetContent({
           debugMode={debugMode}
         />
       ) : (
-        <AdjusterBar fraction={fraction} fillColor={fillColor} trackColor={trackColor} orientation={widget.orientation ?? 'vertical'} />
+        <AdjusterBar
+          fraction={fraction}
+          fillColor={fillColor}
+          trackColor={trackColor}
+          orientation={widget.orientation ?? 'vertical'}
+          widget={widget}
+        />
       )}
       {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
     </div>

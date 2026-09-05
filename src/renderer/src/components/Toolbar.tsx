@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useEditorSettings } from '../settingsStore'
 import { useDebugConsoleStore } from '../debugConsoleStore'
 import { useHistoryStore } from '../historyStore'
-import { useDashboardStore, useGridSize, useCanvasSize } from '../store'
+import { useDashboardStore, useGridSize } from '../store'
 import { DEVICE_PRESETS } from '../devicePresets'
 import { displayDeviceName } from '@shared/deviceName'
 import { VariablesModal } from './VariablesModal'
@@ -29,8 +29,6 @@ export function Toolbar(): React.JSX.Element {
   const gridSize = useGridSize()
   const setSnapToGrid = useEditorSettings((s) => s.setSnapToGrid)
   const setGridSize = useDashboardStore((s) => s.setGridSize)
-  const canvasSize = useCanvasSize()
-  const setCanvasSize = useDashboardStore((s) => s.setCanvasSize)
   const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
   const setSelectedDeviceId = useEditorSettings((s) => s.setSelectedDeviceId)
   const debugMode = useEditorSettings((s) => s.debugMode)
@@ -97,26 +95,6 @@ export function Toolbar(): React.JSX.Element {
           value={gridSize}
           disabled={!snapToGrid}
           onChange={(e) => setGridSize(Number(e.target.value))}
-        />
-        <span className="toolbar__unit">px</span>
-      </label>
-      <label
-        className="toolbar__control"
-        title="The reference resolution this screen's widgets are positioned against. Deployed clients (Chrome, tablet) scale/letterbox to this size rather than stretching to their own actual viewport — its own value per screen, same as grid size above."
-      >
-        <span>Canvas size</span>
-        <input
-          type="number"
-          min={1}
-          value={canvasSize.width}
-          onChange={(e) => setCanvasSize(Number(e.target.value), canvasSize.height)}
-        />
-        <span className="toolbar__unit">×</span>
-        <input
-          type="number"
-          min={1}
-          value={canvasSize.height}
-          onChange={(e) => setCanvasSize(canvasSize.width, Number(e.target.value))}
         />
         <span className="toolbar__unit">px</span>
       </label>

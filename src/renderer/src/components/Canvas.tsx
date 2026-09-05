@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { useDashboardStore, useGridSize } from '../store'
+import { useDashboardStore, useGridSize, useCanvasSize } from '../store'
 import { useEditorSettings, INITIAL_CAMERA } from '../settingsStore'
 import { useEditorShortcuts } from '../useEditorShortcuts'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
@@ -48,6 +48,18 @@ export function Canvas(): React.JSX.Element {
   const rootWidgets = useDashboardStore((s) => s.dashboard.widgets)
   const subDecks = useDashboardStore((s) => s.dashboard.subDecks)
   const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
+  // Unused beyond the subscription itself — registerCustomFonts (called from
+  // this same fonts:list handler in store.ts) updates a plain module-level
+  // Map, not React state, so a label already rendered before that arrives
+  // (a real race on first connect: dashboard:sync's own render can land
+  // before the very next WS message is processed) never automatically
+  // re-renders once a custom font's own lineHeight override becomes
+  // available — it stays stuck on DEFAULT_LABEL_LINE_HEIGHT, which is what
+  // was overlapping a multi-line label until something UNRELATED happened to
+  // re-render it later. Subscribing to customFonts here, at the top of the
+  // whole widget tree, forces exactly that one corrective re-render the
+  // moment fonts:list actually arrives.
+  useDashboardStore((s) => s.customFonts)
   const widgets = useMemo(
     () => getSubDeckWidgets({ widgets: rootWidgets, subDecks }, editingSubDeckId),
     [rootWidgets, subDecks, editingSubDeckId]
@@ -65,6 +77,7 @@ export function Canvas(): React.JSX.Element {
   const selectWidgets = useDashboardStore((s) => s.selectWidgets)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useGridSize()
+  const canvasSize = useCanvasSize()
   const selectedDeviceId = useEditorSettings((s) => s.selectedDeviceId)
 
   useEditorShortcuts()
@@ -207,17 +220,17 @@ export function Canvas(): React.JSX.Element {
         onPointerMove={handleBackgroundPointerMove}
         onPointerUp={handleBackgroundPointerUp}
         onContextMenu={handleBackgroundContextMenu}
-        style={
-          snapToGrid
-            ? {
-                backgroundColor: resolvedBackgroundColor,
-                backgroundSize: `${gridSize * camera.zoom}px ${gridSize * camera.zoom}px`,
-                backgroundPosition: `${camera.x}px ${camera.y}px`
-              }
-            : { backgroundColor: resolvedBackgroundColor, backgroundImage: 'none' }
-        }
       >
         <div className="canvas-layer" style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
+          <div
+            className="canvas-page"
+            style={{
+              width: canvasSize.width,
+              height: canvasSize.height,
+              backgroundColor: resolvedBackgroundColor,
+              ...(snapToGrid ? { backgroundSize: `${gridSize}px ${gridSize}px` } : { backgroundImage: 'none' })
+            }}
+          />
           <div className="canvas-device-bounds" style={{ width: activeDevice.width, height: activeDevice.height }}>
             <span className="canvas-device-bounds__label">
               {activeDeviceLabel} — {activeDevice.width}×{activeDevice.height}
