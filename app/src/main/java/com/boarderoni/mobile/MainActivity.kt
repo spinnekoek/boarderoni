@@ -113,6 +113,12 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_main)
 
+        // Lets `chrome://inspect` on a USB-connected desktop attach to this
+        // WebView's DevTools (Console/Network/Performance) — off by default,
+        // Android doesn't imply it from a debuggable build the way some other
+        // frameworks do. Debug-build-only so a release APK never exposes it.
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
+
         webView = findViewById(R.id.webview)
         statusText = findViewById(R.id.status_text)
         statusOverlay = findViewById(R.id.status_overlay)
