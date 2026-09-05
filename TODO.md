@@ -30,6 +30,11 @@ off as they're fixed; add new ones as they come up.
       in `applyRestIncoming` (~line 1630). Both fire continuously per tick,
       not per user action, so weigh whether logging there is actually
       useful (debug panel's groupSimilar dedup helps) vs. just noise.
+      Same audit should confirm every renderer-evaluated fx field (colorExpr/
+      borderColorExpr/textExpr/activeStateExpr/etc. — anything going through
+      `tryEvaluateExpression` in a renderer, not main) reaches the debug
+      panel's console.log sink too, unless it only ever runs server-side
+      (main process, no debug panel to show it in).
 
 ## Performance
 

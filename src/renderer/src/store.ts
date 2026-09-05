@@ -315,11 +315,70 @@ let socket: WebSocket | null = null
 // without it, the existing auto-reconnect would silently redial the same
 // deck 1.5s after the user chose to leave it.
 let intentionalDisconnect = false
+// Drives syncClock() on a recurring cadence for as long as `socket` above is
+// open — created in connect()'s 'open' handler, cleared in its 'close'
+// handler (both below). Module-level for the same reason `socket` is: this
+// is connection lifecycle state, not something any component renders.
+let clockSyncInterval: ReturnType<typeof setInterval> | null = null
 
 function send(message: ClientToServer): void {
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message))
   }
+}
+
+// Estimated serverClock - clientClock, in ms — see syncClock/'time:sync-
+// reply' below. 0 (assume clocks agree) until the first reply arrives, same
+// as before this existed; deliberately module-level rather than store state
+// since nothing renders it directly, it only ever corrects a computation.
+let clockOffsetMs = 0
+// True once at least one 'time:sync-reply' has landed — see
+// reportLagFromServerTime below, which withholds reporting until then rather
+// than reporting through a clockOffsetMs still at its stale/zero default.
+let hasClockOffset = false
+// Re-measured periodically (not just once at connect) so a device whose
+// clock drifts — or one that was mid-adjustment (e.g. NTP catching up right
+// after boot) when it first connected — doesn't stay stuck with a stale
+// offset for the rest of a long session.
+const CLOCK_SYNC_INTERVAL_MS = 30_000
+// Floor between device:lag-report sends — dashboard:sync can fire every
+// animation frame mid-drag, and reporting on every single one would just add
+// another flood of messages on top of the exact problem this is meant to
+// diagnose.
+const LAG_REPORT_MIN_INTERVAL_MS = 1000
+let lastLagReportAt = 0
+
+function syncClock(): void {
+  send({ type: 'time:sync', clientSentAt: Date.now() })
+}
+
+// Computes and (throttled) reports lag right when a fresh server timestamp
+// actually arrives — either dashboard:sync's generatedAt or time:heartbeat's
+// serverTime (see both handlers below), the latter arriving on a fixed
+// cadence regardless of dashboard activity specifically so there's always
+// something to measure against even while idle (see main/index.ts's
+// HEARTBEAT_BROADCAST_MS). This deliberately does NOT poll Date.now() on its
+// own independent timer: an earlier version did, and its poll cadence
+// (1500ms) being out of phase with the heartbeat's own broadcast cadence
+// (2000ms) produced a sawtooth — every 4th poll happened to land right after
+// a heartbeat had just arrived (their LCM is 6000ms = 4 polls), reading
+// near-zero, with the other three reading progressively higher. Measuring at
+// the moment each fresh timestamp lands avoids that aliasing entirely: what
+// gets reported is the actual one-way gap for that specific message, not a
+// sample taken at an arbitrary point relative to it.
+function reportLagFromServerTime(serverTime: number): void {
+  // Withheld (not reported as 0 or as the raw uncorrected value) until the
+  // first time:sync-reply lands — otherwise the very first dashboard:sync of
+  // a connection (sent immediately in reply to 'hello', almost always ahead
+  // of this same connection's own time:sync round trip completing) would
+  // report through clockOffsetMs still at its default. The very next
+  // heartbeat, at most HEARTBEAT_BROADCAST_MS later, retries once it's set.
+  if (!hasClockOffset) return
+  const now = Date.now()
+  if (now - lastLagReportAt < LAG_REPORT_MIN_INTERVAL_MS) return
+  lastLagReportAt = now
+  const lagMs = Math.max(0, now + clockOffsetMs - serverTime)
+  send({ type: 'device:lag-report', lagMs })
 }
 
 // Separate from `socket` on purpose — see connectLobby's comment on why
@@ -579,10 +638,25 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     ws.addEventListener('open', () => {
       set({ connected: true })
       sendHello(mode)
+      syncClock()
+      if (clockSyncInterval) clearInterval(clockSyncInterval)
+      clockSyncInterval = setInterval(syncClock, CLOCK_SYNC_INTERVAL_MS)
+      // Fresh connection, fresh offset — a clockOffsetMs left over from a
+      // previous connection (e.g. a brief network drop, same server) is
+      // still a reasonable estimate, but hasClockOffset resetting means
+      // reportLagFromServerTime withholds reporting again just until the
+      // very next time:sync-reply confirms it (or replaces it), rather than
+      // ever reporting through a value that's technically stale.
+      hasClockOffset = false
+      lastLagReportAt = 0
     })
 
     ws.addEventListener('close', (event) => {
       socket = null
+      if (clockSyncInterval) {
+        clearInterval(clockSyncInterval)
+        clockSyncInterval = null
+      }
       if (intentionalDisconnect) {
         intentionalDisconnect = false
         return
@@ -631,6 +705,28 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // matters: it's what lets ViewWidget/CanvasWidget's React.memo
         // actually skip re-rendering widgets a drag tick didn't touch.
         set({ dashboard: reconcileDashboard(get().dashboard, message.dashboard), devicePending: false })
+        reportLagFromServerTime(message.generatedAt)
+      } else if (message.type === 'time:heartbeat') {
+        // Arrives every HEARTBEAT_BROADCAST_MS regardless of dashboard
+        // activity — see reportLagFromServerTime's own comment for why that
+        // matters: without this, an idle-but-healthy connection would look
+        // like it's falling further behind the longer nobody edits anything,
+        // simply because there'd be nothing new to have received.
+        reportLagFromServerTime(message.serverTime)
+      } else if (message.type === 'time:sync-reply') {
+        // Standard NTP-style offset estimate, assuming symmetric latency
+        // each way: the server's clock reading corresponds to the midpoint
+        // of this round trip on the client's own clock (clientSentAt +
+        // rtt/2), so offset (serverClock - clientClock) is serverTime minus
+        // that midpoint. Overwrites any previous estimate outright rather
+        // than averaging — a fresh measurement is always at least as good as
+        // one from CLOCK_SYNC_INTERVAL_MS ago, and averaging would only slow
+        // down how fast a real drift gets corrected.
+        {
+          const rtt = Date.now() - message.clientSentAt
+          clockOffsetMs = message.serverTime - message.clientSentAt - rtt / 2
+          hasClockOffset = true
+        }
       } else if (message.type === 'device:pending') {
         set({ devicePending: true })
       } else if (message.type === 'device:denied') {
@@ -642,11 +738,27 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       } else if (message.type === 'device:approved-list') {
         set({ approvedDevices: message.devices })
       } else if (message.type === 'variables:sync') {
-        // Same effect as a dashboard:sync as far as `dashboard.variables` is
+        // The periodic full keyframe (see ServerToClient's own comment) —
+        // same effect as a dashboard:sync as far as `dashboard.variables` is
         // concerned, but leaves `dashboard.widgets`/`plugins`/`devices`
         // etc. at their existing references instead of replacing the whole
-        // object graph — see ServerToClient's own comment on this message.
+        // object graph.
         set((s) => ({ dashboard: { ...s.dashboard, variables: message.variables } }))
+      } else if (message.type === 'variables:delta') {
+        // Changed-only update (see ServerToClient's own comment) — merge by
+        // id into the existing array rather than replacing it outright, same
+        // "preserve reference identity for anything untouched" reasoning as
+        // reconcileDashboard, so a widget whose expression doesn't reference
+        // any of these names doesn't re-render just because SOME variable
+        // elsewhere changed.
+        set((s) => {
+          const existing = s.dashboard.variables ?? []
+          const byId = new Map(existing.map((v) => [v.id, v]))
+          for (const v of message.variables) byId.set(v.id, v)
+          const merged = existing.map((v) => byId.get(v.id)!)
+          for (const v of message.variables) if (!existing.some((e) => e.id === v.id)) merged.push(v)
+          return { dashboard: { ...s.dashboard, variables: merged } }
+        })
       } else if (message.type === 'subdeck:navigate') {
         set({
           activeSubDeckId: message.target.type === 'sub-deck' ? message.target.subDeckId : null,

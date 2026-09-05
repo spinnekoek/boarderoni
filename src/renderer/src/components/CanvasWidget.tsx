@@ -17,6 +17,7 @@ import { LabelWidgetContent } from './widgets/LabelWidget'
 import { LineWidgetContent } from './widgets/LineWidget'
 import { resolveActivePositionIndex } from '@shared/switchPosition'
 import { resolveNumericExpr, resolveWidgetVisible, type VariableMap } from '@shared/expr'
+import { getEffectiveStates } from '@shared/states'
 import type { BoxWidget } from '@shared/types'
 
 interface ResizeState {
@@ -65,7 +66,16 @@ export function CanvasWidget({
   // but a corrupted/hand-edited save can violate that — fall back to `?? []`
   // everywhere below rather than letting a stale/malformed deck blank the
   // whole app (see ErrorBoundary's own comment for what happens without this).
-  const previewState = widget.type === 'button' ? (isSolePreviewTarget ? ((widget.states ?? [])[activeStateIndex] ?? widget.states?.[0]) : widget.states?.[0]) : null
+  // Not the sole preview target: fall back through getEffectiveStates (same
+  // activeStateExpr resolution ViewCanvas.tsx uses for the deployed view)
+  // rather than always states[0], so a live-switching state expression shows
+  // its effect here too instead of only once deployed.
+  const previewState =
+    widget.type === 'button'
+      ? isSolePreviewTarget
+        ? ((widget.states ?? [])[activeStateIndex] ?? widget.states?.[0])
+        : (getEffectiveStates(widget, variables)[0] ?? widget.states?.[0])
+      : null
   const resizeState = useRef<ResizeState | null>(null)
   const [resizing, setResizing] = useState(false)
 

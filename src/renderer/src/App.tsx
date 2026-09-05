@@ -10,6 +10,7 @@ import { ConfirmModal } from './components/ConfirmModal'
 import { DeckPicker } from './components/DeckPicker'
 import { DeviceApprovalBanner } from './components/DeviceApprovalBanner'
 import { DebugPanel } from './components/DebugPanel'
+import { StatusBar } from './components/StatusBar'
 
 function readMode(): 'edit' | 'view' {
   const params = new URLSearchParams(window.location.search)
@@ -101,6 +102,7 @@ export function App(): React.JSX.Element {
         <PropertiesPanel />
       </div>
       <DebugPanel />
+      <StatusBar />
       <ConfirmModal />
       <DeviceApprovalBanner />
     </div>

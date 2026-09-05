@@ -1804,6 +1804,7 @@ function SendDcsCommandActionEditor({
   const variables = useDashboardStore((s) => s.dashboard.variables) ?? []
 
   const [browserOpen, setBrowserOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const [search, setSearch] = useState('')
 
   // dcsBiosSendCommandResult is one global store field, shared by every open
@@ -2048,16 +2049,37 @@ function SendDcsCommandActionEditor({
           {selected && <p className="properties__hint">{commandValueHint(selected)}</p>}
 
           {isExpr && (
-            <label className="properties__field">
+            // A plain div, not a <label> — button is a labelable element per
+            // the HTML spec, so a <label> wrapping the Expand button below
+            // would make a click ANYWHERE in this field (not just the
+            // button itself) synthesize a click on it, same gotcha this
+            // file's other CodeEditor fields already avoid (see e.g. the
+            // visibleExpr field's own comment above).
+            <div className="properties__field">
               <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={3}
-                placeholder={variableHint ? `return ${variableHint} === 'Top' ? '1' : '0';` : "return variables.my_variable > 0 ? 'ON' : 'OFF';"}
-                value={action.argumentExpr ?? ''}
-                onChange={(e) => onPatch({ argumentExpr: e.target.value })}
-              />
-            </label>
+              <div className="color-picker-button__expr-panel">
+                <div className="color-picker-button__expr-editor-wrap">
+                  <CodeEditor
+                    value={action.argumentExpr ?? ''}
+                    onChange={(code) => onPatch({ argumentExpr: code })}
+                    placeholder={variableHint ? `return ${variableHint} === 'Top' ? '1' : '0';` : "return variables.my_variable > 0 ? 'ON' : 'OFF';"}
+                    minimal
+                  />
+                  <button type="button" className="color-picker-button__expand" title="Expand" onClick={() => setExpanded(true)}>
+                    ⤢
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {expanded && (
+            <ExpressionEditorModal
+              value={action.argumentExpr ?? ''}
+              onChange={(code) => onPatch({ argumentExpr: code })}
+              placeholder={variableHint ? `return ${variableHint} === 'Top' ? '1' : '0';` : "return variables.my_variable > 0 ? 'ON' : 'OFF';"}
+              onClose={() => setExpanded(false)}
+            />
           )}
         </>
       )}

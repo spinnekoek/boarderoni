@@ -1953,6 +1953,25 @@ export interface DeviceInfo {
   // tap). Takes priority over the userAgent-derived friendly name wherever a
   // device is displayed — see displayDeviceName in shared/deviceName.ts.
   customName?: string
+  // How far behind this device's own rendered dashboard was, in ms, as of
+  // its last device:lag-report (see main/index.ts's handler) — the CLIENT's
+  // own measurement (Date.now() at receipt minus dashboard:sync's
+  // generatedAt), not something the server can observe directly. Undefined
+  // until the first report arrives (fresh connection, or an old server build
+  // talking to a client that doesn't send it). Purely informational — never
+  // read by any sync/broadcast logic — so a stale value just sits there
+  // until the next report overwrites it rather than being cleared on
+  // disconnect (see broadcastDevices in main/index.ts).
+  lagMs?: number
+  // This device's WebSocket send buffer depth in bytes, sampled fresh every
+  // time devices:sync is broadcast (see socketBufferedAmount in
+  // main/index.ts) — unlike lagMs, this is entirely server-observed and
+  // always current as of the broadcast, never client-reported. A rising
+  // value directly means the server is producing dashboard:sync broadcasts
+  // faster than this device's connection can drain them, which is the root
+  // cause a growing lagMs eventually reflects on the client side. Undefined
+  // while disconnected (no socket to sample).
+  bufferedAmount?: number
 }
 
 // One entry in the settings modal's "Approved devices" list — see
@@ -2073,18 +2092,57 @@ export type ClientToServer =
   // unsaved local edits since the external change are lost, same as the
   // confirm dialog itself warns.
   | { type: 'dashboard:reload' }
+  // Sent periodically by any connected client (throttled client-side, see
+  // store.ts) reporting how far behind its own rendering currently is —
+  // Date.now() at the moment it received its most recent dashboard:sync
+  // minus that message's own generatedAt. Ignored server-side for a socket
+  // with no deviceId (i.e. an edit-role socket — the desktop always renders
+  // its own edits locally/instantly, there's nothing round-tripping through
+  // the network for it to lag behind). See DeviceInfo.lagMs.
+  | { type: 'device:lag-report'; lagMs: number }
+  // Clock-offset probe (see store.ts's syncClock) — dashboard:sync's
+  // generatedAt is stamped from the SERVER's own clock, but a view device's
+  // clock (an Android tablet in particular — often no NTP sync, especially
+  // offline/kiosk setups) can be off by anywhere from seconds to minutes.
+  // Comparing generatedAt against the client's raw Date.now() with no
+  // correction reports that whole clock difference as "lag," even with a
+  // perfectly healthy connection — this round trip measures the actual
+  // offset so device:lag-report can subtract it back out.
+  | { type: 'time:sync'; clientSentAt: number }
 
 export type ServerToClient =
-  | { type: 'dashboard:sync'; dashboard: Dashboard }
-  // Lighter-weight alternative to dashboard:sync for a variables-only change
+  // generatedAt is Date.now() at the moment the server built this snapshot
+  // (see dashboardSyncMessage in main/index.ts, the single place that
+  // constructs this) — the client compares it against its own Date.now() at
+  // receipt to measure end-to-end lag (see DeviceInfo.lagMs/device:lag-report
+  // above). Assumes desktop and view-device clocks are reasonably close,
+  // which holds for a LAN setup without needing a separate clock-sync
+  // handshake — good enough to answer "is this client falling behind and by
+  // how much," not meant as a precise offset.
+  | { type: 'dashboard:sync'; dashboard: Dashboard; generatedAt: number }
+  // Periodic full snapshot of every variable — the "keyframe" a client can
+  // always fall back to, same idea as a video codec's I-frame relative to
+  // variables:delta's P-frame-like changed-only updates below. Sent on a
+  // fixed interval (VARIABLES_KEYFRAME_MS in main/index.ts) regardless of
+  // whether anything actually changed, purely as a drift backstop — a
+  // client that missed/misapplied a delta (a bug, a reconnect racing a
+  // broadcast, whatever) self-heals within one interval instead of staying
+  // wrong until the next unrelated dashboard:sync happens to include
+  // variables too. Also what a client's very first connection effectively
+  // gets via dashboard:sync's own embedded `dashboard.variables`.
+  | { type: 'variables:sync'; variables: Variable[] }
+  // Lighter-weight alternative to variables:sync for a variables-only change
   // (an update-state action — including every in-flight AdjusterWidget drag
   // tick — or an event source tick, see applyVariableUpdates in
-  // main/index.ts). Carries the full variables array (not just the changed
-  // keys) so a brand-new variable's server-assigned id round-trips correctly
-  // without the client having to invent one — but skips widgets/plugins/
-  // devices/background image, which don't change here and would otherwise
-  // get re-serialized and re-diffed on every single tick for no reason.
-  | { type: 'variables:sync'; variables: Variable[] }
+  // main/index.ts). Carries ONLY the variables that actually changed this
+  // tick (including brand-new ones, complete with their server-assigned id
+  // so the client never has to invent one) — the client merges these into
+  // its existing array by id rather than replacing it outright. Skips
+  // widgets/plugins/devices/background image same as variables:sync always
+  // did, but additionally skips every variable that didn't change, since a
+  // dashboard with hundreds of variables would otherwise re-send all of them
+  // on every single tick just because one changed.
+  | { type: 'variables:delta'; variables: Variable[] }
   // detail is only present when the failure happened mid-sequence (a
   // DelayStep/ActionStep threw inside runSequence) — omitted (not a
   // sentinel value) for a pre-sequence error like "Widget not found" or
@@ -2175,6 +2233,24 @@ export type ServerToClient =
   // in-progress edit here isn't silently discarded, or silently allowed to
   // clobber the external change on its next save either.
   | { type: 'dashboard:external-change' }
+  // Reply to time:sync — clientSentAt is echoed back unchanged so the client
+  // can pair this reply with the ping that produced it (and measure its own
+  // round-trip time from it) without needing to correlate by anything else;
+  // serverTime is Date.now() read at the moment the server handled the ping,
+  // not when this reply is actually written to the socket — see the
+  // handler in main/index.ts for why that distinction doesn't matter here.
+  | { type: 'time:sync-reply'; clientSentAt: number; serverTime: number }
+  // Broadcast on a fixed cadence (see main/index.ts's HEARTBEAT_BROADCAST_MS)
+  // regardless of whether the dashboard has actually changed — dashboard:
+  // sync's own generatedAt only advances when something is edited, so
+  // relying on it alone to measure lag makes an idle-but-perfectly-healthy
+  // connection look like it's falling further behind the longer nobody
+  // touches anything (there's simply nothing new to have received). This
+  // gives the client a fresh, content-independent timestamp to measure
+  // against even when nothing else is being broadcast — see
+  // reportLagPeriodically in store.ts, which now uses whichever of this or
+  // the last dashboard:sync was more recent.
+  | { type: 'time:heartbeat'; serverTime: number }
 
 export const DEFAULT_DASHBOARD: Dashboard = {
   id: 'default',

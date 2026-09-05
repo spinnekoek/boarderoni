@@ -581,6 +581,34 @@ const ViewWidget = memo(function ViewWidget({
   return <TriggerableViewWidget widget={widget} variables={variables} error={error} />
 }, viewWidgetPropsEqual)
 
+// Wraps one widget's visibility check + position box + content behind ONE
+// memo boundary (viewWidgetPropsEqual — the same per-widget variable-
+// dependency scoping ViewWidget itself uses, see its own comment). Previously
+// resolveWidgetVisible ran directly in ScreenWidgetsLayer's map body, OUTSIDE
+// any memo boundary — a visibleExpr (or any widget's, since this ran for
+// every widget regardless of visibility) means a fresh `new Function(...)`
+// compiled and run (see tryEvaluateExpression in shared/expr.ts) on EVERY
+// widget, on EVERY single variables:sync/delta tick, even the vast majority
+// that don't reference whatever one variable just changed. At only a few
+// deltas/sec that's still N re-compiles per tick, N being total widget count
+// on the deck — independent of message rate or payload size, which is what
+// made this show up as steadily climbing device lag under sustained DCS-BIOS
+// traffic despite a small, infrequent message stream (buf staying at 0B
+// rules out the network/server side entirely — see StatusBar.tsx's own
+// device:lag-report tooltip for what buf actually measures).
+const ViewWidgetSlot = memo(function ViewWidgetSlot({ widget, variables, deckId, error }: ViewWidgetProps): React.JSX.Element | null {
+  if (!resolveWidgetVisible(widget, variables)) return null
+  const rendered = widget.type === 'morph' ? morphFootprint(widget) : widget
+  return (
+    <div
+      className={`view-canvas__widget${widget.type === 'morph' ? ' view-canvas__widget--morph' : ''}`}
+      style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
+    >
+      <ViewWidget widget={widget} variables={variables} deckId={deckId} error={error} />
+    </div>
+  )
+}, viewWidgetPropsEqual)
+
 // One deck view's worth of widgets, absolutely positioned within whatever
 // positioned box contains this — the fullscreen root canvas below, or an
 // OverlayPanel's own smaller box. Extracted so both render sites share the
@@ -598,19 +626,9 @@ export function ScreenWidgetsLayer({
 }): React.JSX.Element {
   return (
     <>
-      {widgets.map((widget) => {
-        if (!resolveWidgetVisible(widget, variables)) return null
-        const rendered = widget.type === 'morph' ? morphFootprint(widget) : widget
-        return (
-          <div
-            key={widget.id}
-            className={`view-canvas__widget${widget.type === 'morph' ? ' view-canvas__widget--morph' : ''}`}
-            style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
-          >
-            <ViewWidget widget={widget} variables={variables} deckId={deckId} error={errors[widget.id]} />
-          </div>
-        )
-      })}
+      {widgets.map((widget) => (
+        <ViewWidgetSlot key={widget.id} widget={widget} variables={variables} deckId={deckId} error={errors[widget.id]} />
+      ))}
     </>
   )
 }

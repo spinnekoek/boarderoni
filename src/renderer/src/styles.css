@@ -385,6 +385,201 @@ body {
 	background: #14161b;
 }
 
+.status-bar {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 4px 16px;
+	background: #1c1f26;
+	border-top: 1px solid #2a2e37;
+	font-size: 11px;
+	color: #9098a8;
+	flex-shrink: 0;
+	flex-wrap: wrap;
+	/* No overflow-x: auto here (there used to be one) — the custom tooltips
+	below pop up ABOVE the bar via position: absolute, and per the CSS
+	overflow spec, setting overflow-x to anything but 'visible' forces the
+	browser to also treat overflow-y as 'auto' rather than the default
+	'visible', which would silently clip every tooltip at the bar's own top
+	edge. Wrapping (flex-wrap) handles a bar with more items than fit instead
+	of horizontal scrolling. */
+}
+
+/* Custom hover tooltip — replaces the native `title` attribute (instant,
+unstyled, browser-native look) with a themed bubble that matches the rest of
+the app. Pure CSS (pseudo-elements driven by a `data-tooltip` attribute, no
+extra DOM/JS) since every status-bar item just needs a static string above
+it — a full floating-positioned component would be overkill here. */
+.status-bar [data-tooltip] {
+	position: relative;
+}
+
+.status-bar [data-tooltip]::after {
+	content: attr(data-tooltip);
+	position: absolute;
+	bottom: calc(100% + 9px);
+	left: 50%;
+	transform: translateX(-50%);
+	background: #23262e;
+	color: #d8dce4;
+	border: 1px solid #3a3f4b;
+	border-radius: 6px;
+	padding: 7px 10px;
+	font-size: 11px;
+	font-weight: 400;
+	line-height: 1.4;
+	text-transform: none;
+	letter-spacing: normal;
+	white-space: normal;
+	width: max-content;
+	max-width: 260px;
+	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+	z-index: 50;
+}
+
+.status-bar [data-tooltip]::before {
+	content: '';
+	position: absolute;
+	bottom: calc(100% + 4px);
+	left: 50%;
+	transform: translateX(-50%);
+	border: 5px solid transparent;
+	border-top-color: #3a3f4b;
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition: opacity 0.12s ease, visibility 0.12s;
+	z-index: 51;
+}
+
+.status-bar [data-tooltip]:hover::after,
+.status-bar [data-tooltip]:hover::before {
+	opacity: 1;
+	visibility: visible;
+	/* Brief delay before appearing (standard hover-tooltip feel, avoids a
+	flash of tooltips while just moving the mouse across the bar) but instant
+	on the way out — only the appearing transition gets it. */
+	transition-delay: 0.35s;
+}
+
+.status-bar [data-tooltip]:hover::after {
+	transform: translateX(-50%) translateY(-2px);
+}
+
+/* Divider between every top-level item (label groups, each device, the
+DCS-BIOS chip) — a plain flex `gap` alone left them running together with
+nothing to anchor the eye between one device's metrics and the next. Matches
+every direct child regardless of tag/class via the adjacent-sibling
+combinator, so it stays correct as items are added/removed with no markup of
+its own needed. */
+.status-bar > * + * {
+	padding-left: 12px;
+	border-left: 1px solid #333844;
+}
+
+.status-bar__label {
+	font-weight: 600;
+	color: #6b7280;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	flex-shrink: 0;
+}
+
+.status-bar__empty {
+	color: #6b7280;
+}
+
+.status-bar__device {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+.status-bar__dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 999px;
+	background: #7ee2a8;
+}
+
+.status-bar__device--warn .status-bar__dot {
+	background: #e2c37e;
+}
+
+.status-bar__device--bad .status-bar__dot {
+	background: #e27e7e;
+}
+
+.status-bar__device--warn .status-bar__metric {
+	color: #e2c37e;
+}
+
+.status-bar__device--bad .status-bar__metric {
+	color: #e27e7e;
+}
+
+.status-bar__name {
+	color: #c4c9d4;
+}
+
+.status-bar__metric {
+	color: #6b7280;
+}
+
+/* Fixed-width, right-aligned, tabular-figure number so a value shortening
+(e.g. "128.4KB" -> "0B", or lag dropping from "2.3s" to "<1ms") doesn't
+reflow every item after it in the bar — tabular-nums alone only keeps
+individual DIGITS the same width as each other, it doesn't stop the whole
+string's length (and therefore its box) from changing, hence the fixed
+min-width on top of it. */
+.status-bar__value {
+	display: inline-block;
+	min-width: 42px;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	color: inherit;
+}
+
+/* Teeny lag history sparkline — bars flow oldest (left) to newest (right),
+so a fresh sample entering on the right visually pushes the strip left as
+older ones age out, like a scrolling ticker. Height sits on its own baseline
+(align-items: flex-end) so severity reads by height as well as color even at
+a glance. Fixed integer bar width (not flex: 1 dividing the container's width
+across LAG_SPARK_SAMPLES bars) — that split left ~1.05px per bar, a
+fractional width the browser has to round per bar, so some rounded up to 2px
+and visually swallowed the neighboring 1px gap. Container width is exact
+(20 bars × 1px + 19 gaps × 1px) rather than a round number, so nothing here
+needs to stretch or round at all. */
+.status-bar__spark {
+	display: inline-flex;
+	align-items: flex-end;
+	justify-content: flex-end;
+	gap: 1px;
+	height: 14px;
+	width: 39px;
+	flex-shrink: 0;
+}
+
+.status-bar__spark-bar {
+	flex: none;
+	width: 1px;
+	border-radius: 0.5px;
+	background: #7ee2a8;
+}
+
+.status-bar__spark-bar--warn {
+	background: #e2c37e;
+}
+
+.status-bar__spark-bar--bad {
+	background: #e27e7e;
+}
+
 .debug-panel__resize-handle {
 	position: absolute;
 	top: -3px;

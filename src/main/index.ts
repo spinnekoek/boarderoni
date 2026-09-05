@@ -1195,7 +1195,7 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
     if (room) {
       room.dashboard = { ...room.dashboard, name }
       saveDeckDashboard(room)
-      broadcastToRoom(room, { type: 'dashboard:sync', dashboard: room.dashboard })
+      broadcastToRoom(room, dashboardSyncMessage(room.dashboard))
     } else {
       const dashboard = loadDeckDashboard(deckId)
       if (dashboard) {
@@ -1324,8 +1324,18 @@ const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
 type TrackedSocket = WebSocket & { isAlive?: boolean }
 const HEARTBEAT_INTERVAL_MS = 30_000
 
+// Single place that constructs a dashboard:sync payload — every broadcast/
+// send site below goes through this rather than building the literal
+// inline, so generatedAt (see ServerToClient's own comment on this variant)
+// is always freshly stamped at the moment this specific snapshot is about
+// to go out, not copy-pasted stale from whenever some earlier snapshot was
+// built.
+function dashboardSyncMessage(dashboard: Dashboard): ServerToClient {
+  return { type: 'dashboard:sync', dashboard, generatedAt: Date.now() }
+}
+
 function sendInitialState(ws: WebSocket, room: DeckRoom): void {
-  ws.send(JSON.stringify({ type: 'dashboard:sync', dashboard: room.dashboard } satisfies ServerToClient))
+  ws.send(JSON.stringify(dashboardSyncMessage(room.dashboard)))
   ws.send(JSON.stringify({ type: 'devices:sync', devices: Array.from(room.devices.values()) } satisfies ServerToClient))
   // App-wide, not room-scoped (see broadcastCustomFonts) — sent here too so
   // a client renders any custom-font labels correctly from its very first
@@ -1377,11 +1387,82 @@ const heartbeat = setInterval(() => {
 
 wss.on('close', () => clearInterval(heartbeat))
 
+// Per-socket outbound coalescing so a slow connection (weak wifi to a
+// tablet, in particular) never builds up a backlog of QUEUED-BUT-UNSENT
+// broadcasts behind Node's own socket write buffer. Every message this app
+// broadcasts (dashboard:sync, variables:sync, devices:sync, ...) is a full,
+// idempotent snapshot rather than a diff/delta — so if two updates of the
+// SAME type are both still waiting to go out to one socket, only the newer
+// one is worth sending; the older one is pure wasted bandwidth/latency that
+// would otherwise force the receiving client to render N stale intermediate
+// states before it ever catches up to "now" (this is what made a multi-
+// widget drag over slow wifi appear to arrive 30 seconds late — every drag
+// tick's full-dashboard broadcast was queued strictly in order, one socket
+// buffer's worth of history the client had no way to skip). Keyed by
+// message TYPE, not just socket, so e.g. an action:log line broadcast via
+// broadcastToEditClients is never silently dropped by a dashboard:sync
+// racing ahead of it — only same-type messages ever coalesce.
+interface SocketSendQueue {
+  sending: boolean
+  pending: Map<string, string>
+}
+const socketSendQueues = new WeakMap<WebSocket, SocketSendQueue>()
+
+function pumpSocketSendQueue(ws: WebSocket, queue: SocketSendQueue): void {
+  if (queue.sending) return
+  const next = queue.pending.entries().next()
+  if (next.done) return
+  const [type, payload] = next.value
+  queue.pending.delete(type)
+  queue.sending = true
+  ws.send(payload, () => {
+    queue.sending = false
+    pumpSocketSendQueue(ws, queue)
+  })
+}
+
+// Every message type coalesces by plain last-write-wins EXCEPT the ones
+// listed here — those aren't full snapshots (see queueSend's own comment),
+// so blindly overwriting a still-queued one with a newer one would silently
+// lose whatever changed only in the discarded (older) payload. variables:delta
+// is the only such type today: merge the two variables arrays by id (newer
+// value per id wins, same as the client's own merge in store.ts) instead of
+// replacing outright, so a socket backed up across several ticks still ends
+// up with the union of every change once it finally drains — the periodic
+// variables:sync keyframe (VARIABLES_KEYFRAME_MS) is a backstop for other
+// failure modes, not a substitute for this.
+const QUEUE_MERGE: Partial<Record<string, (older: string, newer: string) => string>> = {
+  'variables:delta': (older, newer) => {
+    const a = JSON.parse(older) as { type: 'variables:delta'; variables: Variable[] }
+    const b = JSON.parse(newer) as { type: 'variables:delta'; variables: Variable[] }
+    const byId = new Map(a.variables.map((v) => [v.id, v]))
+    for (const v of b.variables) byId.set(v.id, v)
+    return JSON.stringify({ type: 'variables:delta', variables: [...byId.values()] } satisfies ServerToClient)
+  }
+}
+
+// `type` is the message's own `type` field — the coalescing key. Only ever
+// called for messages that are safe to supersede (a full snapshot, not an
+// incremental event) — see the callers below — UNLESS `type` has its own
+// entry in QUEUE_MERGE, in which case a still-queued payload is merged with
+// the new one rather than replaced.
+function queueSend(ws: WebSocket, type: string, payload: string): void {
+  let queue = socketSendQueues.get(ws)
+  if (!queue) {
+    queue = { sending: false, pending: new Map() }
+    socketSendQueues.set(ws, queue)
+  }
+  const existing = queue.pending.get(type)
+  const merge = QUEUE_MERGE[type]
+  queue.pending.set(type, existing && merge ? merge(existing, payload) : payload)
+  pumpSocketSendQueue(ws, queue)
+}
+
 function broadcastToRoom(room: DeckRoom, message: ServerToClient, exclude?: WebSocket): void {
   const payload = JSON.stringify(message)
   for (const client of room.sockets) {
     if (client.readyState === WebSocket.OPEN && client !== exclude) {
-      client.send(payload)
+      queueSend(client, message.type, payload)
     }
   }
 }
@@ -1395,7 +1476,7 @@ function broadcastToEditClients(room: DeckRoom, message: ServerToClient): void {
   for (const client of room.sockets) {
     const ctx = socketContext.get(client)
     if (client.readyState === WebSocket.OPEN && ctx?.role === 'edit') {
-      client.send(payload)
+      queueSend(client, message.type, payload)
     }
   }
 }
@@ -1448,8 +1529,29 @@ function watchDeckFile(room: DeckRoom): void {
   }
 }
 
+// This room's currently-open socket for a given device, if any — a device
+// can be listed in room.devices (connected: false included) with nothing
+// live to sample, e.g. right after it disconnects. Linear scan over
+// room.sockets rather than a maintained reverse index: a room's socket count
+// is a handful of devices at most, and this only ever runs right before a
+// devices:sync broadcast, not on any hot per-message path.
+function socketForDevice(room: DeckRoom, deviceId: string): WebSocket | undefined {
+  for (const sock of room.sockets) {
+    if (socketContext.get(sock)?.deviceId === deviceId) return sock
+  }
+  return undefined
+}
+
 function broadcastDevices(room: DeckRoom): void {
-  broadcastToRoom(room, { type: 'devices:sync', devices: Array.from(room.devices.values()) })
+  // bufferedAmount is sampled fresh here rather than stored on DeviceInfo —
+  // it's a live property of the socket's current write buffer, not
+  // meaningful state to persist alongside customName/connected (see
+  // DeviceInfo.bufferedAmount's own comment).
+  const devices = Array.from(room.devices.values()).map((device) => ({
+    ...device,
+    bufferedAmount: socketForDevice(room, device.id)?.bufferedAmount
+  }))
+  broadcastToRoom(room, { type: 'devices:sync', devices })
 }
 
 function keyFromName(name: string): Key {
@@ -1496,17 +1598,27 @@ function applyVariableUpdates(room: DeckRoom, updates: Record<string, unknown>, 
   if (!hasChange) return
 
   const variables: Variable[] = existing.map((v) => (coercedUpdates.has(v.name) ? { ...v, value: coercedUpdates.get(v.name)! } : v))
+  const changed: Variable[] = []
   for (const [name, value] of coercedUpdates) {
-    if (!existingByName.has(name)) variables.push({ id: randomUUID(), name, value })
+    const existingVar = existingByName.get(name)
+    if (existingVar) {
+      changed.push({ ...existingVar, value })
+    } else {
+      const created: Variable = { id: randomUUID(), name, value }
+      variables.push(created)
+      changed.push(created)
+    }
   }
 
   room.dashboard = { ...room.dashboard, variables }
-  // variables:sync, not dashboard:sync — this can fire many times a second
-  // (every in-flight AdjusterWidget drag tick, or a fast plugin), and
-  // widgets/plugins/devices never change here, so re-sending the whole
-  // dashboard every time would mean every connected client re-serializing
-  // and re-diffing all of that for nothing.
-  broadcastToRoom(room, { type: 'variables:sync', variables })
+  // variables:delta, not dashboard:sync or a full variables:sync — this can
+  // fire many times a second (every in-flight AdjusterWidget drag tick, or a
+  // fast plugin), and widgets/plugins/devices never change here, nor do the
+  // hundreds of OTHER variables this tick didn't touch — see
+  // variables:delta's own comment in shared/types.ts. The periodic
+  // VARIABLES_KEYFRAME_MS interval below is what keeps a client that missed
+  // one of these from drifting forever.
+  broadcastToRoom(room, { type: 'variables:delta', variables: changed })
   if (options.immediate) {
     cancelScheduledSave(room)
     saveDeckDashboard(room)
@@ -2163,7 +2275,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         } else {
           scheduleDebouncedSave(activeRoom)
         }
-        broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard }, ws)
+        broadcastToRoom(activeRoom, dashboardSyncMessage(activeRoom.dashboard), ws)
         syncPlugins(activeRoom)
         break
       case 'dashboard:reload': {
@@ -2183,7 +2295,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
           // successfully above) — if it somehow fails, the next real save
           // still re-seeds this via saveDeckDashboard.
         }
-        broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
+        broadcastToRoom(activeRoom, dashboardSyncMessage(activeRoom.dashboard))
         syncPlugins(activeRoom)
         break
       }
@@ -2299,6 +2411,28 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         ws.send(JSON.stringify({ type: 'device:approved-list', devices: listApprovedDevices() } satisfies ServerToClient))
         break
       }
+      case 'time:sync':
+        // Direct ws.send, deliberately bypassing queueSend/broadcastToRoom's
+        // coalescing queue — sitting behind an unrelated queued
+        // dashboard:sync would inflate the client's measured RTT (and, with
+        // it, the derived clock offset) for no reason. This reply is small,
+        // rare (see store.ts's SYNC_INTERVAL_MS), and time-sensitive in a
+        // way ordinary broadcasts aren't, so it always jumps the queue.
+        ws.send(JSON.stringify({ type: 'time:sync-reply', clientSentAt: message.clientSentAt, serverTime: Date.now() } satisfies ServerToClient))
+        break
+      case 'device:lag-report': {
+        // ctx.deviceId is only ever set for a 'view' socket (see the 'hello'
+        // handler below) — an edit socket (the desktop itself) has nothing
+        // to report here since it renders its own edits locally, with
+        // nothing round-tripping through the network to lag behind.
+        if (!activeRoom || ctx.deviceId === undefined) break
+        const existing = activeRoom.devices.get(ctx.deviceId)
+        if (existing) {
+          activeRoom.devices.set(ctx.deviceId, { ...existing, lagMs: message.lagMs })
+          broadcastDevices(activeRoom)
+        }
+        break
+      }
       case 'device:rename': {
         if (!activeRoom) break
         const existing = activeRoom.devices.get(message.deviceId)
@@ -2327,7 +2461,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         writeFileSync(deckBackgroundImageFile(activeRoom.id), Buffer.from(base64, 'base64'))
         activeRoom.dashboard = { ...activeRoom.dashboard, backgroundImageMime: mime, backgroundImageVersion: Date.now() }
         saveDeckDashboard(activeRoom)
-        broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
+        broadcastToRoom(activeRoom, dashboardSyncMessage(activeRoom.dashboard))
         break
       }
       case 'background-image:clear': {
@@ -2337,7 +2471,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         const { backgroundImageMime: _mime, backgroundImageVersion: _version, ...rest } = activeRoom.dashboard
         activeRoom.dashboard = rest
         saveDeckDashboard(activeRoom)
-        broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
+        broadcastToRoom(activeRoom, dashboardSyncMessage(activeRoom.dashboard))
         break
       }
       case 'dcsbios:list-aircraft': {
@@ -2576,7 +2710,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
             w.type === 'screen-capture' ? { ...w, region, displayId } : w
           )
           saveDeckDashboard(activeRoom)
-          broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
+          broadcastToRoom(activeRoom, dashboardSyncMessage(activeRoom.dashboard))
         }
         break
       }
@@ -2598,7 +2732,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
             )
           }
           saveDeckDashboard(activeRoom)
-          broadcastToRoom(activeRoom, { type: 'dashboard:sync', dashboard: activeRoom.dashboard })
+          broadcastToRoom(activeRoom, dashboardSyncMessage(activeRoom.dashboard))
           // Unlike the widget case above, this config change needs to
           // restart the running producer (its signature just changed) so
           // the source starts ticking against the new region immediately,
@@ -2629,6 +2763,47 @@ onDcsViewportsStatusChange((status) => {
   for (const room of rooms.values()) broadcastToRoom(room, payload)
 })
 
+// Keeps device:lag-report meaningful while a deck is idle — see
+// ServerToClient's own comment on time:heartbeat for why dashboard:sync
+// alone isn't enough. Re-stamped fresh on every tick (not a fixed payload
+// hoisted outside) since serverTime has to be current each time it goes out.
+// Goes through the same per-socket coalescing queue as everything else
+// (queueSend, via broadcastToRoom) — if a connection is backed up enough
+// that even THIS starts piling up, that itself is exactly the signal a
+// growing lagMs should surface, same as a real dashboard:sync backlog would.
+const HEARTBEAT_BROADCAST_MS = 2_000
+setInterval(() => {
+  for (const room of rooms.values()) broadcastToRoom(room, { type: 'time:heartbeat', serverTime: Date.now() })
+}, HEARTBEAT_BROADCAST_MS)
+
+// The "keyframe" backstop for variables:delta (see its own comment in
+// shared/types.ts) — unconditional, unlike applyVariableUpdates' own
+// broadcast, so it also self-heals a client that missed a delta for a
+// reason unrelated to this app's own logic entirely (a dropped frame, a
+// reconnect that raced a broadcast, whatever). Cheap to send unconditionally
+// at this interval even for a dashboard with hundreds of variables — the
+// whole point is trading a small periodic cost for never having to trust
+// delta delivery as the only source of truth.
+const VARIABLES_KEYFRAME_MS = 5_000
+setInterval(() => {
+  for (const room of rooms.values()) {
+    broadcastToRoom(room, { type: 'variables:sync', variables: room.dashboard.variables ?? [] })
+  }
+}, VARIABLES_KEYFRAME_MS)
+
+
+// This server also hosts the WS upgrade (`new WebSocketServer({ server:
+// httpServer })` above) that every device's long-lived deck connection rides
+// on. Node's http.Server has shipped a `requestTimeout` guard (default
+// 300_000ms) since 14.11 to mitigate slow-header DoS attacks — it's meant to
+// only bound the HTTP request/response cycle, but on a shared server like
+// this one it was closing upgraded WebSocket sockets exactly 5 minutes after
+// they connected, regardless of the ping/pong heartbeat still flowing (see
+// HEARTBEAT_INTERVAL_MS above) — the reconnect masked it as a transient drop.
+// Disabling it here only removes that guard for this app's own local/LAN
+// server, not any public-facing one.
+httpServer.requestTimeout = 0
+httpServer.headersTimeout = 0
 
 httpServer.listen(SERVER_PORT, () => {
   console.log(`[boarderoni] server listening on :${SERVER_PORT}`)
