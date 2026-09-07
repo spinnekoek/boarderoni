@@ -28,8 +28,19 @@ function actionKindTitle(action: WidgetAction): string {
   }
 }
 
-function stepTitle(step: SequenceStep): string {
-  return step.kind === 'delay' ? `Wait ${step.delayMs}ms` : actionKindTitle(step.action)
+// Exported for reuse as the collapsed header title of a step row in the
+// properties panel (PropertiesPanel.tsx) — same "reuse, don't duplicate the
+// switch" reasoning as EVENT_LABELS. Deliberately non-recursive for
+// 'condition': the hover tooltip below joins one event's steps with ' → '
+// into a single line, which already implies a strict sequence — splicing in
+// two branch sub-sequences would either read ambiguously (mixing "then" and
+// "sequence" under the same arrow) or blow up in length a few levels of
+// nesting deep. `If <expr>` is enough to say a fork exists on hover; the
+// properties panel is where you inspect what each branch actually does.
+export function stepTitle(step: SequenceStep): string {
+  if (step.kind === 'delay') return `Wait ${step.delayMs}ms`
+  if (step.kind === 'condition') return `If ${step.condition.trim() || '…'}`
+  return actionKindTitle(step.action)
 }
 
 // Short human-readable summary of everything a widget's events will do, used

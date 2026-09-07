@@ -35,6 +35,7 @@ import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { LabelWidgetContent } from './widgets/LabelWidget'
 import { LineWidgetContent } from './widgets/LineWidget'
 import { useAdjusterDrag } from '../useAdjusterDrag'
+import { useMultiPressArbiter } from '../useMultiPressArbiter'
 import { useMorphSliderDrag } from '../useMorphSliderDrag'
 import { useEncoderDrag } from '../useEncoderDrag'
 import { useSwitchPosition } from '../useSwitchPosition'
@@ -229,6 +230,12 @@ function DialSwitchView({ widget, variables }: { widget: DialSwitchWidget; varia
   const activeIndex = rawActiveIndex ?? 0
   const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useDialSwitchDrag(widget, select, variables)
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
+  // ?? [] guards a dashboard saved before these existed — see
+  // ButtonWidget.events' own comment in shared/types.ts for the convention.
+  const hasDoublePress = (widget.events.doublePress ?? []).length > 0
+  const hasTriplePress = (widget.events.triplePress ?? []).length > 0
+  const multiPressEnabled = hasDoublePress || hasTriplePress
+  const { registerTap } = useMultiPressArbiter(widget.id, hasDoublePress, hasTriplePress)
 
   const content =
     widget.interactionMode === 'drag' ? (
@@ -252,7 +259,7 @@ function DialSwitchView({ widget, variables }: { widget: DialSwitchWidget; varia
   return (
     <div
       style={{ position: 'absolute', inset: 0 }}
-      onPointerDown={() => triggerWidget(widget.id, 'press')}
+      onPointerDown={() => (multiPressEnabled ? registerTap() : triggerWidget(widget.id, 'press'))}
       onPointerUp={() => triggerWidget(widget.id, 'release')}
       onPointerCancel={() => triggerWidget(widget.id, 'release')}
     >
@@ -306,7 +313,19 @@ function DropdownView({ widget, variables }: { widget: DropdownWidget; variables
 // React's rules of hooks don't allow useMorphSliderDrag to be called from
 // inside an `if (widget.type === 'morph')` block in a component that's also
 // rendered for plain buttons.
-function usePressRelease(widgetId: string): { pressed: boolean; press: () => void; release: () => void } {
+function usePressRelease(
+  widgetId: string,
+  options?: {
+    // See useMultiPressArbiter's own comment — true while a button with
+    // real doublePress/triplePress steps is holding a tap to see if another
+    // follows, so this hook's own automatic 'press' trigger doesn't ALSO
+    // fire alongside whatever the arbiter itself decides to send. The
+    // visual pressed state below is deliberately NOT gated on this — a tap
+    // should still look pressed instantly regardless of how its network
+    // trigger gets resolved.
+    suppressPressTrigger?: boolean
+  }
+): { pressed: boolean; press: () => void; release: () => void } {
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   const [pressed, setPressed] = useState(false)
   // Guards against firing 'release' twice for one gesture — pointerup and
@@ -320,7 +339,7 @@ function usePressRelease(widgetId: string): { pressed: boolean; press: () => voi
   function press(): void {
     setPressed(true)
     releasedRef.current = false
-    triggerWidget(widgetId, 'press')
+    if (!options?.suppressPressTrigger) triggerWidget(widgetId, 'press')
   }
 
   function release(): void {
@@ -360,9 +379,10 @@ const ECHO_SUPPRESS_TIMEOUT_MS = 1500
 // asserting a fresh selection.
 function useTriggerableState(
   widget: StatefulWidget,
-  variables: VariableMap
+  variables: VariableMap,
+  options?: { suppressPressTrigger?: boolean }
 ): { pressed: boolean; press: () => void; release: () => void; state: WidgetState } {
-  const { pressed, press, release: releaseRaw } = usePressRelease(widget.id)
+  const { pressed, press, release: releaseRaw } = usePressRelease(widget.id, options)
   const [defaultState, clickedState] = getEffectiveStates(widget, variables)
 
   const [suppressEcho, setSuppressEcho] = useState(false)
@@ -406,7 +426,18 @@ function TriggerableViewWidget({
   variables: VariableMap
   error?: string
 }): React.JSX.Element {
-  const { press, release, state } = useTriggerableState(widget, variables)
+  // Only a real ButtonWidget ever reaches this component (see its own
+  // comment below) — the widget.type check exists purely so TS can see
+  // events.doublePress/triplePress exist at all (MorphButtonWidget's own
+  // events type has neither).
+  // ?? [] guards a dashboard saved before these fields existed — typed as
+  // always-present, same "fall back rather than migrate" convention as
+  // widget.states elsewhere (see CanvasWidget.tsx's own comment on this).
+  const hasDoublePress = widget.type === 'button' && (widget.events.doublePress ?? []).length > 0
+  const hasTriplePress = widget.type === 'button' && (widget.events.triplePress ?? []).length > 0
+  const multiPressEnabled = hasDoublePress || hasTriplePress
+  const { press, release, state } = useTriggerableState(widget, variables, { suppressPressTrigger: multiPressEnabled })
+  const { registerTap } = useMultiPressArbiter(widget.id, hasDoublePress, hasTriplePress)
 
   // Keyboard/assistive-tech activation dispatches a synthetic `click` with
   // no pointer events at all — e.detail === 0 is the standard signal a
@@ -414,7 +445,9 @@ function TriggerableViewWidget({
   // detail >= 1), used here (and in MorphButtonWidget.tsx's per-block
   // onClick) to fire the same press+release pair pointer gestures do below,
   // so that activation path isn't silently broken by moving the real
-  // trigger off the native onClick.
+  // trigger off the native onClick. Multi-press arbitration deliberately
+  // isn't wired in here — assistive tech activation is a discrete "do the
+  // thing" signal, not a stream of taps to count.
   function handleKeyboardActivate(): void {
     press()
     release()
@@ -422,6 +455,7 @@ function TriggerableViewWidget({
 
   function handlePointerDown(e: React.PointerEvent): void {
     press()
+    if (multiPressEnabled) registerTap()
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {

@@ -14,6 +14,7 @@ import {
   type ScreenRegion,
   type SequenceStep,
   type ServerToClient,
+  type StepPath,
   type SubDeck,
   type Widget,
   type WidgetEventKind
@@ -57,7 +58,7 @@ export interface ActionErrorToast {
   widgetId: string
   widgetLabel?: string
   event?: WidgetEventKind
-  stepIndex?: number
+  path?: StepPath
   stepKind?: SequenceStep['kind']
   message: string
   createdAt: number
@@ -794,7 +795,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
           widgetId: message.widgetId,
           widgetLabel: widgetDisplayLabel(widget),
           event: message.detail?.event,
-          stepIndex: message.detail?.stepIndex,
+          path: message.detail?.path,
           stepKind: message.detail?.stepKind,
           message: message.message,
           createdAt: Date.now()

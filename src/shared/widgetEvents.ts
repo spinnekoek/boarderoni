@@ -4,6 +4,8 @@ import type { EventfulWidget, SequenceStep, WidgetEventKind } from './types'
 export const EVENT_LABELS: Record<WidgetEventKind, string> = {
   press: 'Press',
   release: 'Release',
+  doublePress: 'Double press',
+  triplePress: 'Triple press',
   move: 'Move',
   increment: 'Turn CW (increment)',
   decrement: 'Turn CCW (decrement)',
@@ -21,9 +23,10 @@ export const EVENT_LABELS: Record<WidgetEventKind, string> = {
 // shape actually supports a slider (see isMorphSliderActive) — plain
 // Button/Morph otherwise only ever fire on press/release.
 export function eventKindsFor(widget: EventfulWidget): WidgetEventKind[] {
-  if (widget.type === 'adjuster') return ['press', 'release', 'move']
-  if (widget.type === 'encoder') return ['press', 'release', 'increment', 'decrement']
+  if (widget.type === 'adjuster') return ['press', 'release', 'doublePress', 'triplePress', 'move']
+  if (widget.type === 'encoder') return ['press', 'release', 'doublePress', 'triplePress', 'increment', 'decrement']
   if (widget.type === 'morph' && isMorphSliderActive(widget)) return ['press', 'release', 'move']
+  if (widget.type === 'button') return ['press', 'release', 'doublePress', 'triplePress']
   return ['press', 'release']
 }
 
@@ -38,6 +41,18 @@ export function getEventSteps(widget: EventfulWidget, event: WidgetEventKind): S
     return undefined
   }
   if (event === 'increment' || event === 'decrement') return widget.type === 'encoder' ? widget.events[event] : undefined
+  if (event === 'doublePress' || event === 'triplePress') {
+    return widget.type === 'button' || widget.type === 'adjuster' || widget.type === 'encoder' ? widget.events[event] : undefined
+  }
   if (event === 'select') return undefined
   return widget.events[event]
+}
+
+// Recursively expands every step, including ones nested inside a
+// ConditionStep's whenTrue/whenFalse branches, into one flat list — order
+// doesn't matter for callers of this (currently just collectImportWarnings'
+// "does a call-rest action reachable from this widget reference a stale
+// data source" scan), only "is this step reachable at all from this widget".
+export function flattenSequenceSteps(steps: SequenceStep[]): SequenceStep[] {
+  return steps.flatMap((step) => (step.kind === 'condition' ? [step, ...flattenSequenceSteps(step.whenTrue), ...flattenSequenceSteps(step.whenFalse)] : [step]))
 }

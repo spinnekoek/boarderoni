@@ -63,6 +63,17 @@ off as they're fixed; add new ones as they come up.
       for (currently ~14 duplicated `<aside className="properties">
       {resizeHandle}...` call sites).
 
+## Packaging (not yet started)
+
+- [ ] When we eventually package boarderoni (electron-builder/forge, currently
+      not set up at all — only `electron-vite` dev commands exist), set the
+      Windows execution level to `requireAdministrator` in the packager
+      config (e.g. electron-builder's `win.requestedExecutionLevel`). Reason:
+      games like DCS that run elevated silently swallow synthetic keystrokes
+      (`nut-js`/`SendInput` in `src/main/index.ts`) sent from a
+      non-elevated boarderoni due to Windows UIPI — both processes need to be
+      at the same integrity level for macros to reach the game.
+
 ## Features to investigate
 
 - [ ] Design a deck at one resolution and have it scale down cleanly for

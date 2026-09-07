@@ -2847,7 +2847,8 @@ button.deck-morph-cell:focus-visible {
 	font-size: 11px;
 }
 
-.properties-section__header-extra .properties__file-button {
+.properties-section__header-extra .properties__file-button,
+.properties-section__header-extra .properties__file-remove {
 	padding: 3px 8px;
 	font-size: 11px;
 }
@@ -2856,23 +2857,16 @@ button.deck-morph-cell:focus-visible {
 	margin-top: 10px;
 }
 
-.sequence-step {
-	border: 1px solid #2a2e37;
-	border-radius: 6px;
-	padding: 8px 10px;
-	margin-bottom: 6px;
+/* A reorderable step row is a plain PropertiesSection (see EventSequenceEditor
+   in PropertiesPanel.tsx) — draggable only while collapsed (PropertiesSection
+   itself enforces that), so the grab cursor only needs to show on a collapsed
+   row's own header. */
+.properties-section[draggable='true'] > summary {
 	cursor: grab;
-	background: #1c2028;
 }
 
-.sequence-step:active {
+.properties-section[draggable='true'] > summary:active {
 	cursor: grabbing;
-}
-
-/* Scoped tighter spacing for fields inside a sequence step only — the panel-
-   wide .properties__field rule (used everywhere else) stays at 12px. */
-.sequence-step .properties__field {
-	margin-bottom: 8px;
 }
 
 .sequence-step__row {

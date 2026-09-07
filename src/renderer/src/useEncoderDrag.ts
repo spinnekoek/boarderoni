@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useDashboardStore } from './store'
 import { resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { EncoderWidget } from '@shared/types'
+import { useMultiPressArbiter } from './useMultiPressArbiter'
 
 const DEFAULT_STEP_DEGREES = 15
 
@@ -29,7 +30,10 @@ function angleFromEvent(e: React.PointerEvent, rect: DOMRect): number {
 // eventually crosses the threshold. press/release fire unconditionally on
 // pointerdown/up (same as AdjusterWidget's own), independent of whether the
 // gesture also turned — so a push-only or spin-only wiring both work without
-// any extra configuration.
+// any extra configuration. press itself resolves through the same
+// doublePress/triplePress arbiter AdjusterWidget/ButtonWidget use (see
+// useMultiPressArbiter) — opt-in by either being non-empty, otherwise press
+// fires the instant the grip is touched, same as always.
 //
 // dragSpinDegrees tracks the grip's live visual angle starting from
 // widget.valueExpr's resolved rest position (not from 0) so a widget with a
@@ -44,6 +48,12 @@ export function useEncoderDrag(widget: EncoderWidget, variables: VariableMap): {
   handlePointerUp: (e: React.PointerEvent) => void
 } {
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
+  // ?? [] guards a dashboard saved before these existed — see
+  // ButtonWidget.events' own comment in shared/types.ts for the convention.
+  const hasDoublePress = (widget.events.doublePress ?? []).length > 0
+  const hasTriplePress = (widget.events.triplePress ?? []).length > 0
+  const multiPressEnabled = hasDoublePress || hasTriplePress
+  const { registerTap } = useMultiPressArbiter(widget.id, hasDoublePress, hasTriplePress)
   const [dragSpinDegrees, setDragSpinDegrees] = useState<number | undefined>(undefined)
   const lastAngleRef = useRef<number | null>(null)
   // Remainder toward the next increment/decrement step — separate from the
@@ -84,7 +94,8 @@ export function useEncoderDrag(widget: EncoderWidget, variables: VariableMap): {
     } catch {
       // best-effort, see CanvasWidget's handleResizePointerDown
     }
-    triggerWidget(widget.id, 'press')
+    if (multiPressEnabled) registerTap()
+    else triggerWidget(widget.id, 'press')
   }
 
   function handlePointerMove(e: React.PointerEvent): void {

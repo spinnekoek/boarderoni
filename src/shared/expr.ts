@@ -163,6 +163,28 @@ export function resolveBorderColor(box: ColorAppearance, variables: VariableMap)
   return { color: resolved.color ?? box.borderColor, opacity: resolved.opacity }
 }
 
+// Same idea as resolveColor/resolveBorderColor, for a WidgetState's own
+// glow (see its own comment in shared/types.ts) — a separate field rather
+// than a ColorAppearance member since glow is button-state-only, not
+// something every ColorAppearance user (gauge fill/track, switch positions,
+// ...) needs. Deliberately does NOT fall back to box.glowColor the way
+// resolveColor/resolveBorderColor fall back to their own plain field when
+// an expression returns nothing — those always need to show SOME color, so
+// falling back to the last static value is the right rescue. Glow is an
+// on/off effect, not an always-visible base appearance: once glowColorExpr
+// is set, it alone decides whether the glow shows at all, so returning null
+// (or anything else that doesn't resolve to a color) means no glow, even if
+// a real color is still sitting in glowColor from before switching to fx —
+// otherwise "return null" could never actually turn a glow off once one had
+// ever been picked.
+export function resolveGlowColor(
+  box: { glowColor?: string; glowColorExpr?: string },
+  variables: VariableMap
+): ResolvedColor {
+  if (!box.glowColorExpr) return { color: box.glowColor }
+  return evaluateColorExpression(box.glowColorExpr, variables)
+}
+
 // This label's effective display text — textExpr evaluated (coerced to a
 // string) once it's set at all (even ''  — freshly switched to expression
 // mode, nothing typed yet), else just `text`. Unlike resolveColor/

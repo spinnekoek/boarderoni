@@ -4,10 +4,20 @@ import { EVENT_LABELS } from '@shared/widgetEvents'
 
 const TOAST_AUTO_DISMISS_MS = 6000
 
+// Renders a (possibly nested) failure location as a `→`-joined chain, e.g.
+// `Press → step 3 → if true → step 2 → if false → step 1` — each branch
+// entered on the way to the failing step gets its own "if true"/"if false"
+// segment ahead of the step index one level in, so the chain reads as the
+// actual path taken through the condition tree rather than a bare number.
 function toastDetail(toast: ActionErrorToast): string | undefined {
-  if (!toast.event) return undefined
-  const step = toast.stepKind === 'delay' ? 'delay step' : `step ${(toast.stepIndex ?? 0) + 1}`
-  return `${EVENT_LABELS[toast.event]} → ${step}`
+  if (!toast.event || !toast.path) return undefined
+  const segments = toast.path.map((segment, i) => {
+    const enteredBranch = i > 0 ? toast.path![i - 1].branch : undefined
+    const branchLabel = enteredBranch ? `${enteredBranch === 'whenTrue' ? 'if true' : 'if false'} → ` : ''
+    const isLast = i === toast.path!.length - 1
+    return branchLabel + (isLast && toast.stepKind === 'delay' ? 'delay step' : `step ${segment.index + 1}`)
+  })
+  return `${EVENT_LABELS[toast.event]} → ${segments.join(' → ')}`
 }
 
 function Toast({ toast, onDismiss }: { toast: ActionErrorToast; onDismiss: () => void }): React.JSX.Element {

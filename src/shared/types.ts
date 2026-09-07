@@ -174,13 +174,42 @@ export interface ActionStep {
   action: WidgetAction
 }
 
-// One interaction event's full sequence is SequenceStep[], run in array
-// order by runSequence (main/index.ts), aborting at the first step that
-// throws. Deliberately a flat, explicit, timestamp-free list — a future
-// macro recorder can just push {kind:'action',...}/{kind:'delay',...}
-// entries onto this same array as it records, with no separate data model
-// to reconcile.
-export type SequenceStep = DelayStep | ActionStep
+// A boolean fork inside an event's sequence — evaluates `condition` (same
+// mechanism as UpdateStateAction.code; see evaluateConditionStep in
+// main/index.ts) and runs one of two nested SequenceStep[] branches instead
+// of falling through to the next flat entry. This is the only place
+// SequenceStep is recursive. `id` is independent of both branches' own step
+// ids, same convention as every other step kind.
+export interface ConditionStep {
+  kind: 'condition'
+  id: string
+  condition: string
+  whenTrue: SequenceStep[]
+  whenFalse: SequenceStep[]
+}
+
+// One interaction event's full sequence is SequenceStep[], run in order by
+// runSequence (main/index.ts), aborting the rest of the list — and, if
+// nested inside a ConditionStep branch, every remaining step back up
+// through its ancestors too — on the first step that throws. Flat
+// delay/action steps push straight onto an array; a ConditionStep
+// additionally owns two of its own nested SequenceStep[] arrays
+// (whenTrue/whenFalse) rather than being a flat entry itself. A future
+// macro recorder still only ever pushes {kind:'action',...}/{kind:'delay',
+// ...} entries onto whichever flat array (top-level or a branch) it's
+// handed, with no separate data model to reconcile.
+export type SequenceStep = DelayStep | ActionStep | ConditionStep
+
+// Identifies exactly one step inside a (possibly nested) SequenceStep[]
+// tree — see runSequence's own comment in main/index.ts. A flat top-level
+// failure is a single-element path (`[{ index }]`); each additional element
+// is one more ConditionStep branch descended into to reach the failing
+// step, with `branch` naming which of THAT element's own two children the
+// NEXT element (if any) lives inside. A ConditionStep whose own `condition`
+// expression throws is reported at its own location — its element has no
+// `branch` set, since nothing was entered — never misattributed to either
+// of its branches.
+export type StepPath = { index: number; branch?: 'whenTrue' | 'whenFalse' }[]
 
 // Which interaction moments a widget can attach a sequence to. Only
 // AdjusterWidget uses 'move' (continuous, while dragging); 'increment'/
@@ -200,7 +229,23 @@ export type SequenceStep = DelayStep | ActionStep
 // own comment. See eventKindsFor/getEventSteps in shared/widgetEvents.ts,
 // the single source of truth for which of the rest apply to which widget
 // type.
-export type WidgetEventKind = 'press' | 'release' | 'move' | 'increment' | 'decrement' | 'select' | 'positionChange' | 'guardToggle'
+// 'doublePress'/'triplePress' are ButtonWidget-only (see its own events
+// field) — a rapid double/triple tap fires ONE of press/doublePress/
+// triplePress, never more than one, decided client-side (see
+// useMultiPressArbiter in ViewCanvas.tsx) before the network trigger ever
+// goes out, not three separate 'press' events the server would have to
+// de-duplicate after the fact.
+export type WidgetEventKind =
+  | 'press'
+  | 'release'
+  | 'doublePress'
+  | 'triplePress'
+  | 'move'
+  | 'increment'
+  | 'decrement'
+  | 'select'
+  | 'positionChange'
+  | 'guardToggle'
 
 // x/y/w/h are absolute CSS pixels on the dashboard canvas — not grid units.
 // A widget is always rendered at exactly this pixel size on every client, no
@@ -347,6 +392,15 @@ export interface WidgetState extends BoxAppearance, ColorAppearance {
   // enabling states the first time, or by "Reset states"; never on a
   // manually-added state.
   isClicked?: boolean
+  // Off by default (no glow at all) until a color is actually picked — same
+  // "unset renders as if the field didn't exist" convention as
+  // innerBezelRadius elsewhere, so a dashboard saved before this existed
+  // renders unchanged. See resolveGlowColor in shared/expr.ts for how
+  // glowColorExpr overrides glowColor, same colorExpr/color relationship
+  // ColorAppearance's own fields have.
+  glowColor?: string
+  glowColorExpr?: string
+  glowOpacity?: number
 }
 
 // Whether a widget renders at all on the deployed view (a phone, the
@@ -370,10 +424,18 @@ export interface ButtonWidget extends WidgetVisibility {
   y: number
   w: number
   h: number
-  // Two interaction moments a button can fire a sequence from — press
-  // (pointerdown) and release (pointerup/cancel/leave). See SequenceStep;
-  // either can be empty (no steps configured for that moment).
-  events: { press: SequenceStep[]; release: SequenceStep[] }
+  // Interaction moments a button can fire a sequence from — press
+  // (pointerdown) and release (pointerup/cancel/leave) always fire
+  // immediately, zero added latency. doublePress/triplePress are optIN by
+  // being non-empty: whenever EITHER has any steps, a tap is held back for a
+  // short window (see useMultiPressArbiter in ViewCanvas.tsx) to see if a
+  // second/third tap follows, and exactly one of press/doublePress/
+  // triplePress fires once that's decided — never press AND doublePress for
+  // the same physical double-tap. With both empty (the common case, and
+  // every dashboard saved before these existed), that window never opens at
+  // all — press fires the instant it's pressed, same as always. See
+  // SequenceStep; any of the four can be empty (no steps configured).
+  events: { press: SequenceStep[]; release: SequenceStep[]; doublePress: SequenceStep[]; triplePress: SequenceStep[] }
   // Off (default): only "states[0]" is editable; a lightened version of its
   // color stands in for "clicked" automatically. On: every state is exposed
   // and independently configurable in the properties panel.
@@ -656,7 +718,18 @@ export interface AdjusterWidget extends DialShapeStyle, WidgetVisibility {
   // continuously (throttled) while dragging, with the live position exposed
   // as `variables.$value` same as press/release get for their own moment
   // (initial touch position for press, final settled position for release).
-  events: { press: SequenceStep[]; release: SequenceStep[]; move: SequenceStep[] }
+  // doublePress/triplePress follow the exact same optIN-by-being-non-empty
+  // convention as ButtonWidget.events' own (see its comment) — arbitrating
+  // the initial touch-down doesn't affect the continuous 'move' stream or
+  // 'release' at all, only whether that first touch reports itself as
+  // press/doublePress/triplePress.
+  events: {
+    press: SequenceStep[]
+    release: SequenceStep[]
+    move: SequenceStep[]
+    doublePress: SequenceStep[]
+    triplePress: SequenceStep[]
+  }
   fill: ColorAppearance
   track: ColorAppearance
   labels: WidgetLabel[]
@@ -798,7 +871,19 @@ export interface EncoderWidget extends DialShapeStyle, WidgetVisibility {
   // action that nudges a Variable by stepDegrees, so the grip visually
   // tracks it. Falls back to 0 if unset/unresolved.
   valueExpr?: string
-  events: { increment: SequenceStep[]; decrement: SequenceStep[]; press: SequenceStep[]; release: SequenceStep[] }
+  // doublePress/triplePress follow the exact same optIN-by-being-non-empty
+  // convention as ButtonWidget.events' own (see its comment) — arbitrating
+  // the initial touch-down doesn't affect increment/decrement or 'release'
+  // at all, only whether that first touch reports itself as press/
+  // doublePress/triplePress.
+  events: {
+    increment: SequenceStep[]
+    decrement: SequenceStep[]
+    press: SequenceStep[]
+    release: SequenceStep[]
+    doublePress: SequenceStep[]
+    triplePress: SequenceStep[]
+  }
   // Grip color (used by every dialShape: the needle itself, or the square/
   // circle knob's own color fallback — see DialShapeStyle's squareColor/
   // circleColor, which each fall back to this when unset).
@@ -1373,12 +1458,19 @@ export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle, Widg
   // a higher/lower position index than whichever was active before it, in
   // ADDITION to that selection's own onSelect/positionChange — see
   // useSwitchPosition.ts.
+  // doublePress/triplePress: same optIN-by-being-non-empty convention as
+  // ButtonWidget.events' own (see its comment) — a tap is only ever held
+  // back to arbitrate single/double/triple when at least one of these two
+  // actually has steps, so a dial switch with neither configured keeps
+  // firing press the instant it's pressed, zero added latency.
   events: {
     press: SequenceStep[]
     release: SequenceStep[]
     positionChange: SequenceStep[]
     increment: SequenceStep[]
     decrement: SequenceStep[]
+    doublePress: SequenceStep[]
+    triplePress: SequenceStep[]
   }
   startAngle?: number // degrees, default 135
   endAngle?: number // degrees, default 405
@@ -2168,11 +2260,12 @@ export type ServerToClient =
   // ViewCanvas.tsx) — the server only ever hears about a press to run its
   // sequence, never broadcasts it back out, until now.
   | { type: 'widget:live-press'; widgetId: string; pressed: boolean }
-  // detail is only present when the failure happened mid-sequence (a
-  // DelayStep/ActionStep threw inside runSequence) — omitted (not a
-  // sentinel value) for a pre-sequence error like "Widget not found" or
-  // "cannot fire this event", which has no step context.
-  | { type: 'action:error'; widgetId: string; message: string; detail?: { event: WidgetEventKind; stepIndex: number; stepKind: SequenceStep['kind'] } }
+  // detail is only present when the failure happened mid-sequence (any
+  // step, however deeply nested inside condition branches, threw inside
+  // runSequence) — omitted (not a sentinel value) for a pre-sequence error
+  // like "Widget not found" or "cannot fire this event", which has no step
+  // context.
+  | { type: 'action:error'; widgetId: string; message: string; detail?: { event: WidgetEventKind; path: StepPath; stepKind: SequenceStep['kind'] } }
   // An update-state/send-dcs-command/call-rest action's own console.log
   // call, forwarded from wherever it actually ran — always the main process
   // (see runUpdateState et al in main/index.ts), never the editor's own

@@ -56,7 +56,7 @@ export function Palette(): React.JSX.Element {
       y: pos.y,
       w: 160,
       h: 80,
-      events: { press: [], release: [] },
+      events: { press: [], release: [], doublePress: [], triplePress: [] },
       statesEnabled: false,
       states: [
         {
@@ -135,7 +135,7 @@ export function Palette(): React.JSX.Element {
       orientation: 'vertical',
       min: 0,
       max: 100,
-      events: { press: [], release: [], move: [] },
+      events: { press: [], release: [], move: [], doublePress: [], triplePress: [] },
       fill: { color: '#5b8def' },
       track: { color: DEFAULT_WIDGET_COLOR },
       labels: []
@@ -154,7 +154,7 @@ export function Palette(): React.JSX.Element {
       w: 80,
       h: 80,
       stepDegrees: 15,
-      events: { increment: [], decrement: [], press: [], release: [] },
+      events: { increment: [], decrement: [], press: [], release: [], doublePress: [], triplePress: [] },
       fill: { color: '#5b8def' },
       track: { color: DEFAULT_WIDGET_COLOR },
       labels: []
@@ -213,7 +213,7 @@ export function Palette(): React.JSX.Element {
       labels: [],
       track: { color: DEFAULT_WIDGET_COLOR },
       fill: { color: '#5b8def' },
-      events: { press: [], release: [], positionChange: [], increment: [], decrement: [] },
+      events: { press: [], release: [], positionChange: [], increment: [], decrement: [], doublePress: [], triplePress: [] },
       fireWhileDragging: true
     }
     addWidget(widget)

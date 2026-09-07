@@ -1,5 +1,5 @@
 import { DEFAULT_WIDGET_COLOR, pickAutoBorderColor, withOpacity } from '@shared/color'
-import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
+import { resolveBorderColor, resolveColor, resolveGlowColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { ButtonWidget, WidgetState } from '@shared/types'
 import { actionTitle } from '@shared/actionTitle'
 import { useEditorSettings } from '../../settingsStore'
@@ -32,6 +32,13 @@ export function ButtonWidgetContent({
   const backgroundColor = resolvedColor.color ?? DEFAULT_WIDGET_COLOR
   const resolvedBorderColor = resolveBorderColor(state, variables)
   const borderColor = resolvedBorderColor.color ?? pickAutoBorderColor(backgroundColor)
+  // resolveGlowColor itself already resolves to box.glowColor when no
+  // expression is set, and to nothing (not a stale glowColor) when an
+  // expression is set but returns something that isn't a color — see its
+  // own comment for why glow doesn't get resolveColor/resolveBorderColor's
+  // usual expression-failure rescue.
+  const resolvedGlow = resolveGlowColor(state, variables)
+  const glowColor = resolvedGlow.color
   const rotateAngle = widget.rotateAngleExpr ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle) : widget.rotateAngle
 
   const buttonStyle: React.CSSProperties = {
@@ -43,7 +50,14 @@ export function ButtonWidgetContent({
     // explicit z-index here overrides that per-state, e.g. to pop a
     // "Clicked" state above whatever it's overlapping while held.
     ...(state.zIndex !== undefined && { zIndex: state.zIndex }),
-    transform: rotateAngle ? `rotate(${rotateAngle}deg)` : undefined
+    transform: rotateAngle ? `rotate(${rotateAngle}deg)` : undefined,
+    // Off entirely (no shadow) until there's an actual color to show — see
+    // WidgetState.glowColor's own comment. Fixed blur/spread rather than
+    // configurable, same "one deliberate look, not a knob for every
+    // possible variant" scope this was asked for.
+    ...(glowColor !== undefined && {
+      boxShadow: `0 0 16px 3px ${withOpacity(glowColor, resolvedGlow.opacity ?? state.glowOpacity ?? 1)}`
+    })
   }
 
   const labelElements = renderWidgetLabels(state.labels, backgroundColor, variables, debugMode)

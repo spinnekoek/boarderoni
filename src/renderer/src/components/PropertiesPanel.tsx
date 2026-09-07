@@ -28,6 +28,7 @@ import type {
   CallRestAction,
   CallRestPlaceholderValue,
   ColorAppearance,
+  ConditionStep,
   DelayStep,
   DetentStyle,
   DialShapeStyle,
@@ -65,6 +66,7 @@ import type {
   WidgetState
 } from '@shared/types'
 import { extractPlaceholders } from '@shared/restPlaceholders'
+import { stepTitle } from '@shared/actionTitle'
 import type { DcsBiosCommandCatalogEntry, DcsBiosInputInterface } from '@shared/dcsBiosTypes'
 import { DCS_AIRCRAFT_CATALOG } from '@shared/dcsViewportsCatalog'
 
@@ -143,7 +145,10 @@ function PropertiesSection({
   badge,
   sectionKey,
   headerExtra,
-  children
+  children,
+  onDragStart,
+  onDragOver,
+  onDrop
 }: {
   title: string
   badge?: number
@@ -160,9 +165,24 @@ function PropertiesSection({
   // any click that reaches it, descendant-originated or not.
   headerExtra?: React.ReactNode
   children: React.ReactNode
+  // Opts this section into being a reorderable row inside a drag list (used
+  // by EventSequenceEditor's step list). All three land on the rendered
+  // <details> itself, which is draggable ONLY WHILE COLLAPSED (`!open`) — a
+  // collapsed <details> renders none of its body's own text/number inputs
+  // at all (only <summary>'s title, plus headerExtra's own controls, which
+  // already stopPropagation their own pointerdown/click), so there's
+  // nothing inside a draggable collapsed row for a click-drag to mean
+  // "select this text" instead of "drag this row". Expanding a row to edit
+  // it simply turns dragging back off until it's collapsed again — no
+  // separate pointerdown/pointerup guard needed, unlike the old flat
+  // sequence-step div this replaces.
+  onDragStart?: () => void
+  onDragOver?: (e: React.DragEvent) => void
+  onDrop?: () => void
 }): React.JSX.Element {
   const key = sectionKey ?? title
   const [open, setOpen] = useState(() => isSectionOpen(key))
+  const reorderable = onDragStart !== undefined
 
   // Properties panel's own "Expand all"/"Collapse all" header buttons (see
   // propertiesExpansionStore.ts) — every mounted PropertiesSection reacts
@@ -182,6 +202,10 @@ function PropertiesSection({
     <details
       className="properties-section"
       open={open}
+      draggable={reorderable ? !open : undefined}
+      onDragStart={reorderable ? onDragStart : undefined}
+      onDragOver={reorderable ? onDragOver : undefined}
+      onDrop={reorderable ? onDrop : undefined}
       onToggle={(e) => {
         const next = e.currentTarget.open
         setOpen(next)
@@ -1258,10 +1282,13 @@ function ActionFields({
   )
 }
 
-// One step within an event's sequence — either a plain WidgetAction (via
-// ActionFields, unchanged) or a Delay step (a single ms field). Both share
-// the same remove control; only the action variant needs the full
-// ActionFields sub-editor.
+// One step within an event's sequence — a plain WidgetAction (via
+// ActionFields, unchanged), a Delay step (a single ms field), or a
+// Condition step (an fx expression plus two nested EventSequenceEditor
+// branches — reusing that same component recursively rather than a
+// bespoke branch-list widget, since a branch is just another event's own
+// SequenceStep[] with nowhere else to live). All three share the same
+// remove control.
 function SequenceStepFields({
   step,
   onChange,
@@ -1292,6 +1319,40 @@ function SequenceStepFields({
           Remove
         </button>
       </div>
+    )
+  }
+  if (step.kind === 'condition') {
+    return (
+      <>
+        <label className="properties__field">
+          <span>Condition</span>
+          <CodeEditor
+            value={step.condition}
+            onChange={(condition) => onChange({ ...step, condition })}
+            placeholder={variableHint ? `return ${variableHint} > 0;` : 'return variables.GEAR_HANDLE === 1;'}
+          />
+        </label>
+        <p className="properties__hint">
+          JS function body — return a truthy/falsy value. <code>variables</code> holds every variable&rsquo;s current value.
+        </p>
+        <EventSequenceEditor
+          title="If true"
+          steps={step.whenTrue}
+          onChange={(whenTrue) => onChange({ ...step, whenTrue })}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
+          variableHint={variableHint}
+        />
+        <EventSequenceEditor
+          title="If false"
+          steps={step.whenFalse}
+          onChange={(whenFalse) => onChange({ ...step, whenFalse })}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
+          variableHint={variableHint}
+        />
+        <button type="button" className="properties__file-remove sequence-step__remove" onClick={onRemove}>
+          Remove step
+        </button>
+      </>
     )
   }
   return (
@@ -1338,6 +1399,7 @@ function EventSequenceEditor({
   const dragStepIndex = useRef<number | null>(null)
   const [recording, setRecording] = useState(false)
   const [bulkDelayMs, setBulkDelayMs] = useState(30)
+  const confirm = useConfirmStore((s) => s.confirm)
 
   function patchStep(index: number, step: SequenceStep): void {
     onChange(steps.map((s, i) => (i === index ? step : s)))
@@ -1345,11 +1407,33 @@ function EventSequenceEditor({
   function removeStep(index: number): void {
     onChange(steps.filter((_, i) => i !== index))
   }
+  // Shared by both the collapsed header's own delete button and the
+  // expanded body's "Remove step"/"Remove" button — same confirm-then-act
+  // pattern as every other Remove/Delete control in this panel (see
+  // confirmRemoveLabel and friends).
+  async function confirmRemoveStep(index: number): Promise<void> {
+    const ok = await confirm('Remove this step? This cannot be undone.', { confirmLabel: 'Remove' })
+    if (ok) removeStep(index)
+  }
+  // A step's own PropertiesSection is keyed by its (freshly generated,
+  // never-before-seen) id, so isSectionOpen would default it to collapsed —
+  // pre-seed the open-sections store so a step reads as expanded the moment
+  // it's added, instead of forcing an extra click to see what was just
+  // created.
   function addActionStep(): void {
-    onChange([...steps, { kind: 'action', id: nextId(), action: { kind: 'none' } } satisfies ActionStep])
+    const id = nextId()
+    setSectionOpen(id, true)
+    onChange([...steps, { kind: 'action', id, action: { kind: 'none' } } satisfies ActionStep])
   }
   function addDelayStep(): void {
-    onChange([...steps, { kind: 'delay', id: nextId(), delayMs: 250 } satisfies DelayStep])
+    const id = nextId()
+    setSectionOpen(id, true)
+    onChange([...steps, { kind: 'delay', id, delayMs: 250 } satisfies DelayStep])
+  }
+  function addConditionStep(): void {
+    const id = nextId()
+    setSectionOpen(id, true)
+    onChange([...steps, { kind: 'condition', id, condition: '', whenTrue: [], whenFalse: [] } satisfies ConditionStep])
   }
   function setAllDelays(delayMs: number): void {
     onChange(steps.map((s) => (s.kind === 'delay' ? { ...s, delayMs } : s)))
@@ -1387,47 +1471,27 @@ function EventSequenceEditor({
       {hint && <p className="properties__hint">{hint}</p>}
       {steps.length === 0 && <p className="properties__hint">No actions on this event.</p>}
       {steps.map((step, index) => (
-        <div
+        <PropertiesSection
           key={step.id}
-          className="sequence-step"
-          draggable
-          // `draggable` on this whole row (so you can grab it anywhere, not
-          // just a dedicated handle) means a click-drag that starts inside
-          // one of SequenceStepFields' own text/number inputs — meant as a
-          // text-selection drag — would otherwise get swept up as a native
-          // HTML5 row-reorder drag instead. Checking the target inside
-          // onDragStart doesn't work: for a draggable ANCESTOR with a
-          // non-draggable descendant, the browser fires dragstart with
-          // target = the draggable element itself (this row), never the
-          // input the mousedown actually landed on — there's no "which
-          // descendant started it" info left by the time dragstart fires.
-          // So this has to happen earlier: flip the row's own `draggable`
-          // off, on the actual pointerdown, whenever THAT target is a form
-          // control — before the browser ever decides to start a drag at
-          // all — then flip it back on release so the row can still be
-          // grabbed normally anywhere else.
-          onPointerDown={(e) => {
-            e.currentTarget.draggable = !(
-              e.target instanceof HTMLInputElement ||
-              e.target instanceof HTMLTextAreaElement ||
-              e.target instanceof HTMLSelectElement
-            )
-          }}
-          onPointerUp={(e) => {
-            e.currentTarget.draggable = true
-          }}
+          title={stepTitle(step)}
+          sectionKey={step.id}
           onDragStart={() => (dragStepIndex.current = index)}
           onDragOver={(e) => e.preventDefault()}
           onDrop={() => handleReorderStep(index)}
+          headerExtra={
+            <button type="button" className="properties__file-remove" onClick={() => confirmRemoveStep(index)}>
+              Delete
+            </button>
+          }
         >
           <SequenceStepFields
             step={step}
             onChange={(s) => patchStep(index, s)}
-            onRemove={() => removeStep(index)}
+            onRemove={() => confirmRemoveStep(index)}
             dcsBiosActionEnabled={dcsBiosActionEnabled}
             variableHint={variableHint}
           />
-        </div>
+        </PropertiesSection>
       ))}
       {recording ? (
         <SequenceRecorder
@@ -1443,6 +1507,9 @@ function EventSequenceEditor({
           </button>
           <button type="button" className="properties__file-button" onClick={addDelayStep}>
             + Add delay
+          </button>
+          <button type="button" className="properties__file-button" onClick={addConditionStep}>
+            + Add condition
           </button>
           <button type="button" className="properties__file-button" onClick={() => setRecording(true)}>
             ● Record keys
@@ -4257,7 +4324,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </PropertiesSection>
         )}
 
-        <PropertiesSection title="Actions" badge={3}>
+        <PropertiesSection title="Actions" badge={5}>
           <EventSequenceEditor
             title="Press"
             steps={adjuster.events.press}
@@ -4270,6 +4337,22 @@ export function PropertiesPanel(): React.JSX.Element {
             onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, release: steps } })}
             dcsBiosActionEnabled={dcsBiosActionEnabled}
           />
+          <EventSequenceEditor
+            title="Double press"
+            steps={adjuster.events.doublePress ?? []}
+            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, doublePress: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <EventSequenceEditor
+            title="Triple press"
+            steps={adjuster.events.triplePress ?? []}
+            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, triplePress: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <p className="properties__hint">
+            Double/Triple press only engage the double/triple-tap window at all once either has any steps — with both empty, Press
+            fires the instant the drag starts, same as always.
+          </p>
           <EventSequenceEditor
             title="Move (while dragging)"
             steps={adjuster.events.move}
@@ -4553,7 +4636,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </PropertiesSection>
 
-        <PropertiesSection title="Actions" badge={4}>
+        <PropertiesSection title="Actions" badge={6}>
           <EventSequenceEditor
             title="Press"
             steps={encoder.events.press}
@@ -4566,6 +4649,22 @@ export function PropertiesPanel(): React.JSX.Element {
             onChange={(steps) => patchEncoder({ events: { ...encoder.events, release: steps } })}
             dcsBiosActionEnabled={dcsBiosActionEnabled}
           />
+          <EventSequenceEditor
+            title="Double press"
+            steps={encoder.events.doublePress ?? []}
+            onChange={(steps) => patchEncoder({ events: { ...encoder.events, doublePress: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <EventSequenceEditor
+            title="Triple press"
+            steps={encoder.events.triplePress ?? []}
+            onChange={(steps) => patchEncoder({ events: { ...encoder.events, triplePress: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <p className="properties__hint">
+            Double/Triple press only engage the double/triple-tap window at all once either has any steps — with both empty, Press
+            fires the instant the grip is touched, same as always.
+          </p>
           <EventSequenceEditor
             title="Turn CW (increment)"
             steps={encoder.events.increment}
@@ -5918,6 +6017,17 @@ export function PropertiesPanel(): React.JSX.Element {
               onChange: (steps) => patchSwitch({ events: { ...sw.events, decrement: steps } }),
               hint: 'Fires when turning the dial lands on a lower position index than whichever was active before — variables.$value/$index are the landed-on position’s name/index, same as Position Change.',
               variableHint: 'variables.$value'
+            },
+            {
+              title: 'Double press',
+              steps: sw.events.doublePress ?? [],
+              onChange: (steps) => patchSwitch({ events: { ...sw.events, doublePress: steps } }),
+              hint: 'Only engages the double/triple-tap window at all once this or Triple press has any steps — with both empty, Press fires the instant it’s pressed, same as always.'
+            },
+            {
+              title: 'Triple press',
+              steps: sw.events.triplePress ?? [],
+              onChange: (steps) => patchSwitch({ events: { ...sw.events, triplePress: steps } })
             }
           ]}
         />
@@ -6788,6 +6898,7 @@ export function PropertiesPanel(): React.JSX.Element {
   const isColorExpr = activeState.colorExpr !== undefined
   const isBorderColorExpr = activeState.borderColorExpr !== undefined
   const isAutoBorderColor = activeState.borderColor == null && !isBorderColorExpr
+  const isGlowColorExpr = activeState.glowColorExpr !== undefined
   const minSize = snapToGrid ? gridSize : 1
 
   return (
@@ -7001,6 +7112,24 @@ export function PropertiesPanel(): React.JSX.Element {
                 onOpacityChange={(v) => patchState({ borderOpacity: v })}
               />
             </div>
+
+            <div className="properties__field">
+              <span>Glow color</span>
+              <ColorPickerButton
+                key={`${activeState.id}-glow`}
+                value={activeState.glowColor ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => patchState({ glowColor: color, glowColorExpr: undefined })}
+                isExpr={isGlowColorExpr}
+                exprValue={activeState.glowColorExpr ?? ''}
+                onExprChange={(code) => patchState({ glowColorExpr: code })}
+                onEnterExpr={() => patchState({ glowColorExpr: activeState.glowColorExpr ?? '' })}
+                onClearExpr={() => patchState({ glowColorExpr: undefined })}
+                auto={activeState.glowColor === undefined && !isGlowColorExpr}
+                onAuto={() => patchState({ glowColor: undefined, glowColorExpr: undefined })}
+                opacity={activeState.glowOpacity ?? 1}
+                onOpacityChange={(v) => patchState({ glowOpacity: v })}
+              />
+            </div>
           </>
         ) : (
           <p className="properties__hint">Editing this block's own color — see below.</p>
@@ -7122,7 +7251,7 @@ export function PropertiesPanel(): React.JSX.Element {
           onChange={(steps) =>
             widget.type === 'morph'
               ? patch({ events: { ...widget.events, press: steps } })
-              : patch({ events: { press: steps, release: eventfulWidget.events.release } })
+              : patch({ events: { ...eventfulWidget.events, press: steps } })
           }
           dcsBiosActionEnabled={dcsBiosActionEnabled}
         />
@@ -7132,10 +7261,26 @@ export function PropertiesPanel(): React.JSX.Element {
           onChange={(steps) =>
             widget.type === 'morph'
               ? patch({ events: { ...widget.events, release: steps } })
-              : patch({ events: { press: eventfulWidget.events.press, release: steps } })
+              : patch({ events: { ...eventfulWidget.events, release: steps } })
           }
           dcsBiosActionEnabled={dcsBiosActionEnabled}
         />
+        {widget.type === 'button' && (
+          <>
+            <EventSequenceEditor
+              title="Double press"
+              steps={widget.events.doublePress ?? []}
+              onChange={(steps) => patch({ events: { ...widget.events, doublePress: steps } })}
+              dcsBiosActionEnabled={dcsBiosActionEnabled}
+            />
+            <EventSequenceEditor
+              title="Triple press"
+              steps={widget.events.triplePress ?? []}
+              onChange={(steps) => patch({ events: { ...widget.events, triplePress: steps } })}
+              dcsBiosActionEnabled={dcsBiosActionEnabled}
+            />
+          </>
+        )}
         {widget.type === 'morph' && isMorphSliderActive(widget) && (
           <EventSequenceEditor
             title="Move (while dragging)"

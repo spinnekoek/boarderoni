@@ -38,12 +38,14 @@ import {
   type DropdownWidget,
   type ToggleSwitchWidget,
   type Plugin,
+  type ConditionStep,
   type KeypressAction,
   type RockerSwitchWidget,
   type ScreenRegion,
   type SendDcsCommandAction,
   type SequenceStep,
   type ServerToClient,
+  type StepPath,
   type SwitchPosition,
   type Variable,
   type VariableValue,
@@ -51,7 +53,7 @@ import {
   type WidgetAction,
   type WidgetEventKind
 } from '../shared/types'
-import { getEventSteps } from '../shared/widgetEvents'
+import { getEventSteps, flattenSequenceSteps } from '../shared/widgetEvents'
 import { FONT_MIME_BY_EXTENSION, fontExtension } from '../shared/fonts'
 import { findSubDeck, findWidgetAnywhere, allDeckWidgets } from '../shared/subDecks'
 import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression, setExpressionConsoleSink, stringifyExpressionLogArgs } from '../shared/expr'
@@ -973,7 +975,7 @@ function collectImportWarnings(dashboard: Dashboard): string[] {
   const dataSourceIds = new Set(getRestDataSources().map((s) => s.id))
   const warnings: string[] = []
   for (const widget of allDeckWidgets(dashboard)) {
-    for (const step of sequenceStepsForWidget(widget)) {
+    for (const step of flattenSequenceSteps(sequenceStepsForWidget(widget))) {
       if (step.kind === 'action' && step.action.kind === 'call-rest' && !dataSourceIds.has(step.action.dataSourceId)) {
         warnings.push(`A ${widget.type} widget references a REST data source that doesn't exist on this machine — re-link it after import.`)
       }
@@ -1715,6 +1717,23 @@ function runUpdateState(room: DeckRoom, code: string, trigger: TriggerValue | un
   applyVariableUpdates(room, result.value as Record<string, unknown>, { immediate: final })
 }
 
+// A ConditionStep's own condition expression — same evaluation mechanism as
+// runUpdateState above (toVariableMap/withLogRoom/evaluateMappingExpression
+// or tryEvaluateExpression, same trigger-aware $value/$index exposure), just
+// coerced to boolean instead of expecting an object back. Deliberately NOT
+// resolveBooleanExpr (shared/expr.ts) — that swallows a failing expression
+// into `undefined` for rendering-fallback callers; a condition step's
+// failure needs to throw, so runSteps' catch below turns it into an
+// action:error the same way any other step kind's failure already does.
+function evaluateConditionStep(room: DeckRoom, step: ConditionStep, trigger: TriggerValue | undefined): boolean {
+  const variableMap = toVariableMap(room.dashboard.variables ?? [])
+  const result = withLogRoom(room, () =>
+    trigger ? evaluateMappingExpression(step.condition, trigger.value, variableMap, trigger.index) : tryEvaluateExpression(step.condition, variableMap)
+  )
+  if (!result.ok) throw new Error(result.error)
+  return Boolean(result.value)
+}
+
 // argumentExpr (when set) is evaluated the same way UpdateStateAction.code
 // is — variables (plus $value while an AdjusterWidget is being dragged, see
 // runUpdateState) in scope, thrown/syntax errors surface to the caller as an
@@ -1962,8 +1981,16 @@ function sleep(ms: number): Promise<void> {
 async function runKeypressAction(action: KeypressAction): Promise<void> {
   const keys = action.keys.map(keyFromName)
   const mode = action.mode ?? 'press'
-  if (mode !== 'up') await keyboard.pressKey(...keys)
-  if (mode !== 'down') await keyboard.releaseKey(...keys)
+  // Pressed/released one key at a time (not keyboard.pressKey(...keys) as a
+  // single call) because nut-js's multi-key form treats every key but the
+  // last as a "modifier flag" string, and libnut-core's native CheckKeyFlags
+  // collapses right_alt/right_control/right_shift into the same flag as
+  // their left-hand counterparts (always emits VK_LMENU/VK_LCONTROL/
+  // VK_LSHIFT) — so RightAlt+Home silently sent LeftAlt+Home instead.
+  // Toggling each key individually always uses the literal key-lookup path,
+  // which maps right-side keys correctly.
+  if (mode !== 'up') for (const key of keys) await keyboard.pressKey(key)
+  if (mode !== 'down') for (const key of [...keys].reverse()) await keyboard.releaseKey(key)
 }
 
 // A navigate-subdeck/open-overlay action naming a sub-deck must still name
@@ -2025,6 +2052,64 @@ async function runActionStep(room: DeckRoom, action: WidgetAction, trigger: Trig
 // already did (e.g. a completed update-state step's variable change and
 // broadcast/save already happened via applyVariableUpdates — not rolled
 // back).
+// Thrown internally by runSteps to unwind out of arbitrarily nested
+// condition branches with the failing step's exact location still attached
+// — caught once, by runSequence itself, which is the only place that
+// actually reports it. Never escapes runSequence.
+class SequenceStepError extends Error {
+  constructor(
+    message: string,
+    readonly path: StepPath,
+    readonly stepKind: SequenceStep['kind']
+  ) {
+    super(message)
+  }
+}
+
+// Runs one (possibly nested) SequenceStep[] list, recursing into whichever
+// branch a ConditionStep's condition selects. pathPrefix is this list's own
+// location within the overall tree — [] at the top level, or
+// [...outerPrefix, { index, branch }] one level into a condition's branch.
+// Throws a SequenceStepError on the first failure at any depth, so an error
+// inside a nested branch also aborts every remaining step back up through
+// its ancestors, matching the old flat behavior's "abort the rest of the
+// list" for the top-level case.
+async function runSteps(
+  room: DeckRoom,
+  steps: SequenceStep[],
+  trigger: TriggerValue | undefined,
+  final: boolean,
+  ws: WebSocket,
+  pathPrefix: StepPath
+): Promise<void> {
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    try {
+      if (step.kind === 'delay') {
+        await sleep(step.delayMs)
+      } else if (step.kind === 'condition') {
+        const branch: 'whenTrue' | 'whenFalse' = evaluateConditionStep(room, step, trigger) ? 'whenTrue' : 'whenFalse'
+        await runSteps(room, step[branch], trigger, final, ws, [...pathPrefix, { index: i, branch }])
+      } else {
+        await runActionStep(room, step.action, trigger, final, ws)
+      }
+    } catch (err) {
+      // A SequenceStepError already carries the exact nested location it
+      // failed at (built by a deeper runSteps call) — rethrow unchanged
+      // rather than re-wrapping it at every ancestor level on the way up.
+      throw err instanceof SequenceStepError
+        ? err
+        : new SequenceStepError(err instanceof Error ? err.message : String(err), [...pathPrefix, { index: i }], step.kind)
+    }
+  }
+}
+
+// Runs one event's SequenceStep[] tree top to bottom, reporting the first
+// failure (at whatever depth it happened) via sendError — originating ws
+// only, same targeting sendError always used. Steps that already completed
+// before the failure keep whatever they already did (e.g. a completed
+// update-state step's variable change and broadcast/save already happened
+// via applyVariableUpdates — not rolled back).
 async function runSequence(
   room: DeckRoom,
   steps: SequenceStep[],
@@ -2034,18 +2119,14 @@ async function runSequence(
   widgetId: string,
   event: WidgetEventKind
 ): Promise<void> {
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i]
-    try {
-      if (step.kind === 'delay') {
-        await sleep(step.delayMs)
-      } else {
-        await runActionStep(room, step.action, trigger, final, ws)
-      }
-    } catch (err) {
-      sendError(ws, widgetId, err instanceof Error ? err.message : String(err), { event, stepIndex: i, stepKind: step.kind })
-      return
-    }
+  try {
+    await runSteps(room, steps, trigger, final, ws, [])
+  } catch (err) {
+    // runSteps only ever throws a SequenceStepError (every catch inside it
+    // wraps a plain thrown value into one before rethrowing) — this cast
+    // reflects that invariant.
+    const stepErr = err as SequenceStepError
+    sendError(ws, widgetId, stepErr.message, { event, path: stepErr.path, stepKind: stepErr.stepKind })
   }
 }
 
@@ -2110,6 +2191,15 @@ async function triggerAction(
     // wrapping as press/release above, exposed as variables.$value.
     if (widget.type === 'switch-toggle' && event === 'guardToggle') {
       await runSequence(room, widget.events.guardToggle, numericTrigger(value), final, ws, widgetId, event)
+      return
+    }
+
+    // DialSwitchWidget-only, same optIN-by-being-non-empty convention as
+    // ButtonWidget's own (see its events comment) — the client-side arbiter
+    // (useMultiPressArbiter) already decided single vs double vs triple
+    // before this ever arrives, so this is just "run whichever one it is."
+    if (widget.type === 'switch-dial' && (event === 'doublePress' || event === 'triplePress')) {
+      await runSequence(room, widget.events[event], numericTrigger(value), final, ws, widgetId, event)
       return
     }
 
@@ -2194,7 +2284,7 @@ function sendError(
   ws: WebSocket,
   widgetId: string,
   message: string,
-  detail?: { event: WidgetEventKind; stepIndex: number; stepKind: SequenceStep['kind'] }
+  detail?: { event: WidgetEventKind; path: StepPath; stepKind: SequenceStep['kind'] }
 ): void {
   const payload: ServerToClient = { type: 'action:error', widgetId, message, ...(detail && { detail }) }
   ws.send(JSON.stringify(payload))
