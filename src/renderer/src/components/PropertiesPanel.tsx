@@ -151,7 +151,7 @@ function PropertiesSection({
   onDrop
 }: {
   title: string
-  badge?: number
+  badge?: number | string
   // Persistence key for remembering this section's open/closed state (see
   // id.ts's isSectionOpen/setSectionOpen) — defaults to `title`. Per-label
   // sections pass the label's own id instead: several labels can share the
@@ -2293,7 +2293,6 @@ function SwitchPositionsEditor({
   activePositionExpr,
   onPatchPositions,
   onPatchActivePositionExpr,
-  dcsBiosActionEnabled,
   activePositionIndex,
   setActivePositionIndex,
   onActivePositionIdChange,
@@ -2310,7 +2309,6 @@ function SwitchPositionsEditor({
   activePositionExpr?: string
   onPatchPositions: (positions: SwitchPosition[]) => void
   onPatchActivePositionExpr: (expr: string | undefined) => void
-  dcsBiosActionEnabled: boolean
   activePositionIndex: number
   setActivePositionIndex: (indexOrUpdater: number | ((current: number) => number)) => void
   // Rocker only (see its call site below) — keeps the canvas's click-through
@@ -2342,15 +2340,6 @@ function SwitchPositionsEditor({
   // unconditionally further down (see confirmDeletePosition/the "×" button's
   // own `positions.length > 2` guard) — this only adds a ceiling.
   maxPositions?: number
-  // The widget's own root-level events (Press/Release/Position Change, plus
-  // Turn CW/CCW for DialSwitchWidget only — see RockerSwitchWidget.events'
-  // own doc comment in shared/types.ts) — shown in the SAME "Actions"
-  // section as each position's own onSelect below, rather than a second,
-  // separately-titled "Actions" section right next to this one. Each
-  // caller builds its own list from its own widget.events shape, since
-  // that shape differs per widget type (only DialSwitchWidget has
-  // increment/decrement).
-  rootEvents?: { title: string; steps: SequenceStep[]; onChange: (steps: SequenceStep[]) => void; hint?: string; variableHint?: string }[]
 }): React.JSX.Element {
   const positionIndex = Math.min(activePositionIndex, positions.length - 1)
   const activePosition = positions[positionIndex] ?? positions[0]
@@ -2571,7 +2560,7 @@ function SwitchPositionsEditor({
 
         <div className="properties__divider" />
 
-        <span className="properties__section-label">Labels</span>
+        <span className="properties__section-label">Position labels</span>
         {activePosition.labels.map((label) => (
           <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
             <LabelFields
@@ -2587,35 +2576,62 @@ function SwitchPositionsEditor({
           + Add label
         </button>
       </PropertiesSection>
-
-      <PropertiesSection title="Actions" badge={(rootEvents?.length ?? 0) + positions.length}>
-        {rootEvents?.map((e) => (
-          <EventSequenceEditor
-            key={e.title}
-            title={e.title}
-            steps={e.steps}
-            onChange={e.onChange}
-            dcsBiosActionEnabled={dcsBiosActionEnabled}
-            hint={e.hint}
-            variableHint={e.variableHint}
-          />
-        ))}
-        <p className="properties__hint">
-          Every position's own sequence — each runs once, server-side, whenever that position is tapped. Editing here is independent
-          of which position tab is selected above for color/label editing.
-        </p>
-        {positions.map((position, index) => (
-          <EventSequenceEditor
-            key={position.id}
-            title={position.name}
-            steps={position.onSelect}
-            onChange={(steps) => onPatchPositions(positions.map((p, i) => (i === index ? { ...p, onSelect: steps } : p)))}
-            dcsBiosActionEnabled={dcsBiosActionEnabled}
-            variableHint="variables.$value"
-          />
-        ))}
-      </PropertiesSection>
     </>
+  )
+}
+
+// Split out of SwitchPositionsEditor (see its own comment) so each switch
+// widget can render its Actions as its own top-level PropertiesSection,
+// slotted alongside Button/Adjuster/Encoder's Actions instead of buried
+// inside the positions editor. Still shares the same root-events + per-
+// position-onSelect shape as before — only the render location changed.
+function SwitchActionsSection({
+  positions,
+  onPatchPositions,
+  dcsBiosActionEnabled,
+  rootEvents
+}: {
+  positions: SwitchPosition[]
+  onPatchPositions: (positions: SwitchPosition[]) => void
+  dcsBiosActionEnabled: boolean
+  // The widget's own root-level events (Press/Release/Position Change, plus
+  // Turn CW/CCW for DialSwitchWidget only — see RockerSwitchWidget.events'
+  // own doc comment in shared/types.ts) — shown in the SAME "Actions"
+  // section as each position's own onSelect below, rather than a second,
+  // separately-titled "Actions" section right next to this one. Each
+  // caller builds its own list from its own widget.events shape, since
+  // that shape differs per widget type (only DialSwitchWidget has
+  // increment/decrement).
+  rootEvents?: { title: string; steps: SequenceStep[]; onChange: (steps: SequenceStep[]) => void; hint?: string; variableHint?: string }[]
+}): React.JSX.Element {
+  return (
+    <PropertiesSection title="Actions" badge={`${rootEvents?.length ?? 0} events · ${positions.length} positions`}>
+      {rootEvents?.map((e) => (
+        <EventSequenceEditor
+          key={e.title}
+          title={e.title}
+          steps={e.steps}
+          onChange={e.onChange}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
+          hint={e.hint}
+          variableHint={e.variableHint}
+        />
+      ))}
+      <p className="properties__hint">
+        Every position's own sequence — each runs once, server-side, whenever that position is tapped. Editing here is independent
+        of which position tab is selected above for color/label editing.
+      </p>
+      {positions.map((position, index) => (
+        <EventSequenceEditor
+          key={position.id}
+          title={position.name}
+          steps={position.onSelect}
+          onChange={(steps) => onPatchPositions(positions.map((p, i) => (i === index ? { ...p, onSelect: steps } : p)))}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
+          variableHint="variables.$value"
+        />
+      ))}
+    </PropertiesSection>
   )
 }
 
@@ -2935,7 +2951,7 @@ export function PropertiesPanel(): React.JSX.Element {
           <LabelFields label={lw.label} backgroundColor={DEFAULT_WIDGET_COLOR} onChange={patchLabel} onRemove={() => {}} showRemove={false} />
         </PropertiesSection>
 
-        <PropertiesSection title="Advanced">
+        <PropertiesSection title="Layout">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -3084,7 +3100,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Advanced">
+        <PropertiesSection title="Layout">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -3201,7 +3217,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[gauge.type]}</p>
 
-        <PropertiesSection title="Style & Value">
+        <PropertiesSection title="Setup">
           <label className="properties__field">
             <span>Style</span>
             <select value={gauge.style} onChange={(e) => patchGauge({ style: e.target.value as GaugeWidget['style'] })}>
@@ -3699,7 +3715,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </PropertiesSection>
 
-        <PropertiesSection title="Position & Size">
+        <PropertiesSection title="Layout">
           <div className="properties__grid2">
             <label className="properties__field">
               <span>X</span>
@@ -3801,7 +3817,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[adjuster.type]}</p>
 
-        <PropertiesSection title="Style & Value">
+        <PropertiesSection title="Setup">
           <label className="properties__field">
             <span>Style</span>
             <select value={adjuster.style} onChange={(e) => patchAdjuster({ style: e.target.value as AdjusterWidget['style'] })}>
@@ -3872,102 +3888,6 @@ export function PropertiesPanel(): React.JSX.Element {
           <p className="properties__hint">
             Where the handle sits while not being dragged — e.g. reflect a variable back into the visual. Falls back to Min if unset.
           </p>
-        </PropertiesSection>
-
-        <PropertiesSection title="Rotation">
-          <label className="properties__field">
-            <span>Rotate angle</span>
-            <div className="properties__file-row">
-              {adjuster.rotateAngleExpr !== undefined ? (
-                <span className="properties__hint-inline">Using expression below</span>
-              ) : (
-                <input type="number" value={adjuster.rotateAngle ?? 0} onChange={(e) => patchAdjuster({ rotateAngle: Number(e.target.value) })} />
-              )}
-              {adjuster.rotateAngleExpr !== undefined ? (
-                <button
-                  type="button"
-                  className="color-picker-button__clear"
-                  title="Use a fixed angle instead"
-                  onClick={() => patchAdjuster({ rotateAngleExpr: undefined })}
-                >
-                  ×
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="color-picker-button__fx"
-                  title="Compute the angle with an expression"
-                  onClick={() => patchAdjuster({ rotateAngleExpr: '' })}
-                >
-                  ƒx
-                </button>
-              )}
-            </div>
-          </label>
-          {adjuster.rotateAngleExpr !== undefined && (
-            <label className="properties__field">
-              <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={2}
-                placeholder="return variables.my_variable;"
-                value={adjuster.rotateAngleExpr ?? ''}
-                onChange={(e) => patchAdjuster({ rotateAngleExpr: e.target.value })}
-              />
-            </label>
-          )}
-          <p className="properties__hint">
-            Spins the whole widget in place — the knob/slider AND every one of its own labels together, unlike RockerSwitchWidget/
-            DialSwitchWidget's own rotation, which keeps their widget-level labels upright. Falls back to the fixed angle if the
-            expression is unset or fails to evaluate.
-          </p>
-        </PropertiesSection>
-
-        <PropertiesSection title="Colors">
-          <div className="properties__field">
-            <span>Fill color</span>
-            <ColorPickerButton
-              value={adjuster.fill.color ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchAdjuster({ fill: { ...adjuster.fill, color, colorExpr: undefined } })}
-              isExpr={isFillExpr}
-              exprValue={adjuster.fill.colorExpr ?? ''}
-              onExprChange={(code) => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: code } })}
-              onEnterExpr={() => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: adjuster.fill.colorExpr ?? '' } })}
-              onClearExpr={() => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: undefined } })}
-              opacity={adjuster.fill.backgroundOpacity ?? 1}
-              onOpacityChange={(v) => patchAdjuster({ fill: { ...adjuster.fill, backgroundOpacity: v } })}
-            />
-          </div>
-
-          <div className="properties__field">
-            <span>Track color</span>
-            <ColorPickerButton
-              value={adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchAdjuster({ track: { ...adjuster.track, color, colorExpr: undefined } })}
-              isExpr={isTrackExpr}
-              exprValue={adjuster.track.colorExpr ?? ''}
-              onExprChange={(code) => patchAdjuster({ track: { ...adjuster.track, colorExpr: code } })}
-              onEnterExpr={() => patchAdjuster({ track: { ...adjuster.track, colorExpr: adjuster.track.colorExpr ?? '' } })}
-              onClearExpr={() => patchAdjuster({ track: { ...adjuster.track, colorExpr: undefined } })}
-              opacity={adjuster.track.backgroundOpacity ?? 1}
-              onOpacityChange={(v) => patchAdjuster({ track: { ...adjuster.track, backgroundOpacity: v } })}
-            />
-          </div>
-
-          <div className="properties__field">
-            <span>Border color</span>
-            <ColorPickerButton
-              value={adjuster.borderColor ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchAdjuster({ borderColor: color, borderColorExpr: undefined })}
-              isExpr={isBorderExpr}
-              exprValue={adjuster.borderColorExpr ?? ''}
-              onExprChange={(code) => patchAdjuster({ borderColorExpr: code })}
-              onEnterExpr={() => patchAdjuster({ borderColorExpr: adjuster.borderColorExpr ?? '' })}
-              onClearExpr={() => patchAdjuster({ borderColorExpr: undefined })}
-              opacity={adjuster.borderOpacity ?? 1}
-              onOpacityChange={(v) => patchAdjuster({ borderOpacity: v })}
-            />
-          </div>
         </PropertiesSection>
 
         {adjuster.style === 'slider' && (
@@ -4116,6 +4036,53 @@ export function PropertiesPanel(): React.JSX.Element {
             needleColorLabel="Needle color"
           />
         )}
+
+        <PropertiesSection title="Colors">
+          <div className="properties__field">
+            <span>Fill color</span>
+            <ColorPickerButton
+              value={adjuster.fill.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ fill: { ...adjuster.fill, color, colorExpr: undefined } })}
+              isExpr={isFillExpr}
+              exprValue={adjuster.fill.colorExpr ?? ''}
+              onExprChange={(code) => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: code } })}
+              onEnterExpr={() => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: adjuster.fill.colorExpr ?? '' } })}
+              onClearExpr={() => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: undefined } })}
+              opacity={adjuster.fill.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchAdjuster({ fill: { ...adjuster.fill, backgroundOpacity: v } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Track color</span>
+            <ColorPickerButton
+              value={adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ track: { ...adjuster.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={adjuster.track.colorExpr ?? ''}
+              onExprChange={(code) => patchAdjuster({ track: { ...adjuster.track, colorExpr: code } })}
+              onEnterExpr={() => patchAdjuster({ track: { ...adjuster.track, colorExpr: adjuster.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchAdjuster({ track: { ...adjuster.track, colorExpr: undefined } })}
+              opacity={adjuster.track.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchAdjuster({ track: { ...adjuster.track, backgroundOpacity: v } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={adjuster.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={adjuster.borderColorExpr ?? ''}
+              onExprChange={(code) => patchAdjuster({ borderColorExpr: code })}
+              onEnterExpr={() => patchAdjuster({ borderColorExpr: adjuster.borderColorExpr ?? '' })}
+              onClearExpr={() => patchAdjuster({ borderColorExpr: undefined })}
+              opacity={adjuster.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchAdjuster({ borderOpacity: v })}
+            />
+          </div>
+        </PropertiesSection>
 
         <PropertiesSection title="Border shape">
           {adjuster.style === 'slider' ? (
@@ -4324,6 +4291,71 @@ export function PropertiesPanel(): React.JSX.Element {
           </PropertiesSection>
         )}
 
+        <PropertiesSection title="Rotation">
+          <label className="properties__field">
+            <span>Rotate angle</span>
+            <div className="properties__file-row">
+              {adjuster.rotateAngleExpr !== undefined ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input type="number" value={adjuster.rotateAngle ?? 0} onChange={(e) => patchAdjuster({ rotateAngle: Number(e.target.value) })} />
+              )}
+              {adjuster.rotateAngleExpr !== undefined ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed angle instead"
+                  onClick={() => patchAdjuster({ rotateAngleExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the angle with an expression"
+                  onClick={() => patchAdjuster({ rotateAngleExpr: '' })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {adjuster.rotateAngleExpr !== undefined && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={2}
+                placeholder="return variables.my_variable;"
+                value={adjuster.rotateAngleExpr ?? ''}
+                onChange={(e) => patchAdjuster({ rotateAngleExpr: e.target.value })}
+              />
+            </label>
+          )}
+          <p className="properties__hint">
+            Spins the whole widget in place — the knob/slider AND every one of its own labels together, unlike RockerSwitchWidget/
+            DialSwitchWidget's own rotation, which keeps their widget-level labels upright. Falls back to the fixed angle if the
+            expression is unset or fails to evaluate.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Labels" badge={adjuster.labels.length}>
+          {adjuster.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+              <LabelFields
+                label={label}
+                backgroundColor={adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchAdjusterLabel(label.id, fields)}
+                onRemove={() => confirmRemoveAdjusterLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addAdjusterLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
+
         <PropertiesSection title="Actions" badge={5}>
           <EventSequenceEditor
             title="Press"
@@ -4366,23 +4398,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Labels" badge={adjuster.labels.length}>
-          {adjuster.labels.map((label) => (
-            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
-              <LabelFields
-                label={label}
-                backgroundColor={adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
-                onChange={(fields) => patchAdjusterLabel(label.id, fields)}
-                onRemove={() => confirmRemoveAdjusterLabel(label.id)}
-              />
-            </PropertiesSection>
-          ))}
-          <button type="button" className="properties__file-button" onClick={addAdjusterLabel}>
-            + Add label
-          </button>
-        </PropertiesSection>
-
-        <PropertiesSection title="Position & Size">
+        <PropertiesSection title="Layout">
           <div className="properties__grid2">
             <label className="properties__field">
               <span>X</span>
@@ -4483,7 +4499,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[encoder.type]}</p>
 
-        <PropertiesSection title="Step">
+        <PropertiesSection title="Setup">
           <label className="properties__field">
             <span>Degrees per step</span>
             <input
@@ -4636,6 +4652,22 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </PropertiesSection>
 
+        <PropertiesSection title="Labels" badge={encoder.labels.length}>
+          {encoder.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+              <LabelFields
+                label={label}
+                backgroundColor={encoder.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchEncoderLabel(label.id, fields)}
+                onRemove={() => confirmRemoveEncoderLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addEncoderLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
+
         <PropertiesSection title="Actions" badge={6}>
           <EventSequenceEditor
             title="Press"
@@ -4683,23 +4715,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Labels" badge={encoder.labels.length}>
-          {encoder.labels.map((label) => (
-            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
-              <LabelFields
-                label={label}
-                backgroundColor={encoder.track.color ?? DEFAULT_WIDGET_COLOR}
-                onChange={(fields) => patchEncoderLabel(label.id, fields)}
-                onRemove={() => confirmRemoveEncoderLabel(label.id)}
-              />
-            </PropertiesSection>
-          ))}
-          <button type="button" className="properties__file-button" onClick={addEncoderLabel}>
-            + Add label
-          </button>
-        </PropertiesSection>
-
-        <PropertiesSection title="Position & Size">
+        <PropertiesSection title="Layout">
           <div className="properties__grid2">
             <label className="properties__field">
               <span>X</span>
@@ -4792,7 +4808,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
 
-        <PropertiesSection title="Style">
+        <PropertiesSection title="Setup">
           <label className="properties__field">
             <span>Orientation</span>
             <select value={sw.orientation ?? 'vertical'} onChange={(e) => patchSwitch({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
@@ -4800,52 +4816,6 @@ export function PropertiesPanel(): React.JSX.Element {
               <option value="horizontal">Horizontal</option>
             </select>
           </label>
-
-          <label className="properties__field">
-            <span>Rotate angle</span>
-            <div className="properties__file-row">
-              {sw.rotateAngleExpr !== undefined ? (
-                <span className="properties__hint-inline">Using expression below</span>
-              ) : (
-                <input type="number" value={sw.rotateAngle ?? 0} onChange={(e) => patchSwitch({ rotateAngle: Number(e.target.value) })} />
-              )}
-              {sw.rotateAngleExpr !== undefined ? (
-                <button
-                  type="button"
-                  className="color-picker-button__clear"
-                  title="Use a fixed angle instead"
-                  onClick={() => patchSwitch({ rotateAngleExpr: undefined })}
-                >
-                  ×
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="color-picker-button__fx"
-                  title="Compute the angle with an expression"
-                  onClick={() => patchSwitch({ rotateAngleExpr: '' })}
-                >
-                  ƒx
-                </button>
-              )}
-            </div>
-          </label>
-          {sw.rotateAngleExpr !== undefined && (
-            <label className="properties__field">
-              <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={2}
-                placeholder="return variables.my_variable;"
-                value={sw.rotateAngleExpr ?? ''}
-                onChange={(e) => patchSwitch({ rotateAngleExpr: e.target.value })}
-              />
-            </label>
-          )}
-          <p className="properties__hint">
-            Spins the shape/segments and each position&rsquo;s own labels together. The widget&rsquo;s own Labels below (a legend/title)
-            stay upright. Falls back to the fixed angle if the expression is unset or fails to evaluate.
-          </p>
 
           <label className="properties__checkbox">
             <input
@@ -4892,9 +4862,9 @@ export function PropertiesPanel(): React.JSX.Element {
               onOpacityChange={(v) => patchSwitch({ borderOpacity: v })}
             />
           </div>
+        </PropertiesSection>
 
-          <div className="properties__divider" />
-
+        <PropertiesSection title="Border shape">
           <span className="properties__section-label">Border radius</span>
           <CornersInputGrid
             topLeft={{ value: sw.radiusTopLeft ?? 6, min: 0, onChange: (v) => patchSwitch({ radiusTopLeft: v }) }}
@@ -4914,12 +4884,59 @@ export function PropertiesPanel(): React.JSX.Element {
           />
         </PropertiesSection>
 
+        <PropertiesSection title="Rotation">
+          <label className="properties__field">
+            <span>Rotate angle</span>
+            <div className="properties__file-row">
+              {sw.rotateAngleExpr !== undefined ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input type="number" value={sw.rotateAngle ?? 0} onChange={(e) => patchSwitch({ rotateAngle: Number(e.target.value) })} />
+              )}
+              {sw.rotateAngleExpr !== undefined ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed angle instead"
+                  onClick={() => patchSwitch({ rotateAngleExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the angle with an expression"
+                  onClick={() => patchSwitch({ rotateAngleExpr: '' })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {sw.rotateAngleExpr !== undefined && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={2}
+                placeholder="return variables.my_variable;"
+                value={sw.rotateAngleExpr ?? ''}
+                onChange={(e) => patchSwitch({ rotateAngleExpr: e.target.value })}
+              />
+            </label>
+          )}
+          <p className="properties__hint">
+            Spins the shape/segments and each position&rsquo;s own labels together. The widget&rsquo;s own Labels below (a legend/title)
+            stay upright. Falls back to the fixed angle if the expression is unset or fails to evaluate.
+          </p>
+        </PropertiesSection>
+
         <SwitchPositionsEditor
           positions={sw.positions}
           activePositionExpr={sw.activePositionExpr}
           onPatchPositions={(positions) => patchSwitch({ positions })}
           onPatchActivePositionExpr={(activePositionExpr) => patchSwitch({ activePositionExpr })}
-          dcsBiosActionEnabled={dcsBiosActionEnabled}
           activePositionIndex={effectiveActivePositionIndex}
           setActivePositionIndex={setActivePositionIndex}
           onActivePositionIdChange={selectBlock}
@@ -4927,6 +4944,29 @@ export function PropertiesPanel(): React.JSX.Element {
           activePositionExprExpanded={activePositionExprExpanded}
           setActivePositionExprExpanded={setActivePositionExprExpanded}
           confirm={confirm}
+        />
+
+        <PropertiesSection title="Labels" badge={sw.labels.length}>
+          <p className="properties__hint">Anchored to the widget as a whole, independent of each position's own labels above.</p>
+          {sw.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+              <LabelFields
+                label={label}
+                backgroundColor={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchSwitchLabel(label.id, fields)}
+                onRemove={() => confirmRemoveSwitchLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addSwitchLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
+
+        <SwitchActionsSection
+          positions={sw.positions}
+          onPatchPositions={(positions) => patchSwitch({ positions })}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
           rootEvents={[
             { title: 'Press', steps: sw.events.press, onChange: (steps) => patchSwitch({ events: { ...sw.events, press: steps } }) },
             { title: 'Release', steps: sw.events.release, onChange: (steps) => patchSwitch({ events: { ...sw.events, release: steps } }) },
@@ -4953,24 +4993,7 @@ export function PropertiesPanel(): React.JSX.Element {
           ]}
         />
 
-        <PropertiesSection title="Labels" badge={sw.labels.length}>
-          <p className="properties__hint">Anchored to the widget as a whole, independent of each position's own labels above.</p>
-          {sw.labels.map((label) => (
-            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
-              <LabelFields
-                label={label}
-                backgroundColor={sw.track.color ?? DEFAULT_WIDGET_COLOR}
-                onChange={(fields) => patchSwitchLabel(label.id, fields)}
-                onRemove={() => confirmRemoveSwitchLabel(label.id)}
-              />
-            </PropertiesSection>
-          ))}
-          <button type="button" className="properties__file-button" onClick={addSwitchLabel}>
-            + Add label
-          </button>
-        </PropertiesSection>
-
-        <PropertiesSection title="Advanced">
+        <PropertiesSection title="Layout">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -5063,7 +5086,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
 
-        <PropertiesSection title="Style">
+        <PropertiesSection title="Setup">
           <label className="properties__field">
             <span>Orientation</span>
             <select value={sw.orientation ?? 'vertical'} onChange={(e) => patchSwitch({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
@@ -5071,34 +5094,6 @@ export function PropertiesPanel(): React.JSX.Element {
               <option value="horizontal">Horizontal</option>
             </select>
           </label>
-
-          <label className="properties__field">
-            <span>Base shape</span>
-            <select
-              value={sw.bezelShape ?? 'circle'}
-              onChange={(e) => patchSwitch({ bezelShape: e.target.value === 'circle' ? undefined : (e.target.value as ToggleSwitchWidget['bezelShape']) })}
-            >
-              <option value="circle">Circle</option>
-              <option value="hexagon">Hexagon</option>
-            </select>
-          </label>
-
-          <label className="properties__field">
-            <span>Base circle size</span>
-            <input
-              type="number"
-              min={1}
-              value={sw.bezelRadius ?? 45}
-              onChange={(e) => patchSwitch({ bezelRadius: Math.max(1, Number(e.target.value)) })}
-            />
-          </label>
-
-          {(sw.bezelShape ?? 'circle') === 'hexagon' && (
-            <label className="properties__field">
-              <span>Base rotation</span>
-              <input type="number" value={sw.bezelRotation ?? 0} onChange={(e) => patchSwitch({ bezelRotation: Number(e.target.value) })} />
-            </label>
-          )}
 
           <label className="properties__field">
             <span>Interaction</span>
@@ -5130,53 +5125,34 @@ export function PropertiesPanel(): React.JSX.Element {
           )}
         </PropertiesSection>
 
-        <PropertiesSection title="Rotation">
+        <PropertiesSection title="Shape">
           <label className="properties__field">
-            <span>Rotate angle</span>
-            <div className="properties__file-row">
-              {sw.rotateAngleExpr !== undefined ? (
-                <span className="properties__hint-inline">Using expression below</span>
-              ) : (
-                <input type="number" value={sw.rotateAngle ?? 0} onChange={(e) => patchSwitch({ rotateAngle: Number(e.target.value) })} />
-              )}
-              {sw.rotateAngleExpr !== undefined ? (
-                <button
-                  type="button"
-                  className="color-picker-button__clear"
-                  title="Use a fixed angle instead"
-                  onClick={() => patchSwitch({ rotateAngleExpr: undefined })}
-                >
-                  ×
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="color-picker-button__fx"
-                  title="Compute the angle with an expression"
-                  onClick={() => patchSwitch({ rotateAngleExpr: '' })}
-                >
-                  ƒx
-                </button>
-              )}
-            </div>
+            <span>Base shape</span>
+            <select
+              value={sw.bezelShape ?? 'circle'}
+              onChange={(e) => patchSwitch({ bezelShape: e.target.value === 'circle' ? undefined : (e.target.value as ToggleSwitchWidget['bezelShape']) })}
+            >
+              <option value="circle">Circle</option>
+              <option value="hexagon">Hexagon</option>
+            </select>
           </label>
-          {sw.rotateAngleExpr !== undefined && (
+
+          <label className="properties__field">
+            <span>Base circle size</span>
+            <input
+              type="number"
+              min={1}
+              value={sw.bezelRadius ?? 45}
+              onChange={(e) => patchSwitch({ bezelRadius: Math.max(1, Number(e.target.value)) })}
+            />
+          </label>
+
+          {(sw.bezelShape ?? 'circle') === 'hexagon' && (
             <label className="properties__field">
-              <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={2}
-                placeholder="return variables.my_variable;"
-                value={sw.rotateAngleExpr ?? ''}
-                onChange={(e) => patchSwitch({ rotateAngleExpr: e.target.value })}
-              />
+              <span>Base rotation</span>
+              <input type="number" value={sw.bezelRotation ?? 0} onChange={(e) => patchSwitch({ bezelRotation: Number(e.target.value) })} />
             </label>
           )}
-          <p className="properties__hint">
-            Spins the whole switch — bezel/lever/guard, each position&rsquo;s own labels, AND the widget&rsquo;s own Labels below —
-            together. Falls back to the fixed angle if the expression is unset or fails to evaluate. Drag mode's own movement math
-            accounts for this automatically, so the lever still tracks the pointer directly regardless of rotation.
-          </p>
         </PropertiesSection>
 
         {(sw.positions.length === 2 || sw.positions.length === 3) && (
@@ -5214,63 +5190,6 @@ export function PropertiesPanel(): React.JSX.Element {
             })}
           </PropertiesSection>
         )}
-
-        <PropertiesSection title="Colors">
-          <div className="properties__field">
-            <span>Base color</span>
-            <ColorPickerButton
-              value={sw.track.color ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchSwitch({ track: { ...sw.track, color, colorExpr: undefined } })}
-              isExpr={isTrackExpr}
-              exprValue={sw.track.colorExpr ?? ''}
-              onExprChange={(code) => patchSwitch({ track: { ...sw.track, colorExpr: code } })}
-              onEnterExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: sw.track.colorExpr ?? '' } })}
-              onClearExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: undefined } })}
-              opacity={sw.track.backgroundOpacity ?? 1}
-              onOpacityChange={(v) => patchSwitch({ track: { ...sw.track, backgroundOpacity: v } })}
-            />
-          </div>
-
-          <div className="properties__field">
-            <span>Lever color</span>
-            <ColorPickerButton
-              value={sw.fill.color ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchSwitch({ fill: { ...sw.fill, color, colorExpr: undefined } })}
-              isExpr={isFillExpr}
-              exprValue={sw.fill.colorExpr ?? ''}
-              onExprChange={(code) => patchSwitch({ fill: { ...sw.fill, colorExpr: code } })}
-              onEnterExpr={() => patchSwitch({ fill: { ...sw.fill, colorExpr: sw.fill.colorExpr ?? '' } })}
-              onClearExpr={() => patchSwitch({ fill: { ...sw.fill, colorExpr: undefined } })}
-              opacity={sw.fill.backgroundOpacity ?? 1}
-              onOpacityChange={(v) => patchSwitch({ fill: { ...sw.fill, backgroundOpacity: v } })}
-            />
-          </div>
-
-          <div className="properties__field">
-            <span>Border color</span>
-            <ColorPickerButton
-              value={sw.borderColor ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchSwitch({ borderColor: color, borderColorExpr: undefined })}
-              isExpr={isBorderExpr}
-              exprValue={sw.borderColorExpr ?? ''}
-              onExprChange={(code) => patchSwitch({ borderColorExpr: code })}
-              onEnterExpr={() => patchSwitch({ borderColorExpr: sw.borderColorExpr ?? '' })}
-              onClearExpr={() => patchSwitch({ borderColorExpr: undefined })}
-              opacity={sw.borderOpacity ?? 1}
-              onOpacityChange={(v) => patchSwitch({ borderOpacity: v })}
-            />
-          </div>
-
-          <label className="properties__field">
-            <span>Border width</span>
-            <input
-              type="number"
-              min={0}
-              value={sw.borderWidth ?? 2}
-              onChange={(e) => patchSwitch({ borderWidth: Math.max(0, Number(e.target.value)) })}
-            />
-          </label>
-        </PropertiesSection>
 
         <PropertiesSection title="Inner circle">
           <label className="properties__field">
@@ -5669,6 +5588,112 @@ export function PropertiesPanel(): React.JSX.Element {
           )}
         </PropertiesSection>
 
+        <PropertiesSection title="Colors">
+          <div className="properties__field">
+            <span>Base color</span>
+            <ColorPickerButton
+              value={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ track: { ...sw.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={sw.track.colorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ track: { ...sw.track, colorExpr: code } })}
+              onEnterExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: sw.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: undefined } })}
+              opacity={sw.track.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ track: { ...sw.track, backgroundOpacity: v } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Lever color</span>
+            <ColorPickerButton
+              value={sw.fill.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ fill: { ...sw.fill, color, colorExpr: undefined } })}
+              isExpr={isFillExpr}
+              exprValue={sw.fill.colorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ fill: { ...sw.fill, colorExpr: code } })}
+              onEnterExpr={() => patchSwitch({ fill: { ...sw.fill, colorExpr: sw.fill.colorExpr ?? '' } })}
+              onClearExpr={() => patchSwitch({ fill: { ...sw.fill, colorExpr: undefined } })}
+              opacity={sw.fill.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ fill: { ...sw.fill, backgroundOpacity: v } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={sw.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={sw.borderColorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ borderColorExpr: code })}
+              onEnterExpr={() => patchSwitch({ borderColorExpr: sw.borderColorExpr ?? '' })}
+              onClearExpr={() => patchSwitch({ borderColorExpr: undefined })}
+              opacity={sw.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ borderOpacity: v })}
+            />
+          </div>
+
+          <label className="properties__field">
+            <span>Border width</span>
+            <input
+              type="number"
+              min={0}
+              value={sw.borderWidth ?? 2}
+              onChange={(e) => patchSwitch({ borderWidth: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+        </PropertiesSection>
+
+        <PropertiesSection title="Rotation">
+          <label className="properties__field">
+            <span>Rotate angle</span>
+            <div className="properties__file-row">
+              {sw.rotateAngleExpr !== undefined ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input type="number" value={sw.rotateAngle ?? 0} onChange={(e) => patchSwitch({ rotateAngle: Number(e.target.value) })} />
+              )}
+              {sw.rotateAngleExpr !== undefined ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed angle instead"
+                  onClick={() => patchSwitch({ rotateAngleExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the angle with an expression"
+                  onClick={() => patchSwitch({ rotateAngleExpr: '' })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {sw.rotateAngleExpr !== undefined && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={2}
+                placeholder="return variables.my_variable;"
+                value={sw.rotateAngleExpr ?? ''}
+                onChange={(e) => patchSwitch({ rotateAngleExpr: e.target.value })}
+              />
+            </label>
+          )}
+          <p className="properties__hint">
+            Spins the whole switch — bezel/lever/guard, each position&rsquo;s own labels, AND the widget&rsquo;s own Labels below —
+            together. Falls back to the fixed angle if the expression is unset or fails to evaluate. Drag mode's own movement math
+            accounts for this automatically, so the lever still tracks the pointer directly regardless of rotation.
+          </p>
+        </PropertiesSection>
+
         <SwitchPositionsEditor
           positions={sw.positions}
           activePositionExpr={sw.activePositionExpr}
@@ -5676,7 +5701,6 @@ export function PropertiesPanel(): React.JSX.Element {
             patchSwitch({ positions: positions.map((p, i) => ({ ...p, name: toggleNameForIndex(i, positions.length) })) })
           }
           onPatchActivePositionExpr={(activePositionExpr) => patchSwitch({ activePositionExpr })}
-          dcsBiosActionEnabled={dcsBiosActionEnabled}
           activePositionIndex={effectiveActivePositionIndex}
           setActivePositionIndex={setActivePositionIndex}
           onActivePositionIdChange={selectBlock}
@@ -5687,6 +5711,31 @@ export function PropertiesPanel(): React.JSX.Element {
           showLabelAnchor
           showPositionName={false}
           maxPositions={3}
+        />
+
+        <PropertiesSection title="Labels" badge={sw.labels.length}>
+          <p className="properties__hint">Anchored to the widget as a whole, independent of each position's own labels above.</p>
+          {sw.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+              <LabelFields
+                label={label}
+                backgroundColor={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchSwitchLabel(label.id, fields)}
+                onRemove={() => confirmRemoveSwitchLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addSwitchLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
+
+        <SwitchActionsSection
+          positions={sw.positions}
+          onPatchPositions={(positions) =>
+            patchSwitch({ positions: positions.map((p, i) => ({ ...p, name: toggleNameForIndex(i, positions.length) })) })
+          }
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
           rootEvents={[
             { title: 'Press', steps: sw.events.press, onChange: (steps) => patchSwitch({ events: { ...sw.events, press: steps } }) },
             { title: 'Release', steps: sw.events.release, onChange: (steps) => patchSwitch({ events: { ...sw.events, release: steps } }) },
@@ -5711,24 +5760,7 @@ export function PropertiesPanel(): React.JSX.Element {
           ]}
         />
 
-        <PropertiesSection title="Labels" badge={sw.labels.length}>
-          <p className="properties__hint">Anchored to the widget as a whole, independent of each position's own labels above.</p>
-          {sw.labels.map((label) => (
-            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
-              <LabelFields
-                label={label}
-                backgroundColor={sw.track.color ?? DEFAULT_WIDGET_COLOR}
-                onChange={(fields) => patchSwitchLabel(label.id, fields)}
-                onRemove={() => confirmRemoveSwitchLabel(label.id)}
-              />
-            </PropertiesSection>
-          ))}
-          <button type="button" className="properties__file-button" onClick={addSwitchLabel}>
-            + Add label
-          </button>
-        </PropertiesSection>
-
-        <PropertiesSection title="Advanced">
+        <PropertiesSection title="Layout">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -5815,7 +5847,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sw.type]}</p>
 
-        <PropertiesSection title="Style">
+        <PropertiesSection title="Setup">
           <div className="properties__grid2">
             <label className="properties__field">
               <span>Start angle</span>
@@ -5870,34 +5902,66 @@ export function PropertiesPanel(): React.JSX.Element {
               </p>
             </>
           )}
+        </PropertiesSection>
 
-          <PropertiesSection title="Detents">
-            <DetentShapeEditor
-              shape={sw.detentShape ?? 'circle'}
-              onShapeChange={(shape) => patchSwitch({ detentShape: shape === 'circle' ? undefined : shape })}
-              style={sw.detentStyle}
-              onStyleChange={(detentStyle) => patchSwitch({ detentStyle })}
-              allowNone
-            />
-            <label className="properties__field">
-              <span>Detent distance</span>
-              <input
-                type="number"
-                min={0}
-                value={sw.detentRadius ?? 40}
-                onChange={(e) => patchSwitch({ detentRadius: Math.max(0, Number(e.target.value)) })}
-              />
-            </label>
-          </PropertiesSection>
-
-          <DialShapeFields
-            value={sw}
-            onChange={patchSwitch}
-            fill={sw.fill}
-            onFillChange={(fill) => patchSwitch({ fill })}
-            track={sw.track}
-            needleColorLabel="Needle color"
+        <PropertiesSection title="Detents">
+          <DetentShapeEditor
+            shape={sw.detentShape ?? 'circle'}
+            onShapeChange={(shape) => patchSwitch({ detentShape: shape === 'circle' ? undefined : shape })}
+            style={sw.detentStyle}
+            onStyleChange={(detentStyle) => patchSwitch({ detentStyle })}
+            allowNone
           />
+          <label className="properties__field">
+            <span>Detent distance</span>
+            <input
+              type="number"
+              min={0}
+              value={sw.detentRadius ?? 40}
+              onChange={(e) => patchSwitch({ detentRadius: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+        </PropertiesSection>
+
+        <DialShapeFields
+          value={sw}
+          onChange={patchSwitch}
+          fill={sw.fill}
+          onFillChange={(fill) => patchSwitch({ fill })}
+          track={sw.track}
+          needleColorLabel="Needle color"
+        />
+
+        <PropertiesSection title="Colors">
+          <div className="properties__field">
+            <span>Dial face color</span>
+            <ColorPickerButton
+              value={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ track: { ...sw.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={sw.track.colorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ track: { ...sw.track, colorExpr: code } })}
+              onEnterExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: sw.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: undefined } })}
+              opacity={sw.track.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ track: { ...sw.track, backgroundOpacity: v } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={sw.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchSwitch({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={sw.borderColorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ borderColorExpr: code })}
+              onEnterExpr={() => patchSwitch({ borderColorExpr: sw.borderColorExpr ?? '' })}
+              onClearExpr={() => patchSwitch({ borderColorExpr: undefined })}
+              opacity={sw.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchSwitch({ borderOpacity: v })}
+            />
+          </div>
         </PropertiesSection>
 
         <PropertiesSection title="Rotation">
@@ -5949,44 +6013,11 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        <PropertiesSection title="Colors">
-          <div className="properties__field">
-            <span>Dial face color</span>
-            <ColorPickerButton
-              value={sw.track.color ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchSwitch({ track: { ...sw.track, color, colorExpr: undefined } })}
-              isExpr={isTrackExpr}
-              exprValue={sw.track.colorExpr ?? ''}
-              onExprChange={(code) => patchSwitch({ track: { ...sw.track, colorExpr: code } })}
-              onEnterExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: sw.track.colorExpr ?? '' } })}
-              onClearExpr={() => patchSwitch({ track: { ...sw.track, colorExpr: undefined } })}
-              opacity={sw.track.backgroundOpacity ?? 1}
-              onOpacityChange={(v) => patchSwitch({ track: { ...sw.track, backgroundOpacity: v } })}
-            />
-          </div>
-
-          <div className="properties__field">
-            <span>Border color</span>
-            <ColorPickerButton
-              value={sw.borderColor ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchSwitch({ borderColor: color, borderColorExpr: undefined })}
-              isExpr={isBorderExpr}
-              exprValue={sw.borderColorExpr ?? ''}
-              onExprChange={(code) => patchSwitch({ borderColorExpr: code })}
-              onEnterExpr={() => patchSwitch({ borderColorExpr: sw.borderColorExpr ?? '' })}
-              onClearExpr={() => patchSwitch({ borderColorExpr: undefined })}
-              opacity={sw.borderOpacity ?? 1}
-              onOpacityChange={(v) => patchSwitch({ borderOpacity: v })}
-            />
-          </div>
-        </PropertiesSection>
-
         <SwitchPositionsEditor
           positions={sw.positions}
           activePositionExpr={sw.activePositionExpr}
           onPatchPositions={(positions) => patchSwitch({ positions })}
           onPatchActivePositionExpr={(activePositionExpr) => patchSwitch({ activePositionExpr })}
-          dcsBiosActionEnabled={dcsBiosActionEnabled}
           activePositionIndex={activePositionIndex}
           setActivePositionIndex={setActivePositionIndex}
           dragPositionIndex={dragPositionIndex}
@@ -5994,6 +6025,29 @@ export function PropertiesPanel(): React.JSX.Element {
           setActivePositionExprExpanded={setActivePositionExprExpanded}
           confirm={confirm}
           showLabelAnchor
+        />
+
+        <PropertiesSection title="Labels" badge={sw.labels.length}>
+          <p className="properties__hint">Anchored to the widget as a whole, independent of each position's own labels above.</p>
+          {sw.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+              <LabelFields
+                label={label}
+                backgroundColor={sw.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchSwitchLabel(label.id, fields)}
+                onRemove={() => confirmRemoveSwitchLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addSwitchLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
+
+        <SwitchActionsSection
+          positions={sw.positions}
+          onPatchPositions={(positions) => patchSwitch({ positions })}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
           rootEvents={[
             { title: 'Press', steps: sw.events.press, onChange: (steps) => patchSwitch({ events: { ...sw.events, press: steps } }) },
             { title: 'Release', steps: sw.events.release, onChange: (steps) => patchSwitch({ events: { ...sw.events, release: steps } }) },
@@ -6032,24 +6086,7 @@ export function PropertiesPanel(): React.JSX.Element {
           ]}
         />
 
-        <PropertiesSection title="Labels" badge={sw.labels.length}>
-          <p className="properties__hint">Anchored to the widget as a whole, independent of each position's own labels above.</p>
-          {sw.labels.map((label) => (
-            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
-              <LabelFields
-                label={label}
-                backgroundColor={sw.track.color ?? DEFAULT_WIDGET_COLOR}
-                onChange={(fields) => patchSwitchLabel(label.id, fields)}
-                onRemove={() => confirmRemoveSwitchLabel(label.id)}
-              />
-            </PropertiesSection>
-          ))}
-          <button type="button" className="properties__file-button" onClick={addSwitchLabel}>
-            + Add label
-          </button>
-        </PropertiesSection>
-
-        <PropertiesSection title="Advanced">
+        <PropertiesSection title="Layout">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -6123,7 +6160,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[dd.type]}</p>
 
-        <PropertiesSection title="Style">
+        <PropertiesSection title="Setup">
           <label className="properties__field">
             <span>Expand mode</span>
             <select
@@ -6181,9 +6218,9 @@ export function PropertiesPanel(): React.JSX.Element {
               onOpacityChange={(v) => patchDropdown({ borderOpacity: v })}
             />
           </div>
+        </PropertiesSection>
 
-          <div className="properties__divider" />
-
+        <PropertiesSection title="Border shape">
           <span className="properties__section-label">Border radius</span>
           <CornersInputGrid
             topLeft={{ value: dd.radiusTopLeft ?? 6, min: 0, onChange: (v) => patchDropdown({ radiusTopLeft: v }) }}
@@ -6208,13 +6245,18 @@ export function PropertiesPanel(): React.JSX.Element {
           activePositionExpr={dd.activePositionExpr}
           onPatchPositions={(positions) => patchDropdown({ positions })}
           onPatchActivePositionExpr={(activePositionExpr) => patchDropdown({ activePositionExpr })}
-          dcsBiosActionEnabled={dcsBiosActionEnabled}
           activePositionIndex={activePositionIndex}
           setActivePositionIndex={setActivePositionIndex}
           dragPositionIndex={dragPositionIndex}
           activePositionExprExpanded={activePositionExprExpanded}
           setActivePositionExprExpanded={setActivePositionExprExpanded}
           confirm={confirm}
+        />
+
+        <SwitchActionsSection
+          positions={dd.positions}
+          onPatchPositions={(positions) => patchDropdown({ positions })}
+          dcsBiosActionEnabled={dcsBiosActionEnabled}
           rootEvents={[
             {
               title: 'Press',
@@ -6239,7 +6281,7 @@ export function PropertiesPanel(): React.JSX.Element {
           ]}
         />
 
-        <PropertiesSection title="Advanced">
+        <PropertiesSection title="Layout">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -6319,7 +6361,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[sc.type]}</p>
 
-        <PropertiesSection title="Region">
+        <PropertiesSection title="Source">
           <label className="properties__field">
             <span>Monitor</span>
             <select value={effectiveDisplayId ?? ''} onChange={(e) => setPickerDisplayId(Number(e.target.value))}>
@@ -6439,7 +6481,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </div>
         </PropertiesSection>
 
-        <PropertiesSection title="Advanced">
+        <PropertiesSection title="Layout">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -6514,7 +6556,7 @@ export function PropertiesPanel(): React.JSX.Element {
         </div>
         <p className="properties__widget-type">{WIDGET_TYPE_LABELS[dv.type]}</p>
 
-        <PropertiesSection title="Component">
+        <PropertiesSection title="Source">
           <label className="properties__field">
             <span>Aircraft</span>
             <select
@@ -6547,9 +6589,10 @@ export function PropertiesPanel(): React.JSX.Element {
               ))}
             </select>
           </label>
-        </PropertiesSection>
 
-        <PropertiesSection title="Crop">
+          <div className="properties__divider" />
+
+          <span className="properties__section-label">Crop</span>
           <span className="properties__hint-inline">
             Percent to trim off each edge before Fit — use this to crop out DCS's own cockpit-instrument bezel if the
             default automatic inset isn't quite right for this component. Negative values expand back out past that
@@ -6722,7 +6765,7 @@ export function PropertiesPanel(): React.JSX.Element {
           </label>
         </PropertiesSection>
 
-        <PropertiesSection title="Advanced">
+        <PropertiesSection title="Layout">
           <span className="properties__section-label">Position & Size</span>
           <div className="properties__grid2">
             <label className="properties__field">
@@ -7236,6 +7279,56 @@ export function PropertiesPanel(): React.JSX.Element {
         </PropertiesSection>
       )}
 
+      {widget.type === 'button' && (
+        <PropertiesSection title="Rotation">
+          <label className="properties__field">
+            <span>Rotate angle</span>
+            <div className="properties__file-row">
+              {widget.rotateAngleExpr !== undefined ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input type="number" value={widget.rotateAngle ?? 0} onChange={(e) => patch({ rotateAngle: Number(e.target.value) })} />
+              )}
+              {widget.rotateAngleExpr !== undefined ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed angle instead"
+                  onClick={() => patch({ rotateAngleExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the angle with an expression"
+                  onClick={() => patch({ rotateAngleExpr: '' })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {widget.rotateAngleExpr !== undefined && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={2}
+                placeholder="return variables.my_variable;"
+                value={widget.rotateAngleExpr ?? ''}
+                onChange={(e) => patch({ rotateAngleExpr: e.target.value })}
+              />
+            </label>
+          )}
+          <p className="properties__hint">
+            Spins the whole button, including its labels, in place. Falls back to the fixed angle if the expression is unset or
+            fails to evaluate.
+          </p>
+        </PropertiesSection>
+      )}
+
       <PropertiesSection title="Actions" badge={widget.type === 'morph' && isMorphSliderActive(widget) ? 3 : 2}>
         {/* eventfulWidget.events.move doesn't type-check here — Button's and
             Encoder's `events` have no `move` field at all (not even
@@ -7291,7 +7384,7 @@ export function PropertiesPanel(): React.JSX.Element {
         )}
       </PropertiesSection>
 
-      <PropertiesSection title="Position & Size">
+      <PropertiesSection title="Layout">
         <div className="properties__grid2">
           <label className="properties__field">
             <span>X</span>
@@ -7350,58 +7443,6 @@ export function PropertiesPanel(): React.JSX.Element {
             {widget.blocks.length} block{widget.blocks.length === 1 ? '' : 's'} — select the widget on the canvas and use its +
             handles to add more.
           </p>
-        )}
-
-        {widget.type === 'button' && (
-          <>
-            <div className="properties__divider" />
-
-            <label className="properties__field">
-              <span>Rotate angle</span>
-              <div className="properties__file-row">
-                {widget.rotateAngleExpr !== undefined ? (
-                  <span className="properties__hint-inline">Using expression below</span>
-                ) : (
-                  <input type="number" value={widget.rotateAngle ?? 0} onChange={(e) => patch({ rotateAngle: Number(e.target.value) })} />
-                )}
-                {widget.rotateAngleExpr !== undefined ? (
-                  <button
-                    type="button"
-                    className="color-picker-button__clear"
-                    title="Use a fixed angle instead"
-                    onClick={() => patch({ rotateAngleExpr: undefined })}
-                  >
-                    ×
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="color-picker-button__fx"
-                    title="Compute the angle with an expression"
-                    onClick={() => patch({ rotateAngleExpr: '' })}
-                  >
-                    ƒx
-                  </button>
-                )}
-              </div>
-            </label>
-            {widget.rotateAngleExpr !== undefined && (
-              <label className="properties__field">
-                <span>Expression</span>
-                <textarea
-                  className="properties__code"
-                  rows={2}
-                  placeholder="return variables.my_variable;"
-                  value={widget.rotateAngleExpr ?? ''}
-                  onChange={(e) => patch({ rotateAngleExpr: e.target.value })}
-                />
-              </label>
-            )}
-            <p className="properties__hint">
-              Spins the whole button, including its labels, in place. Falls back to the fixed angle if the expression is unset or
-              fails to evaluate.
-            </p>
-          </>
         )}
 
         <div className="properties__divider" />
