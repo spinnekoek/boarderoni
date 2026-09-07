@@ -33,10 +33,27 @@
           network-security-config domain rule could pin to.
         -->
 
+        <!--
+          screenLayout|smallestScreenSize|density|uiMode added alongside the
+          original three — Honor's own window-manager layer fires frequent
+          "recompute display mode" config changes (adaptive display/desktop-
+          mode features, logcat tag HwWindowManagerServiceEx) that aren't
+          covered by orientation/screenSize/keyboardHidden alone. Any config
+          change NOT declared here makes Android destroy and recreate this
+          Activity outright — confirmed in logcat as a genuine onStop()
+          (releaseMulticastLock/stopDiscovery) immediately followed by
+          onStart() (acquireMulticastLock/startDiscovery), which is what was
+          showing up as the WebView losing its connection and the native
+          "looking for boarderoni" screen reappearing with no user action.
+          The WebView's own content doesn't need to react specially to any
+          of these, so handling them here (a no-op onConfigurationChanged,
+          same as the original three already implicitly are) avoids the
+          teardown entirely instead of needing to survive it.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden">
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
