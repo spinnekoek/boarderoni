@@ -24,53 +24,152 @@
             android:importantForAccessibility="no"
             android:src="@drawable/ic_launcher_foreground" />
 
-        <ProgressBar
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:indeterminate="true" />
-
-        <TextView
-            android:id="@+id/status_text"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:textColor="@color/status_text_color"
-            android:textSize="16sp"
-            android:text="@string/status_searching" />
-
         <!--
-          Auto-discovery is unreliable on some OEM Wi-Fi stacks (older
-          Samsung One UI in particular) — this is the escape hatch so a
-          device stuck searching isn't stuck permanently.
+          One card for every sub-state (searching / connecting / found) —
+          used to be three separately-styled siblings, which is why
+          "Looking for Boarderoni" looked like a plain status message next to
+          the found screen's actual card. MainActivity's showSearching/
+          showConnecting/showFoundPrompt toggle which inner group is visible;
+          the card itself (found_card_background, 280dp) never moves.
         -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="32dp"
-            android:textColor="@color/status_text_color"
-            android:textSize="13sp"
-            android:text="@string/manual_connect_hint" />
-
-        <EditText
-            android:id="@+id/manual_ip_input"
+        <LinearLayout
             android:layout_width="280dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:autofillHints=""
-            android:hint="@string/manual_connect_placeholder"
-            android:imeOptions="actionGo"
-            android:inputType="textUri"
-            android:singleLine="true"
-            android:textColor="@color/status_input_text_color"
-            android:textColorHint="@color/status_input_hint_color"
-            android:backgroundTint="@color/status_input_text_color" />
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/found_card_background"
+            android:padding="24dp">
 
-        <Button
-            android:id="@+id/manual_connect_button"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/manual_connect_button" />
+            <LinearLayout
+                android:id="@+id/searching_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="visible">
+
+                <ProgressBar
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:indeterminate="true" />
+
+                <TextView
+                    android:id="@+id/status_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:textColor="@color/status_text_color"
+                    android:textSize="16sp"
+                    android:gravity="center"
+                    android:text="@string/status_searching" />
+
+                <!--
+                  Auto-discovery is unreliable on some OEM Wi-Fi stacks (older
+                  Samsung One UI in particular) — this is the escape hatch so
+                  a device stuck searching isn't stuck permanently.
+                -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="24dp"
+                    android:textColor="@color/status_input_hint_color"
+                    android:textSize="13sp"
+                    android:gravity="center"
+                    android:text="@string/manual_connect_hint" />
+
+                <EditText
+                    android:id="@+id/manual_ip_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:autofillHints=""
+                    android:hint="@string/manual_connect_placeholder"
+                    android:imeOptions="actionGo"
+                    android:inputType="textUri"
+                    android:singleLine="true"
+                    android:textColor="@color/status_input_text_color"
+                    android:textColorHint="@color/status_input_hint_color"
+                    android:backgroundTint="@color/status_input_text_color" />
+
+                <Button
+                    android:id="@+id/manual_connect_button"
+                    style="@style/Boarderoni.Button.Primary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/manual_connect_button" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/connecting_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <ProgressBar
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:indeterminate="true" />
+
+                <TextView
+                    android:id="@+id/connecting_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:textColor="@color/status_text_color"
+                    android:textSize="16sp"
+                    android:gravity="center" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/found_group"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/found_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/status_found_title"
+                    android:textColor="#FF5B8DEF"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/found_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/status_input_hint_color"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/found_connect_button"
+                    style="@style/Boarderoni.Button.Primary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="@string/status_found_connect" />
+
+                <Button
+                    android:id="@+id/found_keep_searching_button"
+                    style="@style/Boarderoni.Button.Text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/status_found_keep_searching" />
+
+            </LinearLayout>
+
+        </LinearLayout>
 
     </LinearLayout>
 

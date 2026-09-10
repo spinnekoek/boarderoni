@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A real ripple (minSdk 26, well above the API 21 floor for this) instead
+     of the plain pressed-state color swap this used to be — that swap was
+     too subtle to register as "the button did something" on a quick tap.
+     The mask clips the ripple to the same rounded rect as the button itself
+     instead of spilling out as a rectangle. #5b8def is the desktop editor's
+     own accent blue (styles.css) — matching it is what makes this read as
+     the same app rather than a generic native screen. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#66FFFFFF">
+    <item android:id="@android:id/mask">
+        <shape android:shape="rectangle">
+            <solid android:color="#FFFFFFFF" />
+            <corners android:radius="24dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#FF5B8DEF" />
+            <corners android:radius="24dp" />
+        </shape>
+    </item>
+</ripple>

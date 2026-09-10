@@ -75,6 +75,17 @@ private const val DEBUG_TAG = "BoarderoniDebug"
 private const val PREFS_NAME = "boarderoni"
 private const val KEY_LAST_MANUAL_INPUT = "last_manual_input"
 
+// "host:port" of the last server this app successfully connected to (set on
+// every real webView.onPageFinished, regardless of how the connection was
+// made — the found/connect screen, manual entry, or a previous remembered
+// reconnect). A fresh launch with this set skips discovery/the found/connect
+// screen entirely and goes straight for it (see attemptRememberedConnect) —
+// only falling back to showing the found/connect screen if that direct
+// attempt actually fails. Cleared by changeServer() (the 5-finger modal's
+// "Change server"), which is the explicit "I want to pick a different one"
+// escape hatch.
+private const val KEY_LAST_CONNECTED_TARGET = "last_connected_target"
+
 // TEMP DEBUG LOGGING — persisted (not just in-memory) so a toggle survives
 // app restarts: the whole point is enabling this once, then letting the
 // tablet roam untethered until the bug reproduces, then pulling `adb logcat
@@ -90,6 +101,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var manualIpInput: EditText
     private lateinit var manualConnectButton: Button
 
+    // Three mutually exclusive sub-states of one shared card inside
+    // statusOverlay — see activity_main.xml's own comment. searchingGroup is
+    // up by default; showSearching()/showConnecting()/showFoundPrompt()
+    // toggle between the three.
+    private lateinit var searchingGroup: View
+    private lateinit var connectingGroup: View
+    private lateinit var connectingText: TextView
+    private lateinit var foundGroup: View
+    private lateinit var foundText: TextView
+    private lateinit var foundConnectButton: Button
+    private lateinit var foundKeepSearchingButton: Button
+
     private lateinit var nsdManager: NsdManager
     private lateinit var connectivityManager: ConnectivityManager
     private var multicastLock: WifiManager.MulticastLock? = null
@@ -104,6 +127,30 @@ class MainActivity : AppCompatActivity() {
     // "host:port" of whatever's currently loaded, so a redundant onServiceFound
     // for the same instance doesn't reload a perfectly fine WebView.
     private var currentTarget: String? = null
+
+    // A resolved-but-not-yet-confirmed discovery — set when onServiceResolved
+    // finds something new, cleared once the user taps Connect (which promotes
+    // it into currentTarget) or Keep searching. Kept separate from
+    // currentTarget so a periodic mDNS re-announcement of the SAME pending
+    // target while the prompt is still up doesn't re-show/reset it.
+    private var pendingHost: String? = null
+    private var pendingPort: Int = 0
+    private val pendingTarget: String?
+        get() = pendingHost?.let { "$it:$pendingPort" }
+
+    // True from a remembered-target reconnect attempt (attemptRememberedConnect)
+    // until it either succeeds (onPageFinished) or fails (onReceivedError) —
+    // suppresses the found/connect screen the whole time, since the point is
+    // to reconnect silently. Once it flips false (a real failure, not just
+    // never having been true), discovery results go through the normal
+    // found/connect screen from then on for the rest of this Activity's life.
+    private var awaitingRememberedConnect = false
+
+    // Guards attemptRememberedConnect so it only ever fires once per Activity
+    // instance — onStart can run again later (app backgrounded/foregrounded)
+    // without re-triggering a silent reconnect attempt that would re-suppress
+    // an already-showing found/connect screen.
+    private var hasAttemptedRememberedConnect = false
 
     // TEMP DEBUG LOGGING — gates every dlog() call below. Off by default;
     // toggled from the web app's 5-finger device settings modal (see
@@ -154,12 +201,20 @@ class MainActivity : AppCompatActivity() {
         statusOverlay = findViewById(R.id.status_overlay)
         manualIpInput = findViewById(R.id.manual_ip_input)
         manualConnectButton = findViewById(R.id.manual_connect_button)
+        searchingGroup = findViewById(R.id.searching_group)
+        connectingGroup = findViewById(R.id.connecting_group)
+        connectingText = findViewById(R.id.connecting_text)
+        foundGroup = findViewById(R.id.found_group)
+        foundText = findViewById(R.id.found_text)
+        foundConnectButton = findViewById(R.id.found_connect_button)
+        foundKeepSearchingButton = findViewById(R.id.found_keep_searching_button)
 
         nsdManager = getSystemService(Context.NSD_SERVICE) as NsdManager
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         setUpWebView()
         setUpManualConnect()
+        setUpFoundPrompt()
 
         onBackPressedDispatcher.addCallback(this) {
             if (webView.canGoBack()) {
@@ -259,6 +314,16 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 dlog("webView.onPageFinished: url=$url")
                 hideSearching()
+                // A real successful load — remember it (whatever got us here:
+                // the found/connect screen, manual entry, or a remembered
+                // reconnect) so the next launch can skip straight to it. Past
+                // this point we're no longer "awaiting" anything.
+                awaitingRememberedConnect = false
+                currentTarget?.let { target ->
+                    getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                        .putString(KEY_LAST_CONNECTED_TARGET, target)
+                        .apply()
+                }
             }
 
             override fun onReceivedError(
@@ -275,6 +340,9 @@ class MainActivity : AppCompatActivity() {
                 )
                 if (request?.isForMainFrame == true) {
                     currentTarget = null
+                    // A failed remembered-reconnect is exactly what should
+                    // fall back to the found/connect screen from here on.
+                    awaitingRememberedConnect = false
                     showSearching(message = getString(R.string.status_lost_connection))
                     scheduleRediscovery()
                 }
@@ -288,6 +356,32 @@ class MainActivity : AppCompatActivity() {
         acquireMulticastLock()
         registerNetworkCallback()
         ensureNearbyWifiPermissionThenDiscover()
+        if (!hasAttemptedRememberedConnect) {
+            hasAttemptedRememberedConnect = true
+            attemptRememberedConnect()
+        }
+    }
+
+    // Skips the found/connect screen entirely on a launch that already knows
+    // where to go — straight to whatever we last successfully connected to.
+    // No-op (falls through to the normal discovery + found/connect screen
+    // flow already underway from ensureNearbyWifiPermissionThenDiscover
+    // above) if nothing's remembered.
+    private fun attemptRememberedConnect() {
+        val remembered = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_LAST_CONNECTED_TARGET, null) ?: return
+        val colonIndex = remembered.lastIndexOf(':')
+        val port = if (colonIndex >= 0) remembered.substring(colonIndex + 1).toIntOrNull() else null
+        if (colonIndex < 0 || port == null) return
+        val host = remembered.substring(0, colonIndex)
+        dlog("attemptRememberedConnect: target=$remembered")
+        awaitingRememberedConnect = true
+        currentTarget = remembered
+        // "Connecting…", not the default "Looking for Boarderoni" onCreate
+        // already put up — this already knows exactly where it's going, so
+        // the wait (however brief) should say that rather than implying a
+        // discovery scan is what's actually happening.
+        showConnecting(host, port)
+        loadMobileLink(host, port)
     }
 
     // NsdManager discovery/resolve throws SecurityException without
@@ -354,6 +448,7 @@ class MainActivity : AppCompatActivity() {
         if (colonIndex >= 0) {
             val port = input.substring(colonIndex + 1).toIntOrNull() ?: DEFAULT_WEB_PORT
             currentTarget = "$host:$port"
+            showConnecting(host, port)
             loadMobileLink(host, port)
         } else {
             resolveManualWebPort(host)
@@ -388,6 +483,7 @@ class MainActivity : AppCompatActivity() {
             } ?: DEFAULT_WEB_PORT
             mainHandler.post {
                 currentTarget = "$host:$resolvedPort"
+                showConnecting(host, resolvedPort)
                 loadMobileLink(host, resolvedPort)
             }
         }.start()
@@ -420,7 +516,21 @@ class MainActivity : AppCompatActivity() {
                 dlog("NetworkCallback.onAvailable: network=$network")
                 // Covers switching Wi-Fi networks (different AP, VPN toggle,
                 // etc.) — the previously-resolved IP can't be trusted once
-                // the network itself has changed, so start over.
+                // the network itself has changed, so start over. BUT: per
+                // Android's own documented behavior, registering a NEW
+                // NetworkCallback fires onAvailable immediately for a
+                // network that's already satisfying the request, even
+                // though nothing actually changed — and registerNetworkCallback()
+                // runs fresh on every onStart(), so this fires on literally
+                // every app launch/foreground. Confirmed via logcat
+                // (2026-09-10): this was clobbering attemptRememberedConnect's
+                // "Connecting…" screen back to plain "Looking for Boarderoni"
+                // for the whole page-load wait, every single launch. The
+                // same view-state gating onServiceLost uses (mid a connect
+                // attempt, or already connected) applies here for the same
+                // reason: this callback can't tell "actually changed" apart
+                // from "just registered," so state already in progress wins.
+                if (connectingGroup.visibility == View.VISIBLE || statusOverlay.visibility != View.VISIBLE) return
                 mainHandler.post {
                     currentTarget = null
                     showSearching()
@@ -472,11 +582,30 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onServiceLost(service: NsdServiceInfo) {
-                dlog("Nsd.onServiceLost: $service currentTarget=$currentTarget")
-                mainHandler.post {
-                    currentTarget = null
-                    showSearching()
-                }
+                dlog("Nsd.onServiceLost: $service currentTarget=$currentTarget statusOverlayVisible=${statusOverlay.visibility == View.VISIBLE}")
+                // mDNS is a DISCOVERY mechanism, not a liveness monitor for an
+                // already-established connection — it has no idea whether the
+                // WebView's actual connection is still alive, only whether
+                // Android's mDNS bookkeeping heard a recent re-announcement.
+                // Once the WebView has a page loaded (status overlay hidden),
+                // what actually indicates a real failure is the WebView's own
+                // onReceivedError (main-frame) or the web app's own WebSocket
+                // reconnect logic (store.ts) — not this. Confirmed via logcat
+                // (2026-09-10) that onServiceLost can fire as a purely
+                // cosmetic mDNS/multicast re-announcement miss on this OEM's
+                // Wi-Fi stack while the connection is otherwise completely
+                // fine; reacting to it while already connected is what
+                // interrupted an active session for no reason. Same
+                // reasoning applies mid a "Connecting…" attempt (connectingGroup
+                // visible) — the WebView load already in flight isn't
+                // affected by mDNS at all, so bouncing back to the plain
+                // searching screen there would be just as spurious. Still
+                // relevant while NOT yet connected/connecting (searching or
+                // found screen up) — that's the actual discovery phase this
+                // exists for.
+                if (statusOverlay.visibility != View.VISIBLE || connectingGroup.visibility == View.VISIBLE) return
+                currentTarget = null
+                showSearching()
             }
 
             override fun onDiscoveryStopped(serviceType: String) {
@@ -537,12 +666,69 @@ class MainActivity : AppCompatActivity() {
                 val host = serviceInfo.host?.hostAddress ?: return
                 val webPort = serviceInfo.txtValue("webPort")?.toIntOrNull() ?: serviceInfo.port
                 val target = "$host:$webPort"
-                dlog("Nsd.onServiceResolved: target=$target currentTarget=$currentTarget")
+                dlog(
+                    "Nsd.onServiceResolved: target=$target currentTarget=$currentTarget " +
+                        "pendingTarget=$pendingTarget awaitingRememberedConnect=$awaitingRememberedConnect"
+                )
+                // Already connected (or connecting) to this exact target —
+                // nothing to do, same as before.
                 if (target == currentTarget) return
-                currentTarget = target
-                mainHandler.post { loadMobileLink(host, webPort) }
+                // Still waiting to see whether a silent remembered-reconnect
+                // succeeds — don't pop the found/connect screen over that; a
+                // real failure (onReceivedError) is what un-suppresses this.
+                if (awaitingRememberedConnect) return
+                // Already connected to something ELSE and just viewing it —
+                // a background mDNS re-announcement shouldn't interrupt an
+                // active session with a found/connect prompt.
+                if (statusOverlay.visibility != View.VISIBLE) return
+                // Already showing the found/connect screen for this exact
+                // target — a periodic re-announcement while the user just
+                // hasn't tapped Connect yet shouldn't re-show/reset it.
+                if (target == pendingTarget) return
+                probeAndShowFoundPrompt(host, webPort, target)
             }
         })
+    }
+
+    // mDNS only knows a service WAS advertised, not that it's still actually
+    // reachable — a dead process that never got to send an mDNS goodbye
+    // (force-closed rather than quit cleanly, or this OEM's NSD stack just
+    // caching) leaves a stale entry that can keep resolving successfully for
+    // a while after the real server is gone. Confirmed via logcat
+    // (2026-09-10): closing the desktop app, waiting, and having the found/
+    // connect screen still claim to have found it. A quick HTTP probe here
+    // — the same /api/apk-info endpoint resolveManualWebPort already uses,
+    // chosen there specifically because it "always answers regardless of
+    // dev/packaged mode" — is what tells "actually there" apart from "still
+    // cached" before claiming to have found something.
+    private fun probeAndShowFoundPrompt(host: String, port: Int, target: String) {
+        Thread {
+            val reachable = try {
+                val connection = URL("http://$host:$port/api/apk-info").openConnection() as HttpURLConnection
+                connection.connectTimeout = 2000
+                connection.readTimeout = 2000
+                try {
+                    connection.responseCode in 200..299
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (_: Exception) {
+                false
+            }
+            mainHandler.post {
+                dlog("probeAndShowFoundPrompt: target=$target reachable=$reachable")
+                if (!reachable) return@post
+                // Several seconds may have passed since the probe started —
+                // re-check the same dedupe/suppression guards onServiceResolved
+                // itself used rather than trusting state from when it kicked
+                // off (a real connect could have happened meanwhile, or the
+                // user could have moved on).
+                if (target == currentTarget || target == pendingTarget) return@post
+                if (awaitingRememberedConnect) return@post
+                if (statusOverlay.visibility != View.VISIBLE) return@post
+                showFoundPrompt(host, port)
+            }
+        }.start()
     }
 
     private fun NsdServiceInfo.txtValue(key: String): String? {
@@ -567,6 +753,14 @@ class MainActivity : AppCompatActivity() {
             )
         }
         statusText.text = message ?: getString(R.string.status_searching)
+        // Reverts the connecting/found screen back to plain searching, if
+        // one was up — e.g. a connect attempt actually failed (see
+        // onReceivedError), or the found service got lost again before the
+        // user tapped Connect (see onServiceLost's own comment).
+        pendingHost = null
+        connectingGroup.visibility = View.GONE
+        foundGroup.visibility = View.GONE
+        searchingGroup.visibility = View.VISIBLE
         statusOverlay.visibility = View.VISIBLE
         armDiscoveryWatchdog()
     }
@@ -575,6 +769,56 @@ class MainActivity : AppCompatActivity() {
         dlog("hideSearching")
         statusOverlay.visibility = View.GONE
         cancelDiscoveryWatchdog()
+    }
+
+    // Shows "Boarderoni found at host:port" + Connect/Keep searching instead
+    // of connecting straight away. Only reachable (see the gating in
+    // onServiceResolved above) on a first launch with nothing remembered yet,
+    // or after an explicit "Change server" — never while already connected,
+    // or mid a silent remembered-reconnect attempt (attemptRememberedConnect).
+    private fun showFoundPrompt(host: String, port: Int) {
+        dlog("showFoundPrompt: host=$host port=$port")
+        pendingHost = host
+        pendingPort = port
+        foundText.text = getString(R.string.status_found_address, host, port)
+        connectingGroup.visibility = View.GONE
+        searchingGroup.visibility = View.GONE
+        foundGroup.visibility = View.VISIBLE
+        statusOverlay.visibility = View.VISIBLE
+    }
+
+    // Immediate feedback for "I tapped Connect and it's actually doing
+    // something" — shown the instant a real, explicit connect attempt (the
+    // found screen's Connect button, or manual entry) fires loadMobileLink,
+    // not just left sitting on whatever screen was up. Cleared by
+    // showSearching() (a real failure — onReceivedError — or the found
+    // service vanishing again mid-attempt) or hideSearching() (success).
+    // Deliberately NOT used for attemptRememberedConnect's silent reconnect
+    // — that one stays on plain searching (or nothing, if it's fast), by
+    // design (see its own comment).
+    private fun showConnecting(host: String, port: Int) {
+        dlog("showConnecting: host=$host port=$port")
+        connectingText.text = getString(R.string.status_connecting, host, port)
+        searchingGroup.visibility = View.GONE
+        foundGroup.visibility = View.GONE
+        connectingGroup.visibility = View.VISIBLE
+        statusOverlay.visibility = View.VISIBLE
+    }
+
+    private fun setUpFoundPrompt() {
+        foundConnectButton.setOnClickListener {
+            val host = pendingHost ?: return@setOnClickListener
+            val port = pendingPort
+            pendingHost = null
+            currentTarget = "$host:$port"
+            showConnecting(host, port)
+            loadMobileLink(host, port)
+        }
+        foundKeepSearchingButton.setOnClickListener {
+            pendingHost = null
+            foundGroup.visibility = View.GONE
+            searchingGroup.visibility = View.VISIBLE
+        }
     }
 
     // Some OEM Wi-Fi stacks (older Samsung One UI in particular) silently
@@ -642,6 +886,34 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun changeServer() {
             dlog("WebAppBridge.changeServer called from JS")
+            runOnUiThread {
+                currentTarget = null
+                // The explicit "I want to pick a different one" escape hatch
+                // — forget the remembered target so the next discovery
+                // result goes through the found/connect screen instead of
+                // silently reconnecting right back to the one being left.
+                awaitingRememberedConnect = false
+                getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                    .remove(KEY_LAST_CONNECTED_TARGET)
+                    .apply()
+                showSearching()
+                restartDiscovery()
+            }
+        }
+
+        // Called from ViewCanvas.tsx (androidBridge.ts's connectionLost) once
+        // the web app's own WebSocket has stayed disconnected for a while —
+        // see its own comment for the exact grace period and reasoning. Same
+        // "drop back to searching + restart discovery" effect as
+        // changeServer() above, but deliberately does NOT touch
+        // KEY_LAST_CONNECTED_TARGET/awaitingRememberedConnect: this is "the
+        // session died, let the user see what's happening," not "I want a
+        // different desktop" — the remembered server is probably still the
+        // right one to reach for once it's back, so the next app launch
+        // should still get to skip straight to it.
+        @JavascriptInterface
+        fun connectionLost() {
+            dlog("WebAppBridge.connectionLost called from JS")
             runOnUiThread {
                 currentTarget = null
                 showSearching()
