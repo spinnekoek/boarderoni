@@ -293,6 +293,13 @@ interface DashboardStore {
   sendToBack: (ids: string[]) => void
   removeWidget: (id: string) => void
   removeWidgets: (ids: string[]) => void
+  // Move-only grouping (see groupId's own comment in shared/types.ts).
+  // Regrouping an existing group (or forming a fresh one from a plain
+  // multi-select) both just reassign a brand-new groupId to every id given —
+  // a widget belongs to at most one group, so this always overwrites
+  // whatever groupId (if any) each widget had before.
+  groupWidgets: (ids: string[]) => void
+  ungroupWidgets: (ids: string[]) => void
   // event selects which of the widget's events[...] sequences to run. value
   // is set only for a live AdjusterWidget drag — see the 'action:trigger' WS
   // message shape in types.ts. final: false marks an in-flight drag tick
@@ -304,7 +311,12 @@ interface DashboardStore {
   // its own comment in shared/types.ts) triggered by an in-panel widget.
   closeOverlay: () => void
   dismissToast: (id: string) => void
-  selectWidget: (id: string | null, options?: { additive?: boolean }) => void
+  // exact: true skips the group-expansion below even when the target widget
+  // has a groupId — selects just that one widget, used by useWidgetDrag's
+  // "collapse a multi-selection down to the clicked widget" re-click handler
+  // to drill into one group member instead of re-expanding to the whole
+  // group.
+  selectWidget: (id: string | null, options?: { additive?: boolean; exact?: boolean }) => void
   // Marquee (shift-drag) selection — replaces the current selection by
   // default, or unions with it when additive (shift-drag always passes
   // additive, matching shift-click's existing meaning elsewhere).
@@ -959,6 +971,14 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     clearLastDeckId()
     set(pickerResetState())
     useHistoryStore.getState().clear()
+    // Same reasoning as the DECK_CLOSE_CODE_UNKNOWN close handler above: a
+    // view client's picker only gets its deck list from the lobby
+    // connection, which App.tsx's mount effect skips whenever a remembered
+    // deck id sends it straight into connect() instead. Without this, an
+    // explicit "Change deck" after that kind of launch leaves the picker on
+    // "Loading decks…" forever, since no lobby connection ever existed this
+    // session to send decks:list.
+    if (get().mode === 'view') get().connectLobby()
   },
 
   updateWidgets: (widgets, options) => {
@@ -1042,6 +1062,19 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     set((s) => ({ selectedWidgetIds: s.selectedWidgetIds.filter((w) => !idSet.has(w)), selectedBlockId: null }))
   },
 
+  groupWidgets: (ids) => {
+    const idSet = new Set(ids)
+    const groupId = nextId()
+    const widgets = getSubDeckWidgets(get().dashboard, get().editingSubDeckId)
+    get().updateWidgets(widgets.map((w) => (idSet.has(w.id) ? { ...w, groupId } : w)))
+  },
+
+  ungroupWidgets: (ids) => {
+    const idSet = new Set(ids)
+    const widgets = getSubDeckWidgets(get().dashboard, get().editingSubDeckId)
+    get().updateWidgets(widgets.map((w) => (idSet.has(w.id) ? { ...w, groupId: undefined } : w)))
+  },
+
   setEditingSubDeck: (subDeckId) => {
     set({ editingSubDeckId: subDeckId, selectedWidgetIds: [], selectedBlockId: null, activeStateIndex: 0 })
   },
@@ -1110,13 +1143,32 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       }))
       return
     }
+    // First click on a grouped-but-unselected widget selects the whole
+    // group (every widget sharing its groupId), not just the one clicked —
+    // the properties panel's existing multi-select UI takes it from there.
+    // Skipped when `exact` is set (the collapse-on-reclick path in
+    // useWidgetDrag's handlePointerUp), which always drills into just the
+    // one widget regardless of grouping.
+    let resolvedIds = [id]
+    if (!options?.exact) {
+      const widgets = getSubDeckWidgets(get().dashboard, get().editingSubDeckId)
+      const target = widgets.find((w) => w.id === id)
+      if (target?.groupId) {
+        resolvedIds = widgets.filter((w) => w.groupId === target.groupId).map((w) => w.id)
+      }
+    }
     set((s) => {
       // A no-op re-click on an already-sole-selected widget (see
       // useWidgetDrag's handlePointerUp, which re-confirms selection on
       // every clean click so a multi-select can collapse to one) must not
       // clobber a block selection made in this same click's pointerdown.
-      if (s.selectedWidgetIds.length === 1 && s.selectedWidgetIds[0] === id) return {}
-      return { selectedWidgetIds: [id], selectedBlockId: null, activeStateIndex: 0 }
+      if (
+        s.selectedWidgetIds.length === resolvedIds.length &&
+        resolvedIds.every((rid) => s.selectedWidgetIds.includes(rid))
+      ) {
+        return {}
+      }
+      return { selectedWidgetIds: resolvedIds, selectedBlockId: null, activeStateIndex: 0 }
     })
   },
 

@@ -1,6 +1,8 @@
 import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
 import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
-import type { AdjusterWidget } from '@shared/types'
+import type { AdjusterKnobWidget, AdjusterSliderWidget } from '@shared/types'
+
+type AdjusterWidget = AdjusterSliderWidget | AdjusterKnobWidget
 import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
 import { describeArc } from './arcPath'
@@ -23,7 +25,7 @@ function AdjusterBar({
   fillColor: string
   trackColor: string
   orientation: 'horizontal' | 'vertical'
-  widget: AdjusterWidget
+  widget: AdjusterSliderWidget
 }): React.JSX.Element {
   const fillStyle: React.CSSProperties =
     orientation === 'vertical'
@@ -85,7 +87,7 @@ function AdjusterKnob({
   variables,
   debugMode
 }: {
-  widget: AdjusterWidget
+  widget: AdjusterKnobWidget
   fraction: number
   fillColor: string
   trackColor: string
@@ -205,10 +207,11 @@ export function AdjusterWidgetContent({
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
   const rotateAngle = widget.rotateAngleExpr ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle) : widget.rotateAngle
 
-  // Box border/radius only make sense for the 'slider' style — a knob has no
-  // rectangular box to round or border, same reasoning as GaugeWidgetContent.
+  // Box border/radius only make sense for AdjusterSliderWidget — a knob has
+  // no rectangular box to round or border, same reasoning as
+  // BarGaugeWidgetContent/ArcGaugeWidgetContent's own split.
   const outerStyle: React.CSSProperties = {
-    ...(widget.style === 'slider' && {
+    ...(widget.type === 'adjuster-slider' && {
       borderRadius: `${widget.radiusTopLeft ?? 8}px ${widget.radiusTopRight ?? 8}px ${widget.radiusBottomRight ?? 8}px ${widget.radiusBottomLeft ?? 8}px`,
       borderStyle: 'solid',
       borderTopWidth: widget.borderWidthTop ?? 1,
@@ -230,7 +233,7 @@ export function AdjusterWidgetContent({
       onPointerUp={interactive ? onPointerUp : undefined}
       onPointerCancel={interactive ? onPointerUp : undefined}
     >
-      {widget.style === 'knob' ? (
+      {widget.type === 'adjuster-knob' ? (
         <AdjusterKnob
           widget={widget}
           fraction={fraction}

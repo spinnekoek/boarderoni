@@ -24,6 +24,8 @@ export function ContextMenu({
   const bringToFront = useDashboardStore((s) => s.bringToFront)
   const sendToBack = useDashboardStore((s) => s.sendToBack)
   const removeWidgets = useDashboardStore((s) => s.removeWidgets)
+  const groupWidgets = useDashboardStore((s) => s.groupWidgets)
+  const ungroupWidgets = useDashboardStore((s) => s.ungroupWidgets)
   const copy = useClipboardStore((s) => s.copy)
   const paste = useClipboardStore((s) => s.paste)
   const canPaste = useClipboardStore((s) => s.widgets.length > 0)
@@ -46,6 +48,16 @@ export function ContextMenu({
   // only paste onto another rotary, never a button, etc.
   const canPasteStyle =
     styleClipboardType !== undefined && selectedWidgets.length > 0 && selectedWidgets.every((w) => w.type === styleClipboardType)
+  // "Group" always just reassigns a fresh groupId to whatever's currently
+  // selected — regrouping an existing group or forming a new one from a
+  // plain multi-select are both fine, so the only requirement is 2+ widgets.
+  const canGroup = selectedWidgets.length > 1
+  // "Ungroup" only makes sense when the CURRENT selection is exactly one
+  // full existing group — every member shares the same non-null groupId.
+  const canUngroup =
+    selectedWidgets.length > 1 &&
+    selectedWidgets[0].groupId != null &&
+    selectedWidgets.every((w) => w.groupId === selectedWidgets[0].groupId)
 
   // Mounted fresh on every open (Canvas keys it by position), so this only
   // ever sees pointerdowns/keydowns that happen after the opening click —
@@ -122,6 +134,18 @@ export function ContextMenu({
     onClose()
   }
 
+  function handleGroup(): void {
+    if (!widgetIds) return
+    groupWidgets(widgetIds)
+    onClose()
+  }
+
+  function handleUngroup(): void {
+    if (!widgetIds) return
+    ungroupWidgets(widgetIds)
+    onClose()
+  }
+
   return (
     <div ref={menuRef} className="context-menu" style={{ left: x, top: y }} onContextMenu={(e) => e.preventDefault()}>
       {widgetIds && (
@@ -149,6 +173,13 @@ export function ContextMenu({
           </button>
           <button type="button" className="context-menu__item" onClick={handleSendToBack}>
             Send to back
+          </button>
+          <div className="context-menu__divider" />
+          <button type="button" className="context-menu__item" disabled={!canGroup} onClick={handleGroup}>
+            Group
+          </button>
+          <button type="button" className="context-menu__item" disabled={!canUngroup} onClick={handleUngroup}>
+            Ungroup
           </button>
           <div className="context-menu__divider" />
           <button type="button" className="context-menu__item context-menu__item--danger" onClick={handleDelete}>

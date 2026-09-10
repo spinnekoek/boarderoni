@@ -4,7 +4,7 @@ import { getSubDeckWidgets } from '@shared/subDecks'
 import { useEditorSettings } from '../settingsStore'
 import { useWidgetDrag } from '../useWidgetDrag'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
-import { GaugeWidgetContent } from './widgets/GaugeWidget'
+import { BarGaugeWidgetContent, ArcGaugeWidgetContent } from './widgets/GaugeWidget'
 import { AdjusterWidgetContent } from './widgets/AdjusterWidget'
 import { EncoderWidgetContent } from './widgets/EncoderWidget'
 import { RockerSwitchWidgetContent } from './widgets/RockerSwitchWidget'
@@ -205,12 +205,15 @@ export function CanvasWidget({
       {widget.type === 'button' && previewState && (
         <ButtonWidgetContent widget={widget} state={previewState} interactive={false} variables={variables} />
       )}
-      {widget.type === 'gauge' && <GaugeWidgetContent widget={widget} variables={variables} />}
+      {widget.type === 'gauge-bar' && <BarGaugeWidgetContent widget={widget} variables={variables} />}
+      {widget.type === 'gauge-arc' && <ArcGaugeWidgetContent widget={widget} variables={variables} />}
       {widget.type === 'label' && <LabelWidgetContent widget={widget} variables={variables} />}
       {widget.type === 'line' && <LineWidgetContent widget={widget} variables={variables} applyRotation={false} />}
       {widget.type === 'screen-capture' && <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />}
       {widget.type === 'dcs-viewport' && <DcsViewportWidgetContent widget={widget} variables={variables} deckId={deckId} />}
-      {widget.type === 'adjuster' && <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} />}
+      {(widget.type === 'adjuster-slider' || widget.type === 'adjuster-knob') && (
+        <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} />
+      )}
       {widget.type === 'encoder' && <EncoderWidgetContent widget={widget} variables={variables} interactive={false} />}
       {widget.type === 'switch-rocker' && (
         <RockerSwitchWidgetContent

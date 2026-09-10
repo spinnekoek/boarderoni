@@ -1,6 +1,6 @@
 import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
 import { resolveBooleanExpr, resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
-import type { GaugeWidget } from '@shared/types'
+import type { BarGaugeWidget, ArcGaugeWidget } from '@shared/types'
 import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
 import { arcBoundsUnit, describeArc, needlePoints, polarToCartesian } from './arcPath'
@@ -65,7 +65,7 @@ function GaugeArc({
   trackColor,
   variables
 }: {
-  widget: GaugeWidget
+  widget: ArcGaugeWidget
   fraction: number
   fillColor: string
   trackColor: string
@@ -193,10 +193,10 @@ function GaugeArc({
 }
 
 // Passive — no pointer handlers, no `events` field at all (see EventfulWidget
-// in shared/types.ts, which deliberately excludes GaugeWidget). Shared as-is
-// between the editor preview (CanvasWidget) and the deployed view client
-// (ViewCanvas).
-export function GaugeWidgetContent({ widget, variables }: { widget: GaugeWidget; variables: VariableMap }): React.JSX.Element {
+// in shared/types.ts, which deliberately excludes both gauge types). Shared
+// as-is between the editor preview (CanvasWidget) and the deployed view
+// client (ViewCanvas).
+export function BarGaugeWidgetContent({ widget, variables }: { widget: BarGaugeWidget; variables: VariableMap }): React.JSX.Element {
   const debugMode = useEditorSettings((s) => s.debugMode)
   const raw = resolveNumericExpr(widget.valueExpr, variables) ?? widget.min
   const span = widget.max - widget.min
@@ -205,22 +205,10 @@ export function GaugeWidgetContent({ widget, variables }: { widget: GaugeWidget;
   const resolvedFill = resolveColor(widget.fill, variables)
   const fillColor = withOpacity(resolvedFill.color ?? DEFAULT_WIDGET_COLOR, resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1)
   const resolvedTrack = resolveColor(widget.track, variables)
-  // Arc style gets its own default track color (medium gray, ARC_DEFAULT_
-  // TRACK_COLOR) rather than the app-wide DEFAULT_WIDGET_COLOR (dark) every
-  // other widget's track falls back to — a bare unset track is far more
-  // common on an arc gauge (there's no box behind it to blend with) than on
-  // a bar gauge, where the dark default already reads fine against the
-  // dashboard background.
-  const trackColor = withOpacity(
-    resolvedTrack.color ?? (widget.style === 'arc' ? ARC_DEFAULT_TRACK_COLOR : DEFAULT_WIDGET_COLOR),
-    resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1
-  )
+  const trackColor = withOpacity(resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1)
   const resolvedBorder = resolveBorderColor(widget, variables)
   const borderColor = withOpacity(resolvedBorder.color ?? 'transparent', resolvedBorder.opacity ?? widget.borderOpacity ?? 1)
 
-  // Box border/radius only make sense for the 'bar' style — an arc has no
-  // rectangular box to round or border, so 'arc' renders with none at all
-  // rather than a stray rounded-rect outline sitting behind the circle.
   // Skips withOpacity entirely when unset rather than resolving a literal
   // 'transparent' through it — same reasoning as WidgetLabel.backgroundColor
   // in labels.tsx.
@@ -228,25 +216,54 @@ export function GaugeWidgetContent({ widget, variables }: { widget: GaugeWidget;
 
   const outerStyle: React.CSSProperties = {
     backgroundColor,
-    ...(widget.style === 'bar' && {
-      borderRadius: `${widget.radiusTopLeft ?? 4}px ${widget.radiusTopRight ?? 4}px ${widget.radiusBottomRight ?? 4}px ${widget.radiusBottomLeft ?? 4}px`,
-      borderStyle: 'solid',
-      borderTopWidth: widget.borderWidthTop ?? 1,
-      borderRightWidth: widget.borderWidthRight ?? 1,
-      borderBottomWidth: widget.borderWidthBottom ?? 1,
-      borderLeftWidth: widget.borderWidthLeft ?? 1,
-      borderColor
-    }),
+    borderRadius: `${widget.radiusTopLeft ?? 4}px ${widget.radiusTopRight ?? 4}px ${widget.radiusBottomRight ?? 4}px ${widget.radiusBottomLeft ?? 4}px`,
+    borderStyle: 'solid',
+    borderTopWidth: widget.borderWidthTop ?? 1,
+    borderRightWidth: widget.borderWidthRight ?? 1,
+    borderBottomWidth: widget.borderWidthBottom ?? 1,
+    borderLeftWidth: widget.borderWidthLeft ?? 1,
+    borderColor,
     ...(widget.zIndex !== undefined && { zIndex: widget.zIndex })
   }
 
   return (
-    <div className={`deck-gauge${widget.style === 'arc' ? ' deck-gauge--arc' : ''}`} style={outerStyle}>
-      {widget.style === 'arc' ? (
-        <GaugeArc widget={widget} fraction={fraction} fillColor={fillColor} trackColor={trackColor} variables={variables} />
-      ) : (
-        <GaugeBar fraction={fraction} fillColor={fillColor} trackColor={trackColor} orientation={widget.orientation ?? 'horizontal'} />
-      )}
+    <div className="deck-gauge" style={outerStyle}>
+      <GaugeBar fraction={fraction} fillColor={fillColor} trackColor={trackColor} orientation={widget.orientation ?? 'horizontal'} />
+      {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
+    </div>
+  )
+}
+
+export function ArcGaugeWidgetContent({ widget, variables }: { widget: ArcGaugeWidget; variables: VariableMap }): React.JSX.Element {
+  const debugMode = useEditorSettings((s) => s.debugMode)
+  const raw = resolveNumericExpr(widget.valueExpr, variables) ?? widget.min
+  const span = widget.max - widget.min
+  const fraction = span !== 0 ? Math.min(1, Math.max(0, (raw - widget.min) / span)) : 0
+
+  const resolvedFill = resolveColor(widget.fill, variables)
+  const fillColor = withOpacity(resolvedFill.color ?? DEFAULT_WIDGET_COLOR, resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1)
+  const resolvedTrack = resolveColor(widget.track, variables)
+  // Its own default track color (medium gray, ARC_DEFAULT_TRACK_COLOR)
+  // rather than the app-wide DEFAULT_WIDGET_COLOR (dark) every other
+  // widget's track falls back to — a bare unset track is far more common
+  // here (there's no box behind it to blend with) than on a bar gauge,
+  // where the dark default already reads fine against the dashboard
+  // background.
+  const trackColor = withOpacity(resolvedTrack.color ?? ARC_DEFAULT_TRACK_COLOR, resolvedTrack.opacity ?? widget.track.backgroundOpacity ?? 1)
+
+  // Skips withOpacity entirely when unset rather than resolving a literal
+  // 'transparent' through it — same reasoning as WidgetLabel.backgroundColor
+  // in labels.tsx.
+  const backgroundColor = widget.backgroundColor ? withOpacity(widget.backgroundColor, widget.backgroundOpacity ?? 1) : 'transparent'
+
+  const outerStyle: React.CSSProperties = {
+    backgroundColor,
+    ...(widget.zIndex !== undefined && { zIndex: widget.zIndex })
+  }
+
+  return (
+    <div className="deck-gauge deck-gauge--arc" style={outerStyle}>
+      <GaugeArc widget={widget} fraction={fraction} fillColor={fillColor} trackColor={trackColor} variables={variables} />
       {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
     </div>
   )

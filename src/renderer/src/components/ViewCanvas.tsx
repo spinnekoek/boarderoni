@@ -1,14 +1,15 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
-import { isBoarderoniAndroidApp, setKeepScreenOn } from '../androidBridge'
-import { getKeepScreenOnPreference } from '../id'
+import { isBoarderoniAndroidApp, setKeepScreenOn, setDebugLogging } from '../androidBridge'
+import { getKeepScreenOnPreference, getDebugLoggingPreference } from '../id'
 import { getEffectiveStates } from '@shared/states'
 import { morphFootprint } from '@shared/morph'
 import { resolveColor, resolveNumericExpr, resolveWidgetVisible, toVariableMap, type VariableMap } from '@shared/expr'
 import { findSubDeck, getSubDeckCanvasSize, getSubDeckWidgets } from '@shared/subDecks'
 import type {
-  AdjusterWidget,
+  AdjusterKnobWidget,
+  AdjusterSliderWidget,
   DialSwitchWidget,
   DropdownWidget,
   EncoderWidget,
@@ -23,7 +24,7 @@ import { OverlayPanel } from './OverlayPanel'
 import { LetterboxedCanvas } from './LetterboxedCanvas'
 import { ButtonWidgetContent } from './widgets/ButtonWidget'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
-import { GaugeWidgetContent } from './widgets/GaugeWidget'
+import { BarGaugeWidgetContent, ArcGaugeWidgetContent } from './widgets/GaugeWidget'
 import { ScreenCaptureWidgetContent } from './widgets/ScreenCaptureWidget'
 import { DcsViewportWidgetContent } from './widgets/DcsViewportWidget'
 import { AdjusterWidgetContent } from './widgets/AdjusterWidget'
@@ -52,7 +53,13 @@ const SETTINGS_GESTURE_FINGER_COUNT = 5
 // Owns the drag hook — kept separate from the dispatcher below so the hook
 // only ever mounts for an actual AdjusterWidget, not conditionally within a
 // component that also handles other widget types.
-function AdjusterView({ widget, variables }: { widget: AdjusterWidget; variables: VariableMap }): React.JSX.Element {
+function AdjusterView({
+  widget,
+  variables
+}: {
+  widget: AdjusterSliderWidget | AdjusterKnobWidget
+  variables: VariableMap
+}): React.JSX.Element {
   const { dragFraction, handlePointerDown, handlePointerMove, handlePointerUp } = useAdjusterDrag(widget, variables)
   return (
     <AdjusterWidgetContent
@@ -625,12 +632,13 @@ const ViewWidget = memo(function ViewWidget({
 }: ViewWidgetProps): React.JSX.Element {
   // customFonts itself isn't used here — see ViewWidgetProps' own comment,
   // it's only present so viewWidgetPropsEqual can see it change.
-  if (widget.type === 'gauge') return <GaugeWidgetContent widget={widget} variables={variables} />
+  if (widget.type === 'gauge-bar') return <BarGaugeWidgetContent widget={widget} variables={variables} />
+  if (widget.type === 'gauge-arc') return <ArcGaugeWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'label') return <LabelWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'line') return <LineWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'screen-capture') return <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />
   if (widget.type === 'dcs-viewport') return <DcsViewportWidgetContent widget={widget} variables={variables} deckId={deckId} />
-  if (widget.type === 'adjuster') return <AdjusterView widget={widget} variables={variables} />
+  if (widget.type === 'adjuster-slider' || widget.type === 'adjuster-knob') return <AdjusterView widget={widget} variables={variables} />
   if (widget.type === 'encoder') return <EncoderView widget={widget} variables={variables} />
   if (widget.type === 'morph') return <MorphView widget={widget} variables={variables} error={error} />
   if (widget.type === 'switch-rocker') return <RockerSwitchView widget={widget} variables={variables} />
@@ -760,6 +768,13 @@ export function ViewCanvas(): React.JSX.Element {
   // ever having to be opened.
   useEffect(() => {
     if (isBoarderoniAndroidApp()) setKeepScreenOn(getKeepScreenOnPreference())
+  }, [])
+
+  // TEMP DEBUG LOGGING — same "apply the persisted preference once per
+  // mount" shape as the keep-screen-on effect above. Remove alongside the
+  // rest of the debug logging once diagnosed.
+  useEffect(() => {
+    if (isBoarderoniAndroidApp()) setDebugLogging(getDebugLoggingPreference())
   }, [])
 
   const [settingsOpen, setSettingsOpen] = useState(false)

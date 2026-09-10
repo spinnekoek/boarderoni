@@ -52,6 +52,20 @@ export function setKeepScreenOnPreference(enabled: boolean): void {
   localStorage.setItem(KEEP_SCREEN_ON_KEY, enabled ? '1' : '0')
 }
 
+// TEMP DEBUG LOGGING — see MainActivity.kt's dlog()/setDebugLogging. Same
+// "purely local, native-side no-op elsewhere" shape as
+// getKeepScreenOnPreference above. Remove alongside the rest of the debug
+// logging once the spinner/reconnect bug is diagnosed.
+const DEBUG_LOGGING_KEY = 'boarderoni-debug-logging'
+
+export function getDebugLoggingPreference(): boolean {
+  return localStorage.getItem(DEBUG_LOGGING_KEY) === '1'
+}
+
+export function setDebugLoggingPreference(enabled: boolean): void {
+  localStorage.setItem(DEBUG_LOGGING_KEY, enabled ? '1' : '0')
+}
+
 // Bumped to -v2 as a deliberate one-time reset: every properties-panel
 // section should read as collapsed again for anyone who already has
 // sections remembered as open under the old key, without giving up the

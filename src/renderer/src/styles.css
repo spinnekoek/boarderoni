@@ -1822,9 +1822,20 @@ button.deck-morph-cell:focus-visible {
 .properties {
 	position: relative;
 	flex-shrink: 0;
-	padding: 16px;
-	border-left: 1px solid #2a2e37;
 	background: #191c22;
+	border-left: 1px solid #2a2e37;
+}
+
+/* The scrollable content lives in its own child rather than directly on
+   `.properties` — `.properties` is also the resize handle's positioned
+   ancestor, and an absolutely-positioned child scrolls along with its
+   containing block's own overflow, which used to drag the handle out of
+   view as soon as the panel scrolled. Keeping `.properties` itself
+   non-scrolling pins the handle to the visible edge regardless of scroll
+   position. */
+.properties__scroll {
+	height: 100%;
+	padding: 16px;
 	overflow-y: auto;
 	/* Reserves the scrollbar's own width always, whether or not content is
 	   currently tall enough to need one — otherwise everything inside

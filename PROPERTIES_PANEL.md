@@ -28,9 +28,7 @@ sections that don't apply — never reordered, never renamed per-widget:
 
 Screen Capture's "Region" and DCS Viewport's "Component" are both
 **"Source"**; DCS Viewport's Crop fields are a sub-group inside Source
-rather than their own top-level section. Adjuster's Setup-section Style
-field (Slider/Knob) is visible near the top of the panel since Setup is
-section 1.
+rather than their own top-level section.
 
 **Deviation note:** the spec called for Button/Morph's folded-in "Rotate
 angle" to split into its own Rotation section "for those two widgets" —
@@ -171,26 +169,40 @@ together inside one "Switch positions editor" wrapper.
   - Z-index
   - Visible
 
-## Gauge
+## Bar Gauge
 
 - **Setup**
-  - Style
-  - Orientation *(Bar style only)*
-  - Start angle, End angle *(Arc style only)*
+  - Orientation
   - Min, Max
   - Value
 - **Colors**
   - Background color
   - Fill color
   - Track color
-  - Border color *(Bar style only)*
+  - Border color
 - **Border shape**
-  - *(Bar style only)*
-    - Border radius *(Top left / Top right / Bottom left / Bottom right grid)*
-    - Border thickness *(Top / Right / Bottom / Left grid)*
-- **Ticks** *(Arc style only)*
+  - Border radius *(Top left / Top right / Bottom left / Bottom right grid)*
+  - Border thickness *(Top / Right / Bottom / Left grid)*
+- **Labels**
+  - one entry per label → Label fields
+- **Layout**
+  - X, Y, W, H
+  - Z-index
+  - Visible
+
+## Arc Gauge
+
+- **Setup**
+  - Start angle, End angle
+  - Min, Max
+  - Value
+- **Colors**
+  - Background color
+  - Fill color
+  - Track color
+- **Ticks**
   - one entry per tick set → Tick set fields
-- **Indicator** *(Arc style only — not part of the canonical list; left in its existing position between Ticks and Labels)*
+- **Indicator** *(not part of the canonical list; left in its existing position between Ticks and Labels)*
   - Show needle indicator *(checkbox, with an expression toggle)*
   - Expression *(when the expression toggle is on)*
   - *(when the indicator is shown, fixed or via expression):*
@@ -208,40 +220,63 @@ together inside one "Switch positions editor" wrapper.
   - Z-index
   - Visible
 
-## Adjuster
+## Slider
 
 - **Setup**
-  - Style
-  - Orientation *(Slider style only)*
-  - Start angle, End angle *(Knob style only)*
+  - Orientation
   - Min, Max
   - Rest value (optional)
-- **Handle** *(Slider style only)*
+- **Handle**
   - Shape
   - *(when Shape ≠ None):*
     - Size
     - Color
     - Border width
     - Border color
-- **Base circle** *(Knob style only)*
-  - Base circle size
-  - Base circle color
-  - Base circle border width
-- **Inner circle** *(Knob style only)*
-  - Inner circle size
-  - Inner circle color
-  - Inner circle border width
-  - Inner circle border color
-- *(Knob style only)* → Dial shape fields
 - **Colors**
   - Fill color
   - Track color
   - Border color
 - **Border shape**
-  - *(Slider style only):*
-    - Border radius *(Top left / Top right / Bottom left / Bottom right grid)*
-    - Border thickness *(Top / Right / Bottom / Left grid)*
-- **Ticks** *(Knob style only)*
+  - Border radius *(Top left / Top right / Bottom left / Bottom right grid)*
+  - Border thickness *(Top / Right / Bottom / Left grid)*
+- **Rotation**
+  - Rotate angle
+  - Expression *(when the ƒx toggle is on)*
+- **Labels**
+  - one entry per label → Label fields
+- **Actions** *(badge 5)*
+  - Press → Action step list
+  - Release → Action step list
+  - Double press → Action step list
+  - Triple press → Action step list
+  - Move (while dragging) → Action step list
+- **Layout**
+  - X, Y, W, H
+  - Z-index
+  - Visible
+
+## Knob
+
+- **Setup**
+  - Start angle, End angle
+  - Min, Max
+  - Rest value (optional)
+- **Base circle**
+  - Base circle size
+  - Base circle color
+  - Base circle border width
+- **Inner circle**
+  - Inner circle size
+  - Inner circle color
+  - Inner circle border width
+  - Inner circle border color
+- → Dial shape fields
+- **Colors**
+  - Fill color
+  - Track color
+  - Border color
+- **Ticks**
   - one entry per tick set → Tick set fields
 - **Rotation**
   - Rotate angle

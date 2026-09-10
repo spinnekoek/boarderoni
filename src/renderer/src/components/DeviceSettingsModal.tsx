@@ -1,9 +1,15 @@
 import { useState } from 'react'
 import { useDashboardStore } from '../store'
-import { getDeviceId, getKeepScreenOnPreference, setKeepScreenOnPreference } from '../id'
+import {
+  getDeviceId,
+  getKeepScreenOnPreference,
+  setKeepScreenOnPreference,
+  getDebugLoggingPreference,
+  setDebugLoggingPreference
+} from '../id'
 import { useEscapeToClose } from '../useEscapeToClose'
 import { friendlyDeviceName } from '@shared/deviceName'
-import { changeServer, isBoarderoniAndroidApp, setKeepScreenOn } from '../androidBridge'
+import { changeServer, isBoarderoniAndroidApp, setKeepScreenOn, setDebugLogging } from '../androidBridge'
 
 export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   const devices = useDashboardStore((s) => s.devices)
@@ -19,6 +25,10 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
   // androidBridge.ts's comment on why presence of window.BoarderoniAndroid
   // is what that means, not e.g. a mobile-browser user-agent check.
   const [keepScreenOn, setKeepScreenOnState] = useState(getKeepScreenOnPreference)
+  // TEMP DEBUG LOGGING — see androidBridge.ts's setDebugLogging. Remove this
+  // state and its checkbox below once the spinner/reconnect bug is
+  // diagnosed.
+  const [debugLogging, setDebugLoggingState] = useState(getDebugLoggingPreference)
 
   function handleSave(): void {
     renameDevice(deviceId, name)
@@ -31,6 +41,14 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
     setKeepScreenOnState(enabled)
     setKeepScreenOnPreference(enabled)
     setKeepScreenOn(enabled)
+  }
+
+  // TEMP DEBUG LOGGING — same "applies immediately" shape as
+  // handleKeepScreenOnChange above.
+  function handleDebugLoggingChange(enabled: boolean): void {
+    setDebugLoggingState(enabled)
+    setDebugLoggingPreference(enabled)
+    setDebugLogging(enabled)
   }
 
   // No onClose() here — disconnect() clears the store's deckId, which is
@@ -75,6 +93,15 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
             <label className="device-modal__checkbox">
               <input type="checkbox" checked={keepScreenOn} onChange={(e) => handleKeepScreenOnChange(e.target.checked)} />
               <span>Prevent screen timeout</span>
+            </label>
+          )}
+
+          {/* TEMP DEBUG LOGGING — see MainActivity.kt's dlog(). Remove this
+              checkbox once the spinner/reconnect bug is diagnosed. */}
+          {isBoarderoniAndroidApp() && (
+            <label className="device-modal__checkbox">
+              <input type="checkbox" checked={debugLogging} onChange={(e) => handleDebugLoggingChange(e.target.checked)} />
+              <span>Debug logging (adb logcat -s BoarderoniDebug:D)</span>
             </label>
           )}
 

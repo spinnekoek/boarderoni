@@ -133,7 +133,12 @@ export function useWidgetDrag(
       updateWidgets(movedWidgets(drag, dx, dy), { final: true })
     }
     if (drag && !drag.moved && drag.wasSelected) {
-      selectWidget(widget.id, drag.additive ? { additive: true } : undefined)
+      // exact: true drills into just this widget on a clean re-click even
+      // when it belongs to a group — otherwise this would just re-expand
+      // back to the whole group via selectWidget's own group-expansion
+      // (see its comment in store.ts), and a group's members could never be
+      // individually selected/configured.
+      selectWidget(widget.id, drag.additive ? { additive: true } : { exact: true })
     }
   }
 

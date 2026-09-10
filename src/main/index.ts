@@ -121,14 +121,14 @@ interface LegacyActionWidget {
 }
 
 function migrateWidgetEvents(widget: Widget & LegacyActionWidget): Widget {
-  if (widget.type === 'gauge') return widget
+  if (widget.type === 'gauge-bar' || widget.type === 'gauge-arc') return widget
   if ('events' in widget && widget.events) return widget // already migrated
   if (!widget.action) return widget // tolerate a malformed widget with neither shape
 
   const step: ActionStep = { kind: 'action', id: randomUUID(), action: widget.action }
   const { action: _action, ...rest } = widget
 
-  if (widget.type === 'adjuster') {
+  if ((widget.type as string) === 'adjuster' || widget.type === 'adjuster-slider' || widget.type === 'adjuster-knob') {
     // Legacy drag behavior fired continuously while dragging — maps to
     // 'move' so a migrated widget's actual trigger moments don't change.
     return { ...rest, events: { press: [], release: [], move: [step] } } as Widget
@@ -169,6 +169,42 @@ function migrateDropdownOrientation(widget: DropdownWidget): DropdownWidget {
   if (orientation === 'vertical') return { ...widget, orientation: 'top-to-bottom' }
   if (orientation === 'horizontal') return { ...widget, orientation: 'left-to-right' }
   return widget
+}
+
+// Pre-split shape: a single 'gauge' widget type with a `style` field choosing
+// bar-vs-arc rendering, before it was split into BarGaugeWidget/ArcGaugeWidget
+// (each its own widget type, no shared style toggle) — same split as
+// migrateSwitchWidget's own rocker/dial one above. Fields irrelevant to the
+// chosen style (e.g. an old bar gauge's arc-only fields, if any were ever
+// set) are just left in the object unused — the new narrower TS type simply
+// won't reference them.
+interface LegacyGaugeWidget {
+  type?: string
+  style?: 'bar' | 'arc'
+}
+
+function migrateGaugeWidget(widget: Widget & LegacyGaugeWidget): Widget {
+  if ((widget.type as string) !== 'gauge') return widget as Widget
+  const { style, ...rest } = widget
+  return { ...rest, type: style === 'arc' ? 'gauge-arc' : 'gauge-bar' } as Widget
+}
+
+// Pre-split shape: a single 'adjuster' widget type with a `style` field
+// choosing slider-vs-knob rendering, before it was split into
+// AdjusterSliderWidget/AdjusterKnobWidget (each its own widget type, no
+// shared style toggle) — same split as migrateGaugeWidget's own bar/arc one
+// above. Fields irrelevant to the chosen style (e.g. an old slider's knob-
+// only fields, if any were ever set) are just left in the object unused —
+// the new narrower TS type simply won't reference them.
+interface LegacyAdjusterWidget {
+  type?: string
+  style?: 'slider' | 'knob'
+}
+
+function migrateAdjusterWidget(widget: Widget & LegacyAdjusterWidget): Widget {
+  if ((widget.type as string) !== 'adjuster') return widget as Widget
+  const { style, ...rest } = widget
+  return { ...rest, type: style === 'knob' ? 'adjuster-knob' : 'adjuster-slider' } as Widget
 }
 
 // labelAnchor started out on the DialSwitchWidget itself (one fixed side for
@@ -280,9 +316,18 @@ function backfillSwitchPositions<T extends { positions: SwitchPosition[] }>(widg
   }
 }
 
-function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget): Widget {
+function migrateWidget(
+  widget: Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget & LegacyGaugeWidget & LegacyAdjusterWidget
+): Widget {
   widget = migrateWidgetEvents(widget) as Widget & LegacyButtonWidget & LegacyActionWidget
   widget = migrateSwitchWidget(widget) as Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget
+  widget = migrateGaugeWidget(widget) as Widget & LegacyButtonWidget & LegacyActionWidget & LegacySwitchWidget & LegacyGaugeWidget
+  widget = migrateAdjusterWidget(widget) as Widget &
+    LegacyButtonWidget &
+    LegacyActionWidget &
+    LegacySwitchWidget &
+    LegacyGaugeWidget &
+    LegacyAdjusterWidget
 
   // Dropdown has its own narrower orientation migration too (see
   // migrateDropdownOrientation) alongside the events backfill every switch
@@ -325,8 +370,10 @@ function migrateWidget(widget: Widget & LegacyButtonWidget & LegacyActionWidget 
   // widget with no `label` at all.
   if (
     widget.type === 'morph' ||
-    widget.type === 'gauge' ||
-    widget.type === 'adjuster' ||
+    widget.type === 'gauge-bar' ||
+    widget.type === 'gauge-arc' ||
+    widget.type === 'adjuster-slider' ||
+    widget.type === 'adjuster-knob' ||
     widget.type === 'encoder' ||
     widget.type === 'screen-capture' ||
     widget.type === 'label' ||
@@ -1831,7 +1878,7 @@ function applyRestIncoming(sourceId: string, flattened: Record<string, unknown>)
   const variableMap = toVariableMap(room.dashboard.variables ?? [])
   const updates: Record<string, unknown> = {}
   for (const mapping of source.incoming.mappings) {
-    if (!mapping.variableName.trim() || !(mapping.field in flattened)) continue
+    if (!(mapping.field in flattened)) continue
     const rawValue = flattened[mapping.field]
     if (mapping.expr && mapping.expr.trim()) {
       const result = evaluateMappingExpression(mapping.expr, coerceVariableValue(rawValue), variableMap)
@@ -1839,8 +1886,17 @@ function applyRestIncoming(sourceId: string, flattened: Record<string, unknown>)
         console.error(`[boarderoni] REST incoming mapping expression failed (${source.name} -> ${mapping.variableName})`, result.error)
         continue
       }
-      updates[mapping.variableName] = result.value
-    } else {
+      // Same convention as runUpdateState: an expression that returns a
+      // plain object sets whichever variables it names (not just this
+      // mapping's own variableName), letting one mapping's expr also patch
+      // other variables in the same room — a scalar return still targets
+      // just mapping.variableName, same as before this was possible.
+      if (result.value && typeof result.value === 'object' && !Array.isArray(result.value)) {
+        Object.assign(updates, result.value as Record<string, unknown>)
+      } else if (mapping.variableName.trim()) {
+        updates[mapping.variableName] = result.value
+      }
+    } else if (mapping.variableName.trim()) {
       updates[mapping.variableName] = rawValue
     }
   }
@@ -1935,7 +1991,7 @@ function syncPlugins(room: DeckRoom): void {
         const variableMap = toVariableMap(room.dashboard.variables ?? [])
         const updates: Record<string, unknown> = {}
         for (const mapping of current.mappings) {
-          if (!mapping.variableName.trim() || !(mapping.field in values)) continue
+          if (!(mapping.field in values)) continue
           const rawValue = values[mapping.field]
           // Skip a mapping whose underlying field is unchanged since the
           // last tick — an expression is only re-run when there's an
@@ -1947,8 +2003,16 @@ function syncPlugins(room: DeckRoom): void {
               console.error(`[boarderoni] plugin mapping expression failed (${current.name} -> ${mapping.variableName})`, result.error)
               continue
             }
-            updates[mapping.variableName] = result.value
-          } else {
+            // Same convention as runUpdateState: an object return patches
+            // whichever variables it names, not just this mapping's own
+            // variableName — a scalar return still targets just that one,
+            // same as before this was possible.
+            if (result.value && typeof result.value === 'object' && !Array.isArray(result.value)) {
+              Object.assign(updates, result.value as Record<string, unknown>)
+            } else if (mapping.variableName.trim()) {
+              updates[mapping.variableName] = result.value
+            }
+          } else if (mapping.variableName.trim()) {
             updates[mapping.variableName] = rawValue
           }
         }
@@ -2147,7 +2211,7 @@ async function triggerAction(
   // Gauge/screen-capture/label are passive — none has `.events` at all, so a
   // stale/malicious action:trigger naming one lands here rather than
   // crashing on getEventSteps below (which assumes EventfulWidget).
-  if (widget.type === 'gauge' || widget.type === 'screen-capture' || widget.type === 'label') {
+  if (widget.type === 'gauge-bar' || widget.type === 'gauge-arc' || widget.type === 'screen-capture' || widget.type === 'label') {
     sendError(ws, widgetId, 'This widget cannot be triggered')
     return
   }

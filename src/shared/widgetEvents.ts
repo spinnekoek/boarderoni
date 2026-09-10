@@ -23,7 +23,7 @@ export const EVENT_LABELS: Record<WidgetEventKind, string> = {
 // shape actually supports a slider (see isMorphSliderActive) — plain
 // Button/Morph otherwise only ever fire on press/release.
 export function eventKindsFor(widget: EventfulWidget): WidgetEventKind[] {
-  if (widget.type === 'adjuster') return ['press', 'release', 'doublePress', 'triplePress', 'move']
+  if (widget.type === 'adjuster-slider' || widget.type === 'adjuster-knob') return ['press', 'release', 'doublePress', 'triplePress', 'move']
   if (widget.type === 'encoder') return ['press', 'release', 'doublePress', 'triplePress', 'increment', 'decrement']
   if (widget.type === 'morph' && isMorphSliderActive(widget)) return ['press', 'release', 'move']
   if (widget.type === 'button') return ['press', 'release', 'doublePress', 'triplePress']
@@ -36,13 +36,15 @@ export function eventKindsFor(widget: EventfulWidget): WidgetEventKind[] {
 // clean error instead of a crash, and lets actionTitle skip it silently.
 export function getEventSteps(widget: EventfulWidget, event: WidgetEventKind): SequenceStep[] | undefined {
   if (event === 'move') {
-    if (widget.type === 'adjuster') return widget.events.move
+    if (widget.type === 'adjuster-slider' || widget.type === 'adjuster-knob') return widget.events.move
     if (widget.type === 'morph' && isMorphSliderActive(widget)) return widget.events.move ?? []
     return undefined
   }
   if (event === 'increment' || event === 'decrement') return widget.type === 'encoder' ? widget.events[event] : undefined
   if (event === 'doublePress' || event === 'triplePress') {
-    return widget.type === 'button' || widget.type === 'adjuster' || widget.type === 'encoder' ? widget.events[event] : undefined
+    return widget.type === 'button' || widget.type === 'adjuster-slider' || widget.type === 'adjuster-knob' || widget.type === 'encoder'
+      ? widget.events[event]
+      : undefined
   }
   if (event === 'select') return undefined
   return widget.events[event]

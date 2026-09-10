@@ -23,7 +23,8 @@ import { CodeEditor } from './CodeEditor'
 import { ExpressionEditorModal } from './ExpressionEditorModal'
 import type {
   ActionStep,
-  AdjusterWidget,
+  AdjusterKnobWidget,
+  AdjusterSliderWidget,
   BackgroundFit,
   CallRestAction,
   CallRestPlaceholderValue,
@@ -38,7 +39,8 @@ import type {
   EncoderWidget,
   EventfulWidget,
   GaugeTickSet,
-  GaugeWidget,
+  BarGaugeWidget,
+  ArcGaugeWidget,
   DcsViewportWidget,
   HorizontalAlign,
   KeypressAction,
@@ -82,8 +84,10 @@ const LABEL_TEXT_EXPR_PLACEHOLDER = 'return "Count: " + variables.my_variable + 
 const WIDGET_TYPE_LABELS: Record<Widget['type'], string> = {
   button: 'Button',
   morph: 'Morph button',
-  gauge: 'Gauge',
-  adjuster: 'Adjuster',
+  'gauge-bar': 'Bar Gauge',
+  'gauge-arc': 'Arc Gauge',
+  'adjuster-slider': 'Slider',
+  'adjuster-knob': 'Knob',
   encoder: 'Encoder',
   'switch-rocker': 'Rocker switch',
   'switch-dial': 'Dial switch',
@@ -2766,6 +2770,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -2783,6 +2788,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteMany}>
           Delete {selectedWidgetIds.length} widgets
         </button>
+        </div>
       </aside>
     )
   }
@@ -2802,6 +2808,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -2907,6 +2914,7 @@ export function PropertiesPanel(): React.JSX.Element {
             </>
           )}
         </PropertiesSection>
+        </div>
       </aside>
     )
   }
@@ -2934,6 +2942,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -2987,6 +2996,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteLabel}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
@@ -3011,6 +3021,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -3146,11 +3157,12 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteLine}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
 
-  if (widget.type === 'gauge') {
+  if (widget.type === 'gauge-bar') {
     // Captured into a const rather than relying on control-flow narrowing of
     // `widget` persisting into the nested closures below — same reasoning as
     // ActionFields' own cast comment above (TS doesn't reliably retain a
@@ -3161,7 +3173,7 @@ export function PropertiesPanel(): React.JSX.Element {
     const isTrackExpr = gauge.track.colorExpr !== undefined
     const isBorderExpr = gauge.borderColorExpr !== undefined
 
-    function patchGauge(fields: Partial<GaugeWidget>): void {
+    function patchGauge(fields: Partial<BarGaugeWidget>): void {
       updateWidgets(widgets.map((w) => (w.id === gauge.id ? ({ ...w, ...fields } as Widget) : w)))
     }
 
@@ -3178,21 +3190,6 @@ export function PropertiesPanel(): React.JSX.Element {
       if (ok) patchGauge({ labels: gauge.labels.filter((l) => l.id !== labelId) })
     }
 
-    const tickSets = gauge.tickSets ?? []
-
-    function patchTickSet(tickSetId: string, fields: Partial<GaugeTickSet>): void {
-      patchGauge({ tickSets: tickSets.map((t) => (t.id === tickSetId ? { ...t, ...fields } : t)) })
-    }
-
-    function addTickSet(): void {
-      patchGauge({ tickSets: [...tickSets, { id: nextId(), count: 5, showLabels: true }] })
-    }
-
-    async function confirmRemoveTickSet(tickSetId: string): Promise<void> {
-      const ok = await confirm('Remove this tick set? This cannot be undone.', { confirmLabel: 'Remove' })
-      if (ok) patchGauge({ tickSets: tickSets.filter((t) => t.id !== tickSetId) })
-    }
-
     async function handleDeleteGauge(): Promise<void> {
       const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
       if (ok) {
@@ -3204,6 +3201,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -3219,33 +3217,12 @@ export function PropertiesPanel(): React.JSX.Element {
 
         <PropertiesSection title="Setup">
           <label className="properties__field">
-            <span>Style</span>
-            <select value={gauge.style} onChange={(e) => patchGauge({ style: e.target.value as GaugeWidget['style'] })}>
-              <option value="bar">Bar</option>
-              <option value="arc">Arc</option>
+            <span>Orientation</span>
+            <select value={gauge.orientation ?? 'horizontal'} onChange={(e) => patchGauge({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
+              <option value="horizontal">Horizontal</option>
+              <option value="vertical">Vertical</option>
             </select>
           </label>
-
-          {gauge.style === 'bar' ? (
-            <label className="properties__field">
-              <span>Orientation</span>
-              <select value={gauge.orientation ?? 'horizontal'} onChange={(e) => patchGauge({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
-                <option value="horizontal">Horizontal</option>
-                <option value="vertical">Vertical</option>
-              </select>
-            </label>
-          ) : (
-            <div className="properties__grid2">
-              <label className="properties__field">
-                <span>Start angle</span>
-                <input type="number" value={gauge.startAngle ?? 135} onChange={(e) => patchGauge({ startAngle: Number(e.target.value) })} />
-              </label>
-              <label className="properties__field">
-                <span>End angle</span>
-                <input type="number" value={gauge.endAngle ?? 405} onChange={(e) => patchGauge({ endAngle: Number(e.target.value) })} />
-              </label>
-            </div>
-          )}
 
           <div className="properties__grid2">
             <label className="properties__field">
@@ -3303,7 +3280,7 @@ export function PropertiesPanel(): React.JSX.Element {
           <div className="properties__field">
             <span>Track color</span>
             <ColorPickerButton
-              value={gauge.track.color ?? (gauge.style === 'arc' ? ARC_DEFAULT_TRACK_COLOR : DEFAULT_WIDGET_COLOR)}
+              value={gauge.track.color ?? DEFAULT_WIDGET_COLOR}
               onChange={(color) => patchGauge({ track: { ...gauge.track, color, colorExpr: undefined } })}
               isExpr={isTrackExpr}
               exprValue={gauge.track.colorExpr ?? ''}
@@ -3315,53 +3292,247 @@ export function PropertiesPanel(): React.JSX.Element {
             />
           </div>
 
-          {gauge.style === 'bar' && (
-            <div className="properties__field">
-              <span>Border color</span>
-              <ColorPickerButton
-                value={gauge.borderColor ?? DEFAULT_WIDGET_COLOR}
-                onChange={(color) => patchGauge({ borderColor: color, borderColorExpr: undefined })}
-                isExpr={isBorderExpr}
-                exprValue={gauge.borderColorExpr ?? ''}
-                onExprChange={(code) => patchGauge({ borderColorExpr: code })}
-                onEnterExpr={() => patchGauge({ borderColorExpr: gauge.borderColorExpr ?? '' })}
-                onClearExpr={() => patchGauge({ borderColorExpr: undefined })}
-                opacity={gauge.borderOpacity ?? 1}
-                onOpacityChange={(v) => patchGauge({ borderOpacity: v })}
-              />
-            </div>
-          )}
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={gauge.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchGauge({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={gauge.borderColorExpr ?? ''}
+              onExprChange={(code) => patchGauge({ borderColorExpr: code })}
+              onEnterExpr={() => patchGauge({ borderColorExpr: gauge.borderColorExpr ?? '' })}
+              onClearExpr={() => patchGauge({ borderColorExpr: undefined })}
+              opacity={gauge.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchGauge({ borderOpacity: v })}
+            />
+          </div>
         </PropertiesSection>
 
         <PropertiesSection title="Border shape">
-          {gauge.style === 'bar' ? (
-            <>
-              <span className="properties__section-label">Border radius</span>
-              <CornersInputGrid
-                topLeft={{ value: gauge.radiusTopLeft ?? 4, min: 0, onChange: (v) => patchGauge({ radiusTopLeft: v }) }}
-                topRight={{ value: gauge.radiusTopRight ?? 4, min: 0, onChange: (v) => patchGauge({ radiusTopRight: v }) }}
-                bottomLeft={{ value: gauge.radiusBottomLeft ?? 4, min: 0, onChange: (v) => patchGauge({ radiusBottomLeft: v }) }}
-                bottomRight={{ value: gauge.radiusBottomRight ?? 4, min: 0, onChange: (v) => patchGauge({ radiusBottomRight: v }) }}
-              />
+          <span className="properties__section-label">Border radius</span>
+          <CornersInputGrid
+            topLeft={{ value: gauge.radiusTopLeft ?? 4, min: 0, onChange: (v) => patchGauge({ radiusTopLeft: v }) }}
+            topRight={{ value: gauge.radiusTopRight ?? 4, min: 0, onChange: (v) => patchGauge({ radiusTopRight: v }) }}
+            bottomLeft={{ value: gauge.radiusBottomLeft ?? 4, min: 0, onChange: (v) => patchGauge({ radiusBottomLeft: v }) }}
+            bottomRight={{ value: gauge.radiusBottomRight ?? 4, min: 0, onChange: (v) => patchGauge({ radiusBottomRight: v }) }}
+          />
 
-              <div className="properties__divider" />
+          <div className="properties__divider" />
 
-              <span className="properties__section-label">Border thickness</span>
-              <SidesInputGrid
-                top={{ value: gauge.borderWidthTop ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthTop: v }) }}
-                right={{ value: gauge.borderWidthRight ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthRight: v }) }}
-                bottom={{ value: gauge.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthBottom: v }) }}
-                left={{ value: gauge.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthLeft: v }) }}
-              />
-            </>
-          ) : (
-            <p className="properties__hint">Border radius/thickness/color only apply to the Bar style.</p>
-          )}
+          <span className="properties__section-label">Border thickness</span>
+          <SidesInputGrid
+            top={{ value: gauge.borderWidthTop ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthTop: v }) }}
+            right={{ value: gauge.borderWidthRight ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthRight: v }) }}
+            bottom={{ value: gauge.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthBottom: v }) }}
+            left={{ value: gauge.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchGauge({ borderWidthLeft: v }) }}
+          />
         </PropertiesSection>
 
-        {gauge.style === 'arc' && (
-          <>
-            <PropertiesSection title="Ticks" badge={tickSets.length}>
+        <PropertiesSection title="Labels" badge={gauge.labels.length}>
+          {gauge.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+              <LabelFields
+                label={label}
+                backgroundColor={gauge.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchGaugeLabel(label.id, fields)}
+                onRemove={() => confirmRemoveGaugeLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addGaugeLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
+
+        <PropertiesSection title="Layout">
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={gauge.x} onChange={(e) => patchGauge({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={gauge.y} onChange={(e) => patchGauge({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>W</span>
+              <input type="number" min={minSize} value={gauge.w} onChange={(e) => patchGauge({ w: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+            <label className="properties__field">
+              <span>H</span>
+              <input type="number" min={minSize} value={gauge.h} onChange={(e) => patchGauge({ h: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={gauge.zIndex ?? 0} onChange={(e) => patchGauge({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={gauge.visible} visibleExpr={gauge.visibleExpr} onChange={patchGauge} />
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteGauge}>
+          Delete widget
+        </button>
+        </div>
+      </aside>
+    )
+  }
+
+  if (widget.type === 'gauge-arc') {
+    // Captured into a const rather than relying on control-flow narrowing of
+    // `widget` persisting into the nested closures below — same reasoning as
+    // ActionFields' own cast comment above (TS doesn't reliably retain a
+    // narrowed type inside a closure that could in principle run later).
+    const gauge = widget
+    const minSize = snapToGrid ? gridSize : 1
+    const isFillExpr = gauge.fill.colorExpr !== undefined
+    const isTrackExpr = gauge.track.colorExpr !== undefined
+
+    function patchGauge(fields: Partial<ArcGaugeWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === gauge.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    function patchGaugeLabel(labelId: string, fields: Partial<WidgetLabel>): void {
+      patchGauge({ labels: gauge.labels.map((l) => (l.id === labelId ? { ...l, ...fields } : l)) })
+    }
+
+    function addGaugeLabel(): void {
+      patchGauge({ labels: [...gauge.labels, { id: nextId(), text: 'New Label', align: 'center', verticalAlign: 'center' }] })
+    }
+
+    async function confirmRemoveGaugeLabel(labelId: string): Promise<void> {
+      const ok = await confirm('Remove this label? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchGauge({ labels: gauge.labels.filter((l) => l.id !== labelId) })
+    }
+
+    const tickSets = gauge.tickSets ?? []
+
+    function patchTickSet(tickSetId: string, fields: Partial<GaugeTickSet>): void {
+      patchGauge({ tickSets: tickSets.map((t) => (t.id === tickSetId ? { ...t, ...fields } : t)) })
+    }
+
+    function addTickSet(): void {
+      patchGauge({ tickSets: [...tickSets, { id: nextId(), count: 5, showLabels: true }] })
+    }
+
+    async function confirmRemoveTickSet(tickSetId: string): Promise<void> {
+      const ok = await confirm('Remove this tick set? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchGauge({ tickSets: tickSets.filter((t) => t.id !== tickSetId) })
+    }
+
+    async function handleDeleteGauge(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(gauge.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <div className="properties__scroll">
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[gauge.type]}</p>
+
+        <PropertiesSection title="Setup">
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Start angle</span>
+              <input type="number" value={gauge.startAngle ?? 135} onChange={(e) => patchGauge({ startAngle: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>End angle</span>
+              <input type="number" value={gauge.endAngle ?? 405} onChange={(e) => patchGauge({ endAngle: Number(e.target.value) })} />
+            </label>
+          </div>
+
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Min</span>
+              <input type="number" value={gauge.min} onChange={(e) => patchGauge({ min: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Max</span>
+              <input type="number" value={gauge.max} onChange={(e) => patchGauge({ max: Number(e.target.value) })} />
+            </label>
+          </div>
+
+          <label className="properties__field">
+            <span>Value</span>
+            <textarea
+              className="properties__code"
+              rows={3}
+              placeholder="return variables.my_variable ?? 0;"
+              value={gauge.valueExpr}
+              onChange={(e) => patchGauge({ valueExpr: e.target.value })}
+            />
+          </label>
+          <p className="properties__hint">
+            JS function body — <code>variables</code> holds every variable&rsquo;s current value. Must return a number; anything else
+            falls back to Min.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Colors">
+          <div className="properties__field">
+            <span>Background color</span>
+            <ColorPickerButton
+              value={gauge.backgroundColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchGauge({ backgroundColor: color })}
+              opacity={gauge.backgroundOpacity ?? (gauge.backgroundColor === undefined ? 0 : 1)}
+              onOpacityChange={(v) => patchGauge({ backgroundOpacity: v })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Fill color</span>
+            <ColorPickerButton
+              value={gauge.fill.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchGauge({ fill: { ...gauge.fill, color, colorExpr: undefined } })}
+              isExpr={isFillExpr}
+              exprValue={gauge.fill.colorExpr ?? ''}
+              onExprChange={(code) => patchGauge({ fill: { ...gauge.fill, colorExpr: code } })}
+              onEnterExpr={() => patchGauge({ fill: { ...gauge.fill, colorExpr: gauge.fill.colorExpr ?? '' } })}
+              onClearExpr={() => patchGauge({ fill: { ...gauge.fill, colorExpr: undefined } })}
+              opacity={gauge.fill.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchGauge({ fill: { ...gauge.fill, backgroundOpacity: v } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Track color</span>
+            <ColorPickerButton
+              value={gauge.track.color ?? ARC_DEFAULT_TRACK_COLOR}
+              onChange={(color) => patchGauge({ track: { ...gauge.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={gauge.track.colorExpr ?? ''}
+              onExprChange={(code) => patchGauge({ track: { ...gauge.track, colorExpr: code } })}
+              onEnterExpr={() => patchGauge({ track: { ...gauge.track, colorExpr: gauge.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchGauge({ track: { ...gauge.track, colorExpr: undefined } })}
+              opacity={gauge.track.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchGauge({ track: { ...gauge.track, backgroundOpacity: v } })}
+            />
+          </div>
+        </PropertiesSection>
+
+        <PropertiesSection title="Ticks" badge={tickSets.length}>
               {tickSets.map((tickSet, i) => (
                 <PropertiesSection key={tickSet.id} title={`Tick set ${i + 1}`} sectionKey={tickSet.id}>
                   <div className="properties__grid2">
@@ -3501,7 +3672,7 @@ export function PropertiesPanel(): React.JSX.Element {
                       <div className="properties__field">
                         <span>Label color</span>
                         <ColorPickerButton
-                          value={tickSet.labelColor ?? pickLegibleTextColor(gauge.track.color ?? (gauge.style === 'arc' ? ARC_DEFAULT_TRACK_COLOR : DEFAULT_WIDGET_COLOR))}
+                          value={tickSet.labelColor ?? pickLegibleTextColor(gauge.track.color ?? ARC_DEFAULT_TRACK_COLOR)}
                           onChange={(color) => patchTickSet(tickSet.id, { labelColor: color })}
                         />
                       </div>
@@ -3608,7 +3779,7 @@ export function PropertiesPanel(): React.JSX.Element {
                     <span>Shape</span>
                     <select
                       value={gauge.indicatorShape ?? 'needle'}
-                      onChange={(e) => patchGauge({ indicatorShape: e.target.value as GaugeWidget['indicatorShape'] })}
+                      onChange={(e) => patchGauge({ indicatorShape: e.target.value as ArcGaugeWidget['indicatorShape'] })}
                     >
                       <option value="needle">Needle</option>
                       <option value="square">Square</option>
@@ -3696,15 +3867,13 @@ export function PropertiesPanel(): React.JSX.Element {
                 </>
               )}
             </PropertiesSection>
-          </>
-        )}
 
         <PropertiesSection title="Labels" badge={gauge.labels.length}>
           {gauge.labels.map((label) => (
             <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
               <LabelFields
                 label={label}
-                backgroundColor={gauge.track.color ?? (gauge.style === 'arc' ? ARC_DEFAULT_TRACK_COLOR : DEFAULT_WIDGET_COLOR)}
+                backgroundColor={gauge.track.color ?? ARC_DEFAULT_TRACK_COLOR}
                 onChange={(fields) => patchGaugeLabel(label.id, fields)}
                 onRemove={() => confirmRemoveGaugeLabel(label.id)}
               />
@@ -3750,18 +3919,19 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteGauge}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
 
-  if (widget.type === 'adjuster') {
+  if (widget.type === 'adjuster-slider') {
     const adjuster = widget
     const minSize = snapToGrid ? gridSize : 1
     const isFillExpr = adjuster.fill.colorExpr !== undefined
     const isTrackExpr = adjuster.track.colorExpr !== undefined
     const isBorderExpr = adjuster.borderColorExpr !== undefined
 
-    function patchAdjuster(fields: Partial<AdjusterWidget>): void {
+    function patchAdjuster(fields: Partial<AdjusterSliderWidget>): void {
       updateWidgets(widgets.map((w) => (w.id === adjuster.id ? ({ ...w, ...fields } as Widget) : w)))
     }
 
@@ -3778,21 +3948,6 @@ export function PropertiesPanel(): React.JSX.Element {
       if (ok) patchAdjuster({ labels: adjuster.labels.filter((l) => l.id !== labelId) })
     }
 
-    const tickSets = adjuster.tickSets ?? []
-
-    function patchTickSet(tickSetId: string, fields: Partial<GaugeTickSet>): void {
-      patchAdjuster({ tickSets: tickSets.map((t) => (t.id === tickSetId ? { ...t, ...fields } : t)) })
-    }
-
-    function addTickSet(): void {
-      patchAdjuster({ tickSets: [...tickSets, { id: nextId(), count: 5, showLabels: true }] })
-    }
-
-    async function confirmRemoveTickSet(tickSetId: string): Promise<void> {
-      const ok = await confirm('Remove this tick set? This cannot be undone.', { confirmLabel: 'Remove' })
-      if (ok) patchAdjuster({ tickSets: tickSets.filter((t) => t.id !== tickSetId) })
-    }
-
     async function handleDeleteAdjuster(): Promise<void> {
       const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
       if (ok) {
@@ -3804,6 +3959,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -3819,33 +3975,12 @@ export function PropertiesPanel(): React.JSX.Element {
 
         <PropertiesSection title="Setup">
           <label className="properties__field">
-            <span>Style</span>
-            <select value={adjuster.style} onChange={(e) => patchAdjuster({ style: e.target.value as AdjusterWidget['style'] })}>
-              <option value="slider">Slider</option>
-              <option value="knob">Knob</option>
+            <span>Orientation</span>
+            <select value={adjuster.orientation ?? 'vertical'} onChange={(e) => patchAdjuster({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
+              <option value="vertical">Vertical</option>
+              <option value="horizontal">Horizontal</option>
             </select>
           </label>
-
-          {adjuster.style === 'slider' ? (
-            <label className="properties__field">
-              <span>Orientation</span>
-              <select value={adjuster.orientation ?? 'vertical'} onChange={(e) => patchAdjuster({ orientation: e.target.value as 'horizontal' | 'vertical' })}>
-                <option value="vertical">Vertical</option>
-                <option value="horizontal">Horizontal</option>
-              </select>
-            </label>
-          ) : (
-            <div className="properties__grid2">
-              <label className="properties__field">
-                <span>Start angle</span>
-                <input type="number" value={adjuster.startAngle ?? 135} onChange={(e) => patchAdjuster({ startAngle: Number(e.target.value) })} />
-              </label>
-              <label className="properties__field">
-                <span>End angle</span>
-                <input type="number" value={adjuster.endAngle ?? 405} onChange={(e) => patchAdjuster({ endAngle: Number(e.target.value) })} />
-              </label>
-            </div>
-          )}
 
           <div className="properties__grid2">
             <label className="properties__field">
@@ -3890,152 +4025,62 @@ export function PropertiesPanel(): React.JSX.Element {
           </p>
         </PropertiesSection>
 
-        {adjuster.style === 'slider' && (
-          <PropertiesSection title="Handle">
-            <label className="properties__field">
-              <span>Shape</span>
-              <select
-                value={adjuster.handleShape ?? 'circle'}
-                onChange={(e) => patchAdjuster({ handleShape: e.target.value as NonNullable<AdjusterWidget['handleShape']> })}
-              >
-                <option value="circle">Circle</option>
-                <option value="square">Square</option>
-                <option value="none">None</option>
-              </select>
-            </label>
+        <PropertiesSection title="Handle">
+          <label className="properties__field">
+            <span>Shape</span>
+            <select
+              value={adjuster.handleShape ?? 'circle'}
+              onChange={(e) => patchAdjuster({ handleShape: e.target.value as NonNullable<AdjusterSliderWidget['handleShape']> })}
+            >
+              <option value="circle">Circle</option>
+              <option value="square">Square</option>
+              <option value="none">None</option>
+            </select>
+          </label>
 
-            {(adjuster.handleShape ?? 'circle') !== 'none' && (
-              <>
-                <label className="properties__field">
-                  <span>Size</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={adjuster.handleSize ?? 14}
-                    onChange={(e) => patchAdjuster({ handleSize: Math.max(1, Number(e.target.value)) })}
-                  />
-                </label>
-                <div className="properties__field">
-                  <span>Color</span>
-                  <ColorPickerButton
-                    value={adjuster.handleColor ?? adjuster.fill.color ?? DEFAULT_WIDGET_COLOR}
-                    onChange={(color) => patchAdjuster({ handleColor: color })}
-                    auto={adjuster.handleColor === undefined}
-                    onAuto={() => patchAdjuster({ handleColor: undefined })}
-                    opacity={adjuster.handleOpacity ?? 1}
-                    onOpacityChange={(v) => patchAdjuster({ handleOpacity: v })}
-                  />
-                </div>
-                <label className="properties__field">
-                  <span>Border width</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={adjuster.handleBorderWidth ?? 0}
-                    onChange={(e) => patchAdjuster({ handleBorderWidth: Math.max(0, Number(e.target.value)) })}
-                  />
-                </label>
-                <div className="properties__field">
-                  <span>Border color</span>
-                  <ColorPickerButton
-                    value={adjuster.handleBorderColor ?? DEFAULT_WIDGET_COLOR}
-                    onChange={(color) => patchAdjuster({ handleBorderColor: color })}
-                    opacity={adjuster.handleBorderOpacity ?? 1}
-                    onOpacityChange={(v) => patchAdjuster({ handleBorderOpacity: v })}
-                  />
-                </div>
-              </>
-            )}
-          </PropertiesSection>
-        )}
-
-        {adjuster.style === 'knob' && (
-          <PropertiesSection title="Base circle">
-            <p className="properties__hint">The dial face behind the arc/indicator — border reuses Border color above.</p>
-            <label className="properties__field">
-              <span>Base circle size</span>
-              <input
-                type="number"
-                min={1}
-                value={adjuster.bezelRadius ?? 32}
-                onChange={(e) => patchAdjuster({ bezelRadius: Math.max(1, Number(e.target.value)) })}
-              />
-            </label>
-            <div className="properties__field">
-              <span>Base circle color</span>
-              <ColorPickerButton
-                value={adjuster.bezelColor ?? adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
-                onChange={(color) => patchAdjuster({ bezelColor: color })}
-                auto={adjuster.bezelColor === undefined}
-                onAuto={() => patchAdjuster({ bezelColor: undefined })}
-                opacity={adjuster.bezelOpacity ?? 1}
-                onOpacityChange={(v) => patchAdjuster({ bezelOpacity: v })}
-              />
-            </div>
-            <label className="properties__field">
-              <span>Base circle border width</span>
-              <input
-                type="number"
-                min={0}
-                value={adjuster.bezelBorderWidth ?? 0}
-                onChange={(e) => patchAdjuster({ bezelBorderWidth: Math.max(0, Number(e.target.value)) })}
-              />
-            </label>
-          </PropertiesSection>
-        )}
-
-        {adjuster.style === 'knob' && (
-          <PropertiesSection title="Inner circle">
-            <label className="properties__field">
-              <span>Inner circle size</span>
-              <input
-                type="number"
-                min={0}
-                value={adjuster.innerBezelRadius ?? 0}
-                onChange={(e) => patchAdjuster({ innerBezelRadius: Math.max(0, Number(e.target.value)) })}
-              />
-            </label>
-            <p className="properties__hint">A second circle drawn on top of the base circle. 0 hides it entirely.</p>
-            <div className="properties__field">
-              <span>Inner circle color</span>
-              <ColorPickerButton
-                value={adjuster.innerBezelColor ?? adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
-                onChange={(color) => patchAdjuster({ innerBezelColor: color })}
-                auto={adjuster.innerBezelColor === undefined}
-                onAuto={() => patchAdjuster({ innerBezelColor: undefined })}
-                opacity={adjuster.innerBezelOpacity ?? 1}
-                onOpacityChange={(v) => patchAdjuster({ innerBezelOpacity: v })}
-              />
-            </div>
-            <label className="properties__field">
-              <span>Inner circle border width</span>
-              <input
-                type="number"
-                min={0}
-                value={adjuster.innerBezelBorderWidth ?? 0}
-                onChange={(e) => patchAdjuster({ innerBezelBorderWidth: Math.max(0, Number(e.target.value)) })}
-              />
-            </label>
-            <div className="properties__field">
-              <span>Inner circle border color</span>
-              <ColorPickerButton
-                value={adjuster.innerBezelBorderColor ?? DEFAULT_WIDGET_COLOR}
-                onChange={(color) => patchAdjuster({ innerBezelBorderColor: color })}
-              />
-            </div>
-          </PropertiesSection>
-        )}
-
-        {adjuster.style === 'knob' && (
-          <DialShapeFields
-            value={adjuster}
-            onChange={patchAdjuster}
-            fill={adjuster.fill}
-            onFillChange={(fill) => patchAdjuster({ fill })}
-            track={adjuster.track}
-            needleColorLabel="Needle color"
-          />
-        )}
+          {(adjuster.handleShape ?? 'circle') !== 'none' && (
+            <>
+              <label className="properties__field">
+                <span>Size</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={adjuster.handleSize ?? 14}
+                  onChange={(e) => patchAdjuster({ handleSize: Math.max(1, Number(e.target.value)) })}
+                />
+              </label>
+              <div className="properties__field">
+                <span>Color</span>
+                <ColorPickerButton
+                  value={adjuster.handleColor ?? adjuster.fill.color ?? DEFAULT_WIDGET_COLOR}
+                  onChange={(color) => patchAdjuster({ handleColor: color })}
+                  auto={adjuster.handleColor === undefined}
+                  onAuto={() => patchAdjuster({ handleColor: undefined })}
+                  opacity={adjuster.handleOpacity ?? 1}
+                  onOpacityChange={(v) => patchAdjuster({ handleOpacity: v })}
+                />
+              </div>
+              <label className="properties__field">
+                <span>Border width</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={adjuster.handleBorderWidth ?? 0}
+                  onChange={(e) => patchAdjuster({ handleBorderWidth: Math.max(0, Number(e.target.value)) })}
+                />
+              </label>
+              <div className="properties__field">
+                <span>Border color</span>
+                <ColorPickerButton
+                  value={adjuster.handleBorderColor ?? DEFAULT_WIDGET_COLOR}
+                  onChange={(color) => patchAdjuster({ handleBorderColor: color })}
+                  opacity={adjuster.handleBorderOpacity ?? 1}
+                  onOpacityChange={(v) => patchAdjuster({ handleBorderOpacity: v })}
+                />
+              </div>
+            </>
+          )}
+        </PropertiesSection>
 
         <PropertiesSection title="Colors">
           <div className="properties__field">
@@ -4085,33 +4130,421 @@ export function PropertiesPanel(): React.JSX.Element {
         </PropertiesSection>
 
         <PropertiesSection title="Border shape">
-          {adjuster.style === 'slider' ? (
-            <>
-              <span className="properties__section-label">Border radius</span>
-              <CornersInputGrid
-                topLeft={{ value: adjuster.radiusTopLeft ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusTopLeft: v }) }}
-                topRight={{ value: adjuster.radiusTopRight ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusTopRight: v }) }}
-                bottomLeft={{ value: adjuster.radiusBottomLeft ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusBottomLeft: v }) }}
-                bottomRight={{ value: adjuster.radiusBottomRight ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusBottomRight: v }) }}
-              />
+          <span className="properties__section-label">Border radius</span>
+          <CornersInputGrid
+            topLeft={{ value: adjuster.radiusTopLeft ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusTopLeft: v }) }}
+            topRight={{ value: adjuster.radiusTopRight ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusTopRight: v }) }}
+            bottomLeft={{ value: adjuster.radiusBottomLeft ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusBottomLeft: v }) }}
+            bottomRight={{ value: adjuster.radiusBottomRight ?? 8, min: 0, onChange: (v) => patchAdjuster({ radiusBottomRight: v }) }}
+          />
 
-              <div className="properties__divider" />
+          <div className="properties__divider" />
 
-              <span className="properties__section-label">Border thickness</span>
-              <SidesInputGrid
-                top={{ value: adjuster.borderWidthTop ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthTop: v }) }}
-                right={{ value: adjuster.borderWidthRight ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthRight: v }) }}
-                bottom={{ value: adjuster.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthBottom: v }) }}
-                left={{ value: adjuster.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthLeft: v }) }}
-              />
-            </>
-          ) : (
-            <p className="properties__hint">Border radius/thickness/color only apply to the Slider style.</p>
-          )}
+          <span className="properties__section-label">Border thickness</span>
+          <SidesInputGrid
+            top={{ value: adjuster.borderWidthTop ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthTop: v }) }}
+            right={{ value: adjuster.borderWidthRight ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthRight: v }) }}
+            bottom={{ value: adjuster.borderWidthBottom ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthBottom: v }) }}
+            left={{ value: adjuster.borderWidthLeft ?? 1, min: 0, onChange: (v) => patchAdjuster({ borderWidthLeft: v }) }}
+          />
         </PropertiesSection>
 
-        {adjuster.style === 'knob' && (
-          <PropertiesSection title="Ticks" badge={tickSets.length}>
+        <PropertiesSection title="Rotation">
+          <label className="properties__field">
+            <span>Rotate angle</span>
+            <div className="properties__file-row">
+              {adjuster.rotateAngleExpr !== undefined ? (
+                <span className="properties__hint-inline">Using expression below</span>
+              ) : (
+                <input type="number" value={adjuster.rotateAngle ?? 0} onChange={(e) => patchAdjuster({ rotateAngle: Number(e.target.value) })} />
+              )}
+              {adjuster.rotateAngleExpr !== undefined ? (
+                <button
+                  type="button"
+                  className="color-picker-button__clear"
+                  title="Use a fixed angle instead"
+                  onClick={() => patchAdjuster({ rotateAngleExpr: undefined })}
+                >
+                  ×
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="color-picker-button__fx"
+                  title="Compute the angle with an expression"
+                  onClick={() => patchAdjuster({ rotateAngleExpr: '' })}
+                >
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {adjuster.rotateAngleExpr !== undefined && (
+            <label className="properties__field">
+              <span>Expression</span>
+              <textarea
+                className="properties__code"
+                rows={2}
+                placeholder="return variables.my_variable;"
+                value={adjuster.rotateAngleExpr ?? ''}
+                onChange={(e) => patchAdjuster({ rotateAngleExpr: e.target.value })}
+              />
+            </label>
+          )}
+          <p className="properties__hint">
+            Spins the whole widget in place — the slider AND every one of its own labels together, unlike RockerSwitchWidget/
+            DialSwitchWidget's own rotation, which keeps their widget-level labels upright. Falls back to the fixed angle if the
+            expression is unset or fails to evaluate.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Labels" badge={adjuster.labels.length}>
+          {adjuster.labels.map((label) => (
+            <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+              <LabelFields
+                label={label}
+                backgroundColor={adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
+                onChange={(fields) => patchAdjusterLabel(label.id, fields)}
+                onRemove={() => confirmRemoveAdjusterLabel(label.id)}
+              />
+            </PropertiesSection>
+          ))}
+          <button type="button" className="properties__file-button" onClick={addAdjusterLabel}>
+            + Add label
+          </button>
+        </PropertiesSection>
+
+        <PropertiesSection title="Actions" badge={5}>
+          <EventSequenceEditor
+            title="Press"
+            steps={adjuster.events.press}
+            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, press: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <EventSequenceEditor
+            title="Release"
+            steps={adjuster.events.release}
+            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, release: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <EventSequenceEditor
+            title="Double press"
+            steps={adjuster.events.doublePress ?? []}
+            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, doublePress: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <EventSequenceEditor
+            title="Triple press"
+            steps={adjuster.events.triplePress ?? []}
+            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, triplePress: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <p className="properties__hint">
+            Double/Triple press only engage the double/triple-tap window at all once either has any steps — with both empty, Press
+            fires the instant the drag starts, same as always.
+          </p>
+          <EventSequenceEditor
+            title="Move (while dragging)"
+            steps={adjuster.events.move}
+            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, move: steps } })}
+            dcsBiosActionEnabled={dcsBiosActionEnabled}
+          />
+          <p className="properties__hint">
+            Move fires continuously (throttled) while dragging — <code>variables.$value</code> is the live position ({adjuster.min}–
+            {adjuster.max}). Press/Release fire once each, at the start/end of a drag gesture, with the same{' '}
+            <code>variables.$value</code> available.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Layout">
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={adjuster.x} onChange={(e) => patchAdjuster({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={adjuster.y} onChange={(e) => patchAdjuster({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>W</span>
+              <input type="number" min={minSize} value={adjuster.w} onChange={(e) => patchAdjuster({ w: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+            <label className="properties__field">
+              <span>H</span>
+              <input type="number" min={minSize} value={adjuster.h} onChange={(e) => patchAdjuster({ h: Math.max(minSize, Number(e.target.value)) })} />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={adjuster.zIndex ?? 0} onChange={(e) => patchAdjuster({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={adjuster.visible} visibleExpr={adjuster.visibleExpr} onChange={patchAdjuster} />
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteAdjuster}>
+          Delete widget
+        </button>
+        </div>
+      </aside>
+    )
+  }
+
+  if (widget.type === 'adjuster-knob') {
+    const adjuster = widget
+    const minSize = snapToGrid ? gridSize : 1
+    const isFillExpr = adjuster.fill.colorExpr !== undefined
+    const isTrackExpr = adjuster.track.colorExpr !== undefined
+    const isBorderExpr = adjuster.borderColorExpr !== undefined
+
+    function patchAdjuster(fields: Partial<AdjusterKnobWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === adjuster.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    function patchAdjusterLabel(labelId: string, fields: Partial<WidgetLabel>): void {
+      patchAdjuster({ labels: adjuster.labels.map((l) => (l.id === labelId ? { ...l, ...fields } : l)) })
+    }
+
+    function addAdjusterLabel(): void {
+      patchAdjuster({ labels: [...adjuster.labels, { id: nextId(), text: 'New Label', align: 'center', verticalAlign: 'center' }] })
+    }
+
+    async function confirmRemoveAdjusterLabel(labelId: string): Promise<void> {
+      const ok = await confirm('Remove this label? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchAdjuster({ labels: adjuster.labels.filter((l) => l.id !== labelId) })
+    }
+
+    const tickSets = adjuster.tickSets ?? []
+
+    function patchTickSet(tickSetId: string, fields: Partial<GaugeTickSet>): void {
+      patchAdjuster({ tickSets: tickSets.map((t) => (t.id === tickSetId ? { ...t, ...fields } : t)) })
+    }
+
+    function addTickSet(): void {
+      patchAdjuster({ tickSets: [...tickSets, { id: nextId(), count: 5, showLabels: true }] })
+    }
+
+    async function confirmRemoveTickSet(tickSetId: string): Promise<void> {
+      const ok = await confirm('Remove this tick set? This cannot be undone.', { confirmLabel: 'Remove' })
+      if (ok) patchAdjuster({ tickSets: tickSets.filter((t) => t.id !== tickSetId) })
+    }
+
+    async function handleDeleteAdjuster(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(adjuster.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <div className="properties__scroll">
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[adjuster.type]}</p>
+
+        <PropertiesSection title="Setup">
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Start angle</span>
+              <input type="number" value={adjuster.startAngle ?? 135} onChange={(e) => patchAdjuster({ startAngle: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>End angle</span>
+              <input type="number" value={adjuster.endAngle ?? 405} onChange={(e) => patchAdjuster({ endAngle: Number(e.target.value) })} />
+            </label>
+          </div>
+
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Min</span>
+              <input type="number" value={adjuster.min} onChange={(e) => patchAdjuster({ min: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Max</span>
+              <input type="number" value={adjuster.max} onChange={(e) => patchAdjuster({ max: Number(e.target.value) })} />
+            </label>
+          </div>
+
+          <div className="properties__field">
+            <span>Rest value (optional)</span>
+            <div className="color-picker-button__expr-editor-wrap">
+              <CodeEditor
+                value={adjuster.valueExpr ?? ''}
+                onChange={(code) => patchAdjuster({ valueExpr: code || undefined })}
+                placeholder="return variables.my_variable;"
+                minimal
+              />
+              <button
+                type="button"
+                className="color-picker-button__expand"
+                title="Expand"
+                onClick={() => setAdjusterValueExprExpanded(true)}
+              >
+                ⤢
+              </button>
+            </div>
+          </div>
+          {adjusterValueExprExpanded && (
+            <ExpressionEditorModal
+              value={adjuster.valueExpr ?? ''}
+              onChange={(code) => patchAdjuster({ valueExpr: code || undefined })}
+              placeholder="return variables.my_variable;"
+              onClose={() => setAdjusterValueExprExpanded(false)}
+            />
+          )}
+          <p className="properties__hint">
+            Where the handle sits while not being dragged — e.g. reflect a variable back into the visual. Falls back to Min if unset.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Base circle">
+          <p className="properties__hint">The dial face behind the arc/indicator — border reuses Border color above.</p>
+          <label className="properties__field">
+            <span>Base circle size</span>
+            <input
+              type="number"
+              min={1}
+              value={adjuster.bezelRadius ?? 32}
+              onChange={(e) => patchAdjuster({ bezelRadius: Math.max(1, Number(e.target.value)) })}
+            />
+          </label>
+          <div className="properties__field">
+            <span>Base circle color</span>
+            <ColorPickerButton
+              value={adjuster.bezelColor ?? adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ bezelColor: color })}
+              auto={adjuster.bezelColor === undefined}
+              onAuto={() => patchAdjuster({ bezelColor: undefined })}
+              opacity={adjuster.bezelOpacity ?? 1}
+              onOpacityChange={(v) => patchAdjuster({ bezelOpacity: v })}
+            />
+          </div>
+          <label className="properties__field">
+            <span>Base circle border width</span>
+            <input
+              type="number"
+              min={0}
+              value={adjuster.bezelBorderWidth ?? 0}
+              onChange={(e) => patchAdjuster({ bezelBorderWidth: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+        </PropertiesSection>
+
+        <PropertiesSection title="Inner circle">
+          <label className="properties__field">
+            <span>Inner circle size</span>
+            <input
+              type="number"
+              min={0}
+              value={adjuster.innerBezelRadius ?? 0}
+              onChange={(e) => patchAdjuster({ innerBezelRadius: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <p className="properties__hint">A second circle drawn on top of the base circle. 0 hides it entirely.</p>
+          <div className="properties__field">
+            <span>Inner circle color</span>
+            <ColorPickerButton
+              value={adjuster.innerBezelColor ?? adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ innerBezelColor: color })}
+              auto={adjuster.innerBezelColor === undefined}
+              onAuto={() => patchAdjuster({ innerBezelColor: undefined })}
+              opacity={adjuster.innerBezelOpacity ?? 1}
+              onOpacityChange={(v) => patchAdjuster({ innerBezelOpacity: v })}
+            />
+          </div>
+          <label className="properties__field">
+            <span>Inner circle border width</span>
+            <input
+              type="number"
+              min={0}
+              value={adjuster.innerBezelBorderWidth ?? 0}
+              onChange={(e) => patchAdjuster({ innerBezelBorderWidth: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
+          <div className="properties__field">
+            <span>Inner circle border color</span>
+            <ColorPickerButton
+              value={adjuster.innerBezelBorderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ innerBezelBorderColor: color })}
+            />
+          </div>
+        </PropertiesSection>
+
+        <DialShapeFields
+          value={adjuster}
+          onChange={patchAdjuster}
+          fill={adjuster.fill}
+          onFillChange={(fill) => patchAdjuster({ fill })}
+          track={adjuster.track}
+          needleColorLabel="Needle color"
+        />
+
+        <PropertiesSection title="Colors">
+          <div className="properties__field">
+            <span>Fill color</span>
+            <ColorPickerButton
+              value={adjuster.fill.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ fill: { ...adjuster.fill, color, colorExpr: undefined } })}
+              isExpr={isFillExpr}
+              exprValue={adjuster.fill.colorExpr ?? ''}
+              onExprChange={(code) => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: code } })}
+              onEnterExpr={() => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: adjuster.fill.colorExpr ?? '' } })}
+              onClearExpr={() => patchAdjuster({ fill: { ...adjuster.fill, colorExpr: undefined } })}
+              opacity={adjuster.fill.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchAdjuster({ fill: { ...adjuster.fill, backgroundOpacity: v } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Track color</span>
+            <ColorPickerButton
+              value={adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ track: { ...adjuster.track, color, colorExpr: undefined } })}
+              isExpr={isTrackExpr}
+              exprValue={adjuster.track.colorExpr ?? ''}
+              onExprChange={(code) => patchAdjuster({ track: { ...adjuster.track, colorExpr: code } })}
+              onEnterExpr={() => patchAdjuster({ track: { ...adjuster.track, colorExpr: adjuster.track.colorExpr ?? '' } })}
+              onClearExpr={() => patchAdjuster({ track: { ...adjuster.track, colorExpr: undefined } })}
+              opacity={adjuster.track.backgroundOpacity ?? 1}
+              onOpacityChange={(v) => patchAdjuster({ track: { ...adjuster.track, backgroundOpacity: v } })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={adjuster.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchAdjuster({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={adjuster.borderColorExpr ?? ''}
+              onExprChange={(code) => patchAdjuster({ borderColorExpr: code })}
+              onEnterExpr={() => patchAdjuster({ borderColorExpr: adjuster.borderColorExpr ?? '' })}
+              onClearExpr={() => patchAdjuster({ borderColorExpr: undefined })}
+              opacity={adjuster.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchAdjuster({ borderOpacity: v })}
+            />
+          </div>
+        </PropertiesSection>
+
+        <PropertiesSection title="Ticks" badge={tickSets.length}>
             {tickSets.map((tickSet, i) => (
               <PropertiesSection key={tickSet.id} title={`Tick set ${i + 1}`} sectionKey={tickSet.id}>
                 <div className="properties__grid2">
@@ -4288,8 +4721,7 @@ export function PropertiesPanel(): React.JSX.Element {
             <button type="button" className="properties__file-button" onClick={addTickSet}>
               + Add tick set
             </button>
-          </PropertiesSection>
-        )}
+        </PropertiesSection>
 
         <PropertiesSection title="Rotation">
           <label className="properties__field">
@@ -4334,7 +4766,7 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
           )}
           <p className="properties__hint">
-            Spins the whole widget in place — the knob/slider AND every one of its own labels together, unlike RockerSwitchWidget/
+            Spins the whole widget in place — the knob AND every one of its own labels together, unlike RockerSwitchWidget/
             DialSwitchWidget's own rotation, which keeps their widget-level labels upright. Falls back to the fixed angle if the
             expression is unset or fails to evaluate.
           </p>
@@ -4433,6 +4865,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteAdjuster}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
@@ -4486,6 +4919,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -4750,6 +5184,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteEncoder}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
@@ -4795,6 +5230,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -5029,6 +5465,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteSwitch}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
@@ -5073,6 +5510,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -5796,6 +6234,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteSwitch}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
@@ -5834,6 +6273,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -6122,6 +6562,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteSwitch}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
@@ -6147,6 +6588,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -6317,6 +6759,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteDropdown}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
@@ -6348,6 +6791,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -6398,7 +6842,18 @@ export function PropertiesPanel(): React.JSX.Element {
               min={1}
               max={60}
               value={sc.fps ?? 5}
-              onChange={(e) => patchScreenCapture({ fps: Math.min(60, Math.max(1, Number(e.target.value))) })}
+              // Clamping on every keystroke (rather than on blur) fights
+              // typing a value below the current one's first digit — e.g.
+              // typing "50" over quality's min of 10 momentarily reads "5",
+              // which used to clamp straight to 10 before the second digit
+              // could land. Let onChange pass the raw number through
+              // unclamped (guarding only against a still-empty/NaN field)
+              // and clamp once the field is committed on blur instead.
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchScreenCapture({ fps: n })
+              }}
+              onBlur={(e) => patchScreenCapture({ fps: Math.min(60, Math.max(1, Number(e.target.value) || 1)) })}
             />
           </label>
           <label className="properties__field">
@@ -6408,7 +6863,11 @@ export function PropertiesPanel(): React.JSX.Element {
               min={10}
               max={100}
               value={sc.quality ?? 70}
-              onChange={(e) => patchScreenCapture({ quality: Math.min(100, Math.max(10, Number(e.target.value))) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchScreenCapture({ quality: n })
+              }}
+              onBlur={(e) => patchScreenCapture({ quality: Math.min(100, Math.max(10, Number(e.target.value) || 10)) })}
             />
           </label>
         </PropertiesSection>
@@ -6517,6 +6976,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteScreenCapture}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
@@ -6543,6 +7003,7 @@ export function PropertiesPanel(): React.JSX.Element {
     return (
       <aside className="properties" style={{ width: propertiesWidth }}>
         {resizeHandle}
+        <div className="properties__scroll">
         <div className="properties__header">
           <h2 className="properties__title">Properties</h2>
           <div className="properties__header-actions">
@@ -6661,7 +7122,13 @@ export function PropertiesPanel(): React.JSX.Element {
               min={1}
               max={60}
               value={dv.fps ?? 5}
-              onChange={(e) => patchDcsViewport({ fps: Math.min(60, Math.max(1, Number(e.target.value))) })}
+              // See ScreenCaptureWidget's own FPS field for why clamping
+              // moved from onChange to onBlur.
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchDcsViewport({ fps: n })
+              }}
+              onBlur={(e) => patchDcsViewport({ fps: Math.min(60, Math.max(1, Number(e.target.value) || 1)) })}
             />
           </label>
           <label className="properties__field">
@@ -6671,7 +7138,11 @@ export function PropertiesPanel(): React.JSX.Element {
               min={10}
               max={100}
               value={dv.quality ?? 70}
-              onChange={(e) => patchDcsViewport({ quality: Math.min(100, Math.max(10, Number(e.target.value))) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchDcsViewport({ quality: n })
+              }}
+              onBlur={(e) => patchDcsViewport({ quality: Math.min(100, Math.max(10, Number(e.target.value) || 10)) })}
             />
           </label>
           <label className="properties__checkbox">
@@ -6801,6 +7272,7 @@ export function PropertiesPanel(): React.JSX.Element {
         <button className="properties__delete" onClick={handleDeleteDcsViewport}>
           Delete widget
         </button>
+        </div>
       </aside>
     )
   }
@@ -6947,6 +7419,7 @@ export function PropertiesPanel(): React.JSX.Element {
   return (
     <aside className="properties" style={{ width: propertiesWidth }}>
       {resizeHandle}
+      <div className="properties__scroll">
       <div className="properties__header">
         <h2 className="properties__title">Properties</h2>
         <div className="properties__header-actions">
@@ -7474,6 +7947,7 @@ export function PropertiesPanel(): React.JSX.Element {
       <button className="properties__delete" onClick={handleDelete}>
         Delete widget
       </button>
+      </div>
     </aside>
   )
 }

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { findSubDeck, findWidgetAnywhere, getSubDeckWidgets, setSubDeckWidgets } from './subDecks'
-import type { Dashboard, GaugeWidget, SubDeck } from './types'
+import type { BarGaugeWidget, Dashboard, SubDeck } from './types'
 
-function widget(id: string): GaugeWidget {
+function widget(id: string): BarGaugeWidget {
   return {
     id,
-    type: 'gauge',
+    type: 'gauge-bar',
     x: 0,
     y: 0,
     w: 10,
@@ -13,18 +13,17 @@ function widget(id: string): GaugeWidget {
     valueExpr: '',
     min: 0,
     max: 1,
-    style: 'bar',
     fill: {},
     track: {},
     labels: []
   }
 }
 
-function subDeck(id: string, widgets: GaugeWidget[]): SubDeck {
+function subDeck(id: string, widgets: BarGaugeWidget[]): SubDeck {
   return { id, name: id, widgets }
 }
 
-function dashboard(mainWidgets: GaugeWidget[], subDecks: SubDeck[]): Dashboard {
+function dashboard(mainWidgets: BarGaugeWidget[], subDecks: SubDeck[]): Dashboard {
   return {
     id: 'd1',
     name: 'Test',

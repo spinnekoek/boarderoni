@@ -152,23 +152,37 @@ function extractButtonStyle(widget: { states: WidgetState[] }) {
   return { states: styleStates(widget.states) }
 }
 
-function extractGaugeStyle(widget: Extract<Widget, { type: 'gauge' }>) {
+function extractBarGaugeStyle(widget: Extract<Widget, { type: 'gauge-bar' }>) {
   return {
-    ...pick(widget, ['style', 'orientation', 'startAngle', 'endAngle', 'fill', 'track', ...BOX_BORDER_KEYS] as const),
+    ...pick(widget, ['orientation', 'fill', 'track', ...BOX_BORDER_KEYS] as const),
     labels: styleLabels(widget.labels)
   }
 }
 
-function extractAdjusterStyle(widget: Extract<Widget, { type: 'adjuster' }>) {
+function extractArcGaugeStyle(widget: Extract<Widget, { type: 'gauge-arc' }>) {
+  return {
+    ...pick(widget, ['startAngle', 'endAngle', 'fill', 'track'] as const),
+    labels: styleLabels(widget.labels)
+  }
+}
+
+function extractAdjusterSliderStyle(widget: Extract<Widget, { type: 'adjuster-slider' }>) {
+  return {
+    ...pick(widget, ['orientation', 'fill', 'track', ...BOX_BORDER_KEYS] as const),
+    labels: styleLabels(widget.labels)
+  }
+}
+
+function extractAdjusterKnobStyle(widget: Extract<Widget, { type: 'adjuster-knob' }>) {
   return {
     ...pick(widget, [
-      'style',
-      'orientation',
       'startAngle',
       'endAngle',
       'fill',
       'track',
-      ...BOX_BORDER_KEYS,
+      'borderColor',
+      'borderColorExpr',
+      'borderOpacity',
       ...DIAL_SHAPE_KEYS,
       'bezelRadius',
       'bezelColor',
@@ -280,10 +294,14 @@ export function extractWidgetStyle(widget: Widget): StyleClipboardEntry {
     case 'button':
     case 'morph':
       return { widgetType: widget.type, data: extractButtonStyle(widget) }
-    case 'gauge':
-      return { widgetType: widget.type, data: extractGaugeStyle(widget) }
-    case 'adjuster':
-      return { widgetType: widget.type, data: extractAdjusterStyle(widget) }
+    case 'gauge-bar':
+      return { widgetType: widget.type, data: extractBarGaugeStyle(widget) }
+    case 'gauge-arc':
+      return { widgetType: widget.type, data: extractArcGaugeStyle(widget) }
+    case 'adjuster-slider':
+      return { widgetType: widget.type, data: extractAdjusterSliderStyle(widget) }
+    case 'adjuster-knob':
+      return { widgetType: widget.type, data: extractAdjusterKnobStyle(widget) }
     case 'encoder':
       return { widgetType: widget.type, data: extractEncoderStyle(widget) }
     case 'switch-rocker':
@@ -312,12 +330,20 @@ export function applyWidgetStyle(widget: Widget, entry: StyleClipboardEntry): Wi
       const { states } = entry.data as ReturnType<typeof extractButtonStyle>
       return { ...widget, states: applyStateStyles(widget.states, states) }
     }
-    case 'gauge': {
-      const { labels, ...rest } = entry.data as ReturnType<typeof extractGaugeStyle>
+    case 'gauge-bar': {
+      const { labels, ...rest } = entry.data as ReturnType<typeof extractBarGaugeStyle>
       return { ...widget, ...rest, labels: applyLabelStyles(widget.labels, labels) }
     }
-    case 'adjuster': {
-      const { labels, ...rest } = entry.data as ReturnType<typeof extractAdjusterStyle>
+    case 'gauge-arc': {
+      const { labels, ...rest } = entry.data as ReturnType<typeof extractArcGaugeStyle>
+      return { ...widget, ...rest, labels: applyLabelStyles(widget.labels, labels) }
+    }
+    case 'adjuster-slider': {
+      const { labels, ...rest } = entry.data as ReturnType<typeof extractAdjusterSliderStyle>
+      return { ...widget, ...rest, labels: applyLabelStyles(widget.labels, labels) }
+    }
+    case 'adjuster-knob': {
+      const { labels, ...rest } = entry.data as ReturnType<typeof extractAdjusterKnobStyle>
       return { ...widget, ...rest, labels: applyLabelStyles(widget.labels, labels) }
     }
     case 'encoder': {

@@ -7,6 +7,10 @@
 interface BoarderoniAndroidBridge {
   setKeepScreenOn: (enabled: boolean) => void
   changeServer: () => void
+  // TEMP DEBUG LOGGING — see MainActivity.kt's dlog()/setDebugLogging. Remove
+  // this and setDebugLogging below once the spinner/reconnect bug is
+  // diagnosed.
+  setDebugLogging: (enabled: boolean) => void
 }
 
 declare global {
@@ -29,4 +33,12 @@ export function setKeepScreenOn(enabled: boolean): void {
 // floating button.
 export function changeServer(): void {
   window.BoarderoniAndroid?.changeServer()
+}
+
+// TEMP DEBUG LOGGING — see the interface comment above. Optional-called
+// (not just optional-accessed) so a WebView still running an older APK
+// build that predates this bridge method degrades to a silent no-op
+// instead of throwing "setDebugLogging is not a function".
+export function setDebugLogging(enabled: boolean): void {
+  window.BoarderoniAndroid?.setDebugLogging?.(enabled)
 }

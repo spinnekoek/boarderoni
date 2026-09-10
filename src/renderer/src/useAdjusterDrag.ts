@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useDashboardStore } from './store'
 import { resolveNumericExpr, type VariableMap } from '@shared/expr'
-import type { AdjusterWidget } from '@shared/types'
+import type { AdjusterKnobWidget, AdjusterSliderWidget } from '@shared/types'
+
+type AdjusterWidget = AdjusterSliderWidget | AdjusterKnobWidget
 import { useMultiPressArbiter } from './useMultiPressArbiter'
 
 // How close the widget's own resolved rest value (see valueExpr below) has
@@ -55,7 +57,7 @@ function knobAngleFromEvent(e: React.PointerEvent, rect: DOMRect, rotateAngle: n
 // ever used for the touch-down sample (tap directly on the arc to jump the
 // handle there) — see knobDeltaFraction below for every sample after that.
 function fractionFromEvent(widget: AdjusterWidget, e: React.PointerEvent, rect: DOMRect, rotateAngle: number): number {
-  if (widget.style === 'knob') {
+  if (widget.type === 'adjuster-knob') {
     const angleDeg = knobAngleFromEvent(e, rect, rotateAngle)
     const startAngle = widget.startAngle ?? DEFAULT_START_ANGLE
     const endAngle = widget.endAngle ?? DEFAULT_END_ANGLE
@@ -117,7 +119,7 @@ function fractionFromEvent(widget: AdjusterWidget, e: React.PointerEvent, rect: 
 // treats delta as 0 — the caller is expected to seed lastAngleRef from this
 // same sample instead of calling this before there's a previous one.
 function knobDeltaFraction(
-  widget: AdjusterWidget,
+  widget: AdjusterKnobWidget,
   angle: number,
   previousAngle: number | null,
   previousVirtual: number
@@ -266,7 +268,7 @@ export function useAdjusterDrag(
   // comment); slider style has no dead zone to worry about, so it stays on
   // the plain absolute mapping.
   function nextFraction(e: React.PointerEvent, rect: DOMRect): number {
-    if (widget.style !== 'knob') return fractionFromEvent(widget, e, rect, rotateAngle)
+    if (widget.type !== 'adjuster-knob') return fractionFromEvent(widget, e, rect, rotateAngle)
     const angle = knobAngleFromEvent(e, rect, rotateAngle)
     const { fraction, virtualFraction } = knobDeltaFraction(widget, angle, lastAngleRef.current, virtualFractionRef.current)
     lastAngleRef.current = angle
@@ -290,7 +292,7 @@ export function useAdjusterDrag(
     // itself is always accepted as-is — knobDeltaFraction only takes over
     // from the very next sample (lastAngleRef/virtualFractionRef seeded here
     // are that baseline).
-    if (widget.style === 'knob') {
+    if (widget.type === 'adjuster-knob') {
       lastAngleRef.current = knobAngleFromEvent(e, rect, rotateAngle)
       virtualFractionRef.current = fraction
     }

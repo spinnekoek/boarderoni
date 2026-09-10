@@ -36,6 +36,17 @@ off as they're fixed; add new ones as they come up.
       panel's console.log sink too, unless it only ever runs server-side
       (main process, no debug panel to show it in).
 
+## Event sources
+
+- [x] Let a variable-mapping `expr` set other variables too, not just its own
+      `mapping.variableName` — implemented (2026-09-07) in both
+      `applyRestIncoming` and the plugin producer tick handler
+      (`main/index.ts`): an expr returning a plain object now merges wholesale
+      into the update batch (same convention as `runUpdateState`'s Update
+      state action), while a scalar return still targets just
+      `mapping.variableName` as before. `mapping.variableName` is now
+      optional when the expr returns an object.
+
 ## Performance
 
 - [ ] Investigate responsiveness slowdown when there are a lot of items —
@@ -46,22 +57,28 @@ off as they're fixed; add new ones as they come up.
 
 ## Bugs
 
-- [ ] Android: switching decks via the 5-finger gesture modal
-      (`MobileAppModal.tsx`, opened from `ViewCanvas.tsx` — see its 5-finger
-      touch handling) doesn't show the deck list. Needs reproduction on an
-      actual Android device to narrow down (state not loading? list
-      rendering empty? gesture opening the wrong view?).
-- [ ] Properties panel's drag-to-resize handle only grabs while the panel is
-      scrolled to the top. Root cause: `.properties__resize-handle`
-      (styles.css) is `position: absolute; top: 0; height: 100%` inside
-      `.properties` itself, which is also the scrolling element
-      (`overflow-y: auto`) — so the handle scrolls away with the content
-      instead of staying pinned to the visible edge. Fix likely means
-      splitting `.properties` into a fixed-position outer wrapper (holding
-      `resizeHandle`) and an inner scrollable content div, which every widget
-      type's own render branch in `PropertiesPanel.tsx` would need updating
-      for (currently ~14 duplicated `<aside className="properties">
-      {resizeHandle}...` call sites).
+- [x] Android: switching decks via the 5-finger gesture modal doesn't show
+      the deck list — fixed (2026-09-10). Root cause: the gesture actually
+      opens `DeviceSettingsModal.tsx` (not `MobileAppModal.tsx`, which is
+      just the editor's APK-install QR modal), whose "Change deck" button
+      calls `disconnect()` in `store.ts`. `disconnect()` reset to the picker
+      but never called `connectLobby()`, so if the app launched straight
+      into a remembered deck (the common case), no lobby connection ever
+      existed to deliver a `decks:list` message — same failure mode the
+      `DECK_CLOSE_CODE_UNKNOWN` close handler already worked around.
+      `disconnect()` now calls `get().connectLobby()` when `mode === 'view'`,
+      matching that handler.
+- [x] Properties panel's drag-to-resize handle only grabbed while the panel
+      was scrolled to the top — fixed (2026-09-10). Split `.properties` into
+      a non-scrolling outer `<aside>` (holds `resizeHandle`, pinned to the
+      edge) and a new `.properties__scroll` inner div (holds everything
+      else, scrolls independently) in `PropertiesPanel.tsx`/`styles.css`,
+      applied across all 16 call sites.
+- [ ] Device approval/remembering is flaky — sometimes an already-approved
+      device isn't remembered and has to be re-approved. Not yet reproduced
+      or scoped; likely area is `src/main/deviceApproval.ts` (device
+      persistence) and how `approvedDevices`/`devices` get read back on
+      reconnect (`store.ts`).
 
 ## Packaging (not yet started)
 
@@ -74,6 +91,24 @@ off as they're fixed; add new ones as they come up.
       non-elevated boarderoni due to Windows UIPI — both processes need to be
       at the same integrity level for macros to reach the game.
 
+## Data model
+
+- [x] Split `GaugeWidget` into two separate widget types — implemented
+      (2026-09-07): `BarGaugeWidget` (`type: 'gauge-bar'`)/`ArcGaugeWidget`
+      (`type: 'gauge-arc'`) in `shared/types.ts`, each carrying only its own
+      fields (no more shared `style: 'bar' | 'arc'` toggle). Migration in
+      `main/index.ts` (`migrateGaugeWidget`) converts an old saved `type:
+      'gauge'` + `style` into the right new type. Palette/PropertiesPanel/
+      rendering/clipboard/style-copy all updated; `PROPERTIES_PANEL.md` has
+      separate Bar Gauge/Arc Gauge entries.
+- [x] Same split for `AdjusterWidget` — implemented (2026-09-07):
+      `AdjusterSliderWidget` (`type: 'adjuster-slider'`)/`AdjusterKnobWidget`
+      (`type: 'adjuster-knob'`, still `extends DialShapeStyle`) in
+      `shared/types.ts`, no more shared `style: 'slider' | 'knob'` toggle.
+      Migration in `main/index.ts` (`migrateAdjusterWidget`). Same touch
+      points as the Gauge split above; `PROPERTIES_PANEL.md` has separate
+      Slider/Knob entries.
+
 ## Features to investigate
 
 - [ ] Design a deck at one resolution and have it scale down cleanly for
@@ -83,19 +118,7 @@ off as they're fixed; add new ones as they come up.
       lines/thin widgets are a known trouble spot at non-native scale, see
       the letterbox-thin-widgets note) and whether per-widget or
       per-resolution overrides are needed on top of straight scaling.
-- [ ] Widget grouping — group/ungroup selected widgets via the canvas
-      right-click menu. Scoped to NOT support resizing a group (moving only)
-      to keep this tractable. Feasibility check (2026-09-03): selection,
-      multi-widget drag-as-a-unit, multi-delete/z-order, and context menu
-      wiring already exist and are directly reusable (`selectedWidgetIds`,
-      `removeWidgets`/`bringToFront`/`sendToBack` already take arrays,
-      `useWidgetDrag` already moves a whole selection by one delta). The
-      widget model (`shared/types.ts`) is currently strictly flat — no
-      parent/child/group concept anywhere — so this needs a data-model
-      addition (`groupId` tag vs. a real container entity) threaded through
-      `types.ts`, save/load migration, export, and subdeck logic
-      (`shared/subDecks.ts`). Undo/history should come for free via the
-      existing `updateWidgets`/`recordBeforeMutation` path. Resize stays
-      hard-gated to a single selected widget with no bounding-box
-      abstraction — deliberately out of scope here since building that is
-      the one piece that isn't a reuse of existing code.
+- [x] Widget grouping — implemented (2026-09-07): move-only groups via
+      `groupId` on `WidgetVisibility`, group/ungroup from the canvas
+      right-click menu, click-to-select-whole-group with re-click-to-drill-in.
+      No group resize/bounding-box UI, per the original scope.

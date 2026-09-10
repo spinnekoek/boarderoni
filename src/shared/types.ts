@@ -415,6 +415,16 @@ export interface WidgetState extends BoxAppearance, ColorAppearance {
 export interface WidgetVisibility {
   visible?: boolean
   visibleExpr?: string
+  // Move-only grouping (see the "Widget grouping" feature) — widgets sharing
+  // the same groupId move together as a unit when any one of them is
+  // dragged (see useWidgetDrag.ts/store.ts's selectWidget), and select
+  // together on a fresh click. At most one groupId per widget — no nested/
+  // overlapping groups. Every Widget union member extends this interface, so
+  // this is the one shared spot that covers all grouped-capable widget types
+  // without threading a new field through each one individually. Undefined
+  // (the default, and every dashboard saved before this existed) means "not
+  // in a group" — ordinary single-widget select/drag, unchanged.
+  groupId?: string
 }
 
 export interface ButtonWidget extends WidgetVisibility {
@@ -599,9 +609,9 @@ export interface GaugeTickSet {
   labelTextExpr?: string
 }
 
-export interface GaugeWidget extends WidgetVisibility {
+export interface BarGaugeWidget extends WidgetVisibility {
   id: string
-  type: 'gauge'
+  type: 'gauge-bar'
   x: number
   y: number
   w: number
@@ -612,34 +622,71 @@ export interface GaugeWidget extends WidgetVisibility {
   valueExpr: string
   min: number
   max: number
-  style: 'bar' | 'arc'
-  orientation?: 'horizontal' | 'vertical' // bar only, default 'horizontal'
-  startAngle?: number // arc only, degrees, default 135
-  endAngle?: number // arc only, degrees, default 405 (270° sweep)
+  orientation?: 'horizontal' | 'vertical' // default 'horizontal'
+  fill: ColorAppearance
+  track: ColorAppearance
+  labels: WidgetLabel[]
+  // The whole widget's own backing fill, behind track/fill alike. Unset (the
+  // default) is fully transparent, same "skip withOpacity entirely rather
+  // than resolve a literal 'transparent'" convention as WidgetLabel's own
+  // backgroundColor in labels.tsx.
+  backgroundColor?: string
+  backgroundOpacity?: number
+  // A rectangle has corners/sides to round/border, same as BoxAppearance's
+  // own radius/border fields, so the properties panel can reuse
+  // CornersInputGrid/SidesInputGrid as-is.
+  radiusTopLeft?: number
+  radiusTopRight?: number
+  radiusBottomLeft?: number
+  radiusBottomRight?: number
+  borderWidthTop?: number
+  borderWidthRight?: number
+  borderWidthBottom?: number
+  borderWidthLeft?: number
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+  zIndex?: number
+}
+
+export interface ArcGaugeWidget extends WidgetVisibility {
+  id: string
+  type: 'gauge-arc'
+  x: number
+  y: number
+  w: number
+  h: number
+  // JS function body (see resolveNumericExpr in shared/expr.ts), `variables`
+  // in scope, must return a number — any other outcome (throw, wrong type,
+  // NaN/Infinity) falls back to `min`.
+  valueExpr: string
+  min: number
+  max: number
+  startAngle?: number // degrees, default 135
+  endAngle?: number // degrees, default 405 (270° sweep)
   fill: ColorAppearance
   track: ColorAppearance
   labels: WidgetLabel[]
   // The whole widget's own backing fill, behind track/fill/ticks/indicator
-  // alike — Bar and Arc both. Unset (the default) is fully transparent, same
-  // "skip withOpacity entirely rather than resolve a literal 'transparent'"
-  // convention as WidgetLabel.backgroundColor in labels.tsx.
+  // alike. Unset (the default) is fully transparent, same "skip withOpacity
+  // entirely rather than resolve a literal 'transparent'" convention as
+  // WidgetLabel.backgroundColor in labels.tsx.
   backgroundColor?: string
   backgroundOpacity?: number
-  // Arc style only. When the sweep is less than a full circle, the arc's
-  // own bounding box (not the full circle it's a slice of) is fit to the
-  // widget's box — see arcBoundsUnit in arcPath.ts — so e.g. a single
-  // quarter-circle sweep fills the whole widget instead of sitting tiny in
-  // one corner of a viewBox sized for the full circle, with the true center
-  // landing wherever that bounding box puts it (the opposite corner from
-  // the missing sweep). Tick marks/labels are deliberately excluded from
-  // that fit — they're allowed to extend past the widget's own edges rather
-  // than shrinking the arc further to make room for them.
+  // When the sweep is less than a full circle, the arc's own bounding box
+  // (not the full circle it's a slice of) is fit to the widget's box — see
+  // arcBoundsUnit in arcPath.ts — so e.g. a single quarter-circle sweep
+  // fills the whole widget instead of sitting tiny in one corner of a
+  // viewBox sized for the full circle, with the true center landing
+  // wherever that bounding box puts it (the opposite corner from the
+  // missing sweep). Tick marks/labels are deliberately excluded from that
+  // fit — they're allowed to extend past the widget's own edges rather than
+  // shrinking the arc further to make room for them.
   tickSets?: GaugeTickSet[]
-  // Arc style only — a needle pointing at the current value, drawn with the
-  // same needlePoints math DialSwitchWidget's own needle uses. Off by
-  // default (the arc fill already shows the value), so an existing
-  // dashboard's gauge renders unchanged until this is deliberately turned
-  // on.
+  // A needle pointing at the current value, drawn with the same
+  // needlePoints math DialSwitchWidget's own needle uses. Off by default
+  // (the arc fill already shows the value), so an existing dashboard's
+  // gauge renders unchanged until this is deliberately turned on.
   showIndicator?: boolean
   // Overrides showIndicator when set — same convention as
   // WidgetVisibility.visibleExpr/ToggleSwitchWidget.guardOpenExpr (see
@@ -670,22 +717,6 @@ export interface GaugeWidget extends WidgetVisibility {
   indicatorCenterColor?: string
   indicatorCenterBorderColor?: string
   indicatorCenterBorderWidth?: number
-  // Bar style only — an arc has no rectangular box to round/border, so these
-  // are hidden from the properties panel (and not applied to the outer
-  // container) whenever style is 'arc'. Per-corner/per-side, same as
-  // BoxAppearance's own radius/border fields, so the properties panel can
-  // reuse CornersInputGrid/SidesInputGrid as-is.
-  radiusTopLeft?: number
-  radiusTopRight?: number
-  radiusBottomLeft?: number
-  radiusBottomRight?: number
-  borderWidthTop?: number
-  borderWidthRight?: number
-  borderWidthBottom?: number
-  borderWidthLeft?: number
-  borderColor?: string
-  borderColorExpr?: string
-  borderOpacity?: number
   zIndex?: number
 }
 
@@ -697,17 +728,14 @@ export interface GaugeWidget extends WidgetVisibility {
 // evaluateMappingExpression in shared/expr.ts, the same convention an
 // PluginMapping's own `expr` already uses) for whichever expression
 // field the chosen action kind reads.
-export interface AdjusterWidget extends DialShapeStyle, WidgetVisibility {
+export interface AdjusterSliderWidget extends WidgetVisibility {
   id: string
-  type: 'adjuster'
+  type: 'adjuster-slider'
   x: number
   y: number
   w: number
   h: number
-  style: 'slider' | 'knob'
-  orientation?: 'horizontal' | 'vertical' // slider only, default 'vertical'
-  startAngle?: number // knob only, degrees, default 135
-  endAngle?: number // knob only, degrees, default 405
+  orientation?: 'horizontal' | 'vertical' // default 'vertical'
   min: number
   max: number
   // Rest-position fallback for the handle while not being dragged (e.g.
@@ -733,14 +761,14 @@ export interface AdjusterWidget extends DialShapeStyle, WidgetVisibility {
   fill: ColorAppearance
   track: ColorAppearance
   labels: WidgetLabel[]
-  // Slider style only — the little draggable handle. 'none' hides it
-  // entirely (e.g. a board that wants just the fill level to read as
-  // position, no separate knob). handleColor unset falls back to `fill`'s
-  // own resolved color (what every existing dashboard already looks like),
-  // and handleBorderColor unset means no visible border (0 width/transparent,
-  // same "always present, defaults to invisible" convention as
-  // innerBezelBorderColor above) — so a dashboard saved before these fields
-  // existed renders completely unchanged.
+  // The little draggable handle. 'none' hides it entirely (e.g. a board
+  // that wants just the fill level to read as position, no separate knob).
+  // handleColor unset falls back to `fill`'s own resolved color (what every
+  // existing dashboard already looks like), and handleBorderColor unset
+  // means no visible border (0 width/transparent, same "always present,
+  // defaults to invisible" convention as innerBezelBorderColor on the knob
+  // variant) — so a dashboard saved before these fields existed renders
+  // completely unchanged.
   handleShape?: 'circle' | 'square' | 'none'
   handleSize?: number
   handleColor?: string
@@ -748,8 +776,8 @@ export interface AdjusterWidget extends DialShapeStyle, WidgetVisibility {
   handleBorderColor?: string
   handleBorderWidth?: number
   handleBorderOpacity?: number
-  // Slider style only — a knob has no rectangular box to round/border, same
-  // reasoning as GaugeWidget's own radius/border fields above.
+  // A rectangle has corners/sides to round/border, same as BoxAppearance's
+  // own radius/border fields.
   radiusTopLeft?: number
   radiusTopRight?: number
   radiusBottomLeft?: number
@@ -761,22 +789,76 @@ export interface AdjusterWidget extends DialShapeStyle, WidgetVisibility {
   borderColor?: string
   borderColorExpr?: string
   borderOpacity?: number
-  // Knob style only — the dial FACE circle behind the arc/indicator, since
-  // this widget (unlike EncoderWidget/DialSwitchWidget, which always draw
-  // one) previously had none at all — just the arc floating on the widget's
-  // own transparent background. Border reuses `borderColor` above rather
-  // than adding a separate field for it — a knob has no rectangular box
-  // border of its own to conflict with (that field is otherwise slider-
-  // only), so there's no ambiguity in sharing it; only the circle's own
-  // border WIDTH needs a dedicated field, since borderWidthTop/Right/Bottom/
-  // Left above are genuinely slider-only (a circle has no separate sides).
-  // bezelColor unset falls back to `track`'s own color (so an existing
-  // dashboard's knob doesn't suddenly grow a differently-colored circle
-  // behind the arc) but stays independently overridable/opaque via
-  // bezelColor/bezelOpacity, unlike border which always shares borderColor
-  // outright. Default radius sits comfortably inside the arc's own inner
-  // edge (see AdjusterWidget.tsx) so it reads as a face the arc rings
-  // around, not something the arc's own stroke overlaps.
+  // Spins the WHOLE widget in place around its own center — degrees,
+  // clockwise, 0 is unrotated — same convention as ButtonWidget's own
+  // rotateAngle, and deliberately the same "everything rotates together"
+  // choice that one makes rather than RockerSwitchWidget/DialSwitchWidget's
+  // own (which keep their widget-level `labels` upright as a legend/title):
+  // this widget's own `labels` above are rendered inside the same rotated
+  // element, so there's no separate always-upright layer to carve out here.
+  rotateAngle?: number
+  // Overrides rotateAngle with a live expression (degrees, same convention)
+  // when set — e.g. tying the tilt to a variable instead of a fixed value.
+  // Falls back to rotateAngle if unset or unresolved.
+  rotateAngleExpr?: string
+  zIndex?: number
+}
+
+export interface AdjusterKnobWidget extends DialShapeStyle, WidgetVisibility {
+  id: string
+  type: 'adjuster-knob'
+  x: number
+  y: number
+  w: number
+  h: number
+  startAngle?: number // degrees, default 135
+  endAngle?: number // degrees, default 405
+  min: number
+  max: number
+  // Rest-position fallback for the handle while not being dragged (e.g.
+  // reflect a variable back into the visual) — same mechanism as Gauge's
+  // valueExpr. Falls back to `min` if unset/unresolved.
+  valueExpr?: string
+  // Same press/release model as ButtonWidget, plus 'move' — fires
+  // continuously (throttled) while dragging, with the live position exposed
+  // as `variables.$value` same as press/release get for their own moment
+  // (initial touch position for press, final settled position for release).
+  // doublePress/triplePress follow the exact same optIN-by-being-non-empty
+  // convention as ButtonWidget.events' own (see its comment) — arbitrating
+  // the initial touch-down doesn't affect the continuous 'move' stream or
+  // 'release' at all, only whether that first touch reports itself as
+  // press/doublePress/triplePress.
+  events: {
+    press: SequenceStep[]
+    release: SequenceStep[]
+    move: SequenceStep[]
+    doublePress: SequenceStep[]
+    triplePress: SequenceStep[]
+  }
+  fill: ColorAppearance
+  track: ColorAppearance
+  labels: WidgetLabel[]
+  // A knob has no rectangular box of its own to round/border, but DOES have
+  // its own circular face (bezelRadius etc. below) — border reuses these
+  // fields rather than adding a separate one, since a knob has no
+  // rectangular box border of its own to conflict with them (they're
+  // otherwise Slider-only on that variant).
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+  // The dial FACE circle behind the arc/indicator, since this widget
+  // (unlike EncoderWidget/DialSwitchWidget, which always draw one)
+  // previously had none at all — just the arc floating on the widget's own
+  // transparent background. Border reuses `borderColor` above rather than
+  // adding a separate field for it — see that field's own comment; only the
+  // circle's own border WIDTH needs a dedicated field, since a circle has
+  // no separate sides. bezelColor unset falls back to `track`'s own color
+  // (so an existing dashboard's knob doesn't suddenly grow a differently-
+  // colored circle behind the arc) but stays independently overridable/
+  // opaque via bezelColor/bezelOpacity, unlike border which always shares
+  // borderColor outright. Default radius sits comfortably inside the arc's
+  // own inner edge (see AdjusterWidget.tsx) so it reads as a face the arc
+  // rings around, not something the arc's own stroke overlaps.
   bezelRadius?: number
   bezelColor?: string
   bezelOpacity?: number
@@ -790,11 +872,11 @@ export interface AdjusterWidget extends DialShapeStyle, WidgetVisibility {
   innerBezelOpacity?: number
   innerBezelBorderColor?: string
   innerBezelBorderWidth?: number
-  // Knob style only — same shared shape/marks-plus-labels vocabulary as
-  // GaugeWidget's own tickSets, since a knob has the same bounded
-  // startAngle..endAngle/min..max range an arc gauge does (unlike
-  // EncoderWidget's own EncoderTickSet, which is label-less because that
-  // widget has no such range). See renderTickSet in widgets/tickSet.tsx.
+  // Same shared shape/marks-plus-labels vocabulary as GaugeWidget's own
+  // tickSets, since a knob has the same bounded startAngle..endAngle/
+  // min..max range an arc gauge does (unlike EncoderWidget's own
+  // EncoderTickSet, which is label-less because that widget has no such
+  // range). See renderTickSet in widgets/tickSet.tsx.
   tickSets?: GaugeTickSet[]
   // Spins the WHOLE widget in place around its own center — degrees,
   // clockwise, 0 is unrotated — same convention as ButtonWidget's own
@@ -1760,8 +1842,10 @@ export interface LineWidget extends WidgetVisibility {
 export type Widget =
   | ButtonWidget
   | MorphButtonWidget
-  | GaugeWidget
-  | AdjusterWidget
+  | BarGaugeWidget
+  | ArcGaugeWidget
+  | AdjusterSliderWidget
+  | AdjusterKnobWidget
   | EncoderWidget
   | RockerSwitchWidget
   | DialSwitchWidget
@@ -1777,8 +1861,10 @@ export type Widget =
 // CanvasWidget's generalized drag/resize wrapper.
 export type BoxWidget =
   | ButtonWidget
-  | GaugeWidget
-  | AdjusterWidget
+  | BarGaugeWidget
+  | ArcGaugeWidget
+  | AdjusterSliderWidget
+  | AdjusterKnobWidget
   | EncoderWidget
   | RockerSwitchWidget
   | DialSwitchWidget
@@ -1805,7 +1891,7 @@ export type StatefulWidget = ButtonWidget | MorphButtonWidget
 // own narrowing convention immediately above. DropdownWidget is excluded for
 // the same reason PLUS it has its own press/release, unlike the switches —
 // see its own comment and triggerAction's dropdown branch.
-export type EventfulWidget = ButtonWidget | MorphButtonWidget | AdjusterWidget | EncoderWidget
+export type EventfulWidget = ButtonWidget | MorphButtonWidget | AdjusterSliderWidget | AdjusterKnobWidget | EncoderWidget
 
 // The three switch widget types, narrowed together wherever code (triggerAction,
 // the properties panel's shared positions editor, ...) treats them

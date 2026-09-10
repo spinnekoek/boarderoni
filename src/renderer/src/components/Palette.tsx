@@ -5,13 +5,15 @@ import { DEFAULT_WIDGET_COLOR } from '@shared/color'
 import { isWidgetTypeGatedByDisabledPlugin } from '@shared/plugins'
 import { nextId } from '../id'
 import type {
-  AdjusterWidget,
+  AdjusterSliderWidget,
+  AdjusterKnobWidget,
   ButtonWidget,
   DcsViewportWidget,
   DialSwitchWidget,
   DropdownWidget,
   EncoderWidget,
-  GaugeWidget,
+  BarGaugeWidget,
+  ArcGaugeWidget,
   LabelWidget,
   LineWidget,
   MorphButtonWidget,
@@ -94,11 +96,11 @@ export function Palette(): React.JSX.Element {
     selectWidget(widget.id)
   }
 
-  function handleAddGauge(): void {
+  function handleAddBarGauge(): void {
     const pos = spawnPosition()
-    const widget: GaugeWidget = {
+    const widget: BarGaugeWidget = {
       id: nextId(),
-      type: 'gauge',
+      type: 'gauge-bar',
       x: pos.x,
       y: pos.y,
       w: 160,
@@ -106,15 +108,11 @@ export function Palette(): React.JSX.Element {
       valueExpr: 'return variables.my_variable ?? 0;',
       min: 0,
       max: 100,
-      style: 'bar',
       orientation: 'horizontal',
       fill: { color: '#5b8def' },
       // Left unset, not DEFAULT_WIDGET_COLOR — GaugeWidgetContent's own
-      // trackColor fallback already resolves to that same value for 'bar'
-      // (no visual change here), but leaves the arc-specific gray default
-      // free to apply if this gauge is later switched to 'arc' in the
-      // properties panel, rather than an explicit value permanently
-      // shadowing it.
+      // trackColor fallback already resolves to that same value (no visual
+      // change here).
       track: {},
       labels: []
     }
@@ -122,17 +120,56 @@ export function Palette(): React.JSX.Element {
     selectWidget(widget.id)
   }
 
-  function handleAddAdjuster(): void {
+  function handleAddArcGauge(): void {
     const pos = spawnPosition()
-    const widget: AdjusterWidget = {
+    const widget: ArcGaugeWidget = {
       id: nextId(),
-      type: 'adjuster',
+      type: 'gauge-arc',
+      x: pos.x,
+      y: pos.y,
+      w: 120,
+      h: 120,
+      valueExpr: 'return variables.my_variable ?? 0;',
+      min: 0,
+      max: 100,
+      fill: { color: '#5b8def' },
+      track: {},
+      labels: []
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
+  function handleAddSlider(): void {
+    const pos = spawnPosition()
+    const widget: AdjusterSliderWidget = {
+      id: nextId(),
+      type: 'adjuster-slider',
       x: pos.x,
       y: pos.y,
       w: 60,
       h: 160,
-      style: 'slider',
       orientation: 'vertical',
+      min: 0,
+      max: 100,
+      events: { press: [], release: [], move: [], doublePress: [], triplePress: [] },
+      fill: { color: '#5b8def' },
+      track: { color: DEFAULT_WIDGET_COLOR },
+      labels: []
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
+  function handleAddKnob(): void {
+    const pos = spawnPosition()
+    const widget: AdjusterKnobWidget = {
+      id: nextId(),
+      type: 'adjuster-knob',
+      x: pos.x,
+      y: pos.y,
+      w: 100,
+      h: 100,
       min: 0,
       max: 100,
       events: { press: [], release: [], move: [], doublePress: [], triplePress: [] },
@@ -351,11 +388,17 @@ export function Palette(): React.JSX.Element {
       <button className="palette__item" onClick={handleAddMorph}>
         + Morph button
       </button>
-      <button className="palette__item" onClick={handleAddGauge}>
-        + Gauge
+      <button className="palette__item" onClick={handleAddBarGauge}>
+        + Bar Gauge
       </button>
-      <button className="palette__item" onClick={handleAddAdjuster}>
-        + Adjuster
+      <button className="palette__item" onClick={handleAddArcGauge}>
+        + Arc Gauge
+      </button>
+      <button className="palette__item" onClick={handleAddSlider}>
+        + Slider
+      </button>
+      <button className="palette__item" onClick={handleAddKnob}>
+        + Knob
       </button>
       <button className="palette__item" onClick={handleAddEncoder}>
         + Encoder

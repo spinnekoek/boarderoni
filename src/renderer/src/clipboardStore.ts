@@ -9,12 +9,23 @@ import type { Widget } from '@shared/types'
 const PASTE_OFFSET = 24
 
 function cloneWidget(widget: Widget, offset: number): Widget {
-  if (widget.type === 'gauge' || widget.type === 'adjuster' || widget.type === 'encoder') {
+  if (
+    widget.type === 'gauge-bar' ||
+    widget.type === 'gauge-arc' ||
+    widget.type === 'adjuster-slider' ||
+    widget.type === 'adjuster-knob' ||
+    widget.type === 'encoder'
+  ) {
     return {
       ...widget,
       id: nextId(),
       x: widget.x + offset,
       y: widget.y + offset,
+      // A pasted/duplicated widget starts ungrouped — without this it would
+      // silently inherit the source's groupId and join the same group,
+      // making the original drag the unrelated copy along with it (see
+      // groupId's own comment in shared/types.ts).
+      groupId: undefined,
       labels: widget.labels.map((label) => ({ ...label, id: nextId() }))
     }
   }
@@ -25,6 +36,7 @@ function cloneWidget(widget: Widget, offset: number): Widget {
       id: nextId(),
       x: widget.x + offset,
       y: widget.y + offset,
+      groupId: undefined,
       positions: widget.positions.map((position) => ({
         ...position,
         id: nextId(),
@@ -35,14 +47,21 @@ function cloneWidget(widget: Widget, offset: number): Widget {
 
   // No nested labels/positions/states to regenerate ids for at all.
   if (widget.type === 'screen-capture' || widget.type === 'line') {
-    return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset }
+    return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset, groupId: undefined }
   }
 
   // Its own single label (not a labels[] array — see LabelWidget's own
   // comment in shared/types.ts), still needs a fresh id like every other
   // widget's own labels do.
   if (widget.type === 'label') {
-    return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset, label: { ...widget.label, id: nextId() } }
+    return {
+      ...widget,
+      id: nextId(),
+      x: widget.x + offset,
+      y: widget.y + offset,
+      groupId: undefined,
+      label: { ...widget.label, id: nextId() }
+    }
   }
 
   // Tracks old state id -> new state id so a morph widget's blocks (below)
@@ -61,6 +80,7 @@ function cloneWidget(widget: Widget, offset: number): Widget {
       id: nextId(),
       x: widget.x + offset,
       y: widget.y + offset,
+      groupId: undefined,
       states,
       blocks: widget.blocks.map((block) => ({
         ...block,
@@ -72,7 +92,7 @@ function cloneWidget(widget: Widget, offset: number): Widget {
     }
   }
 
-  return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset, states }
+  return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset, groupId: undefined, states }
 }
 
 interface ClipboardStore {
