@@ -7,6 +7,7 @@
 interface BoarderoniAndroidBridge {
   setKeepScreenOn: (enabled: boolean) => void
   changeServer: () => void
+  connectionLost: () => void
   // TEMP DEBUG LOGGING — see MainActivity.kt's dlog()/setDebugLogging. Remove
   // this and setDebugLogging below once the spinner/reconnect bug is
   // diagnosed.
@@ -33,6 +34,20 @@ export function setKeepScreenOn(enabled: boolean): void {
 // floating button.
 export function changeServer(): void {
   window.BoarderoniAndroid?.changeServer()
+}
+
+// Drops back to the native searching/found-connect screen the same way
+// changeServer() does, but WITHOUT forgetting the remembered server — the
+// idea is "give up on this frozen session and let the user see what's
+// happening," not "I want a different desktop." Called from ViewCanvas.tsx
+// after the WebSocket has stayed disconnected for a while (see its own
+// comment on the exact grace period) — a brief drop is expected to just
+// reconnect on its own via store.ts's normal retry loop; this is only for
+// when that's clearly not working. Optional-called (not just
+// optional-accessed) so an older APK build that predates this bridge method
+// degrades to a silent no-op instead of throwing.
+export function connectionLost(): void {
+  window.BoarderoniAndroid?.connectionLost?.()
 }
 
 // TEMP DEBUG LOGGING — see the interface comment above. Optional-called

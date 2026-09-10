@@ -21,18 +21,28 @@ export function useWidgetDrag(
   zoom: number
 ): {
   selected: boolean
-  selectedWidgetIds: string[]
+  // The size of the current selection, not the ids themselves — every
+  // caller only ever needs "is this the sole selection" (selectionCount ===
+  // 1), never the actual member ids. Exposing just this (rather than the
+  // raw selectedWidgetIds array, as before) matters because it's read
+  // reactively in every widget's render: a plain-primitive Zustand selector
+  // like this one only triggers a re-render when its OWN output changes, so
+  // a widget stays untouched by, say, a selection changing from one OTHER
+  // widget to a different other widget (still a solo selection, count stays
+  // 1) — the raw-array version re-rendered every widget on the canvas on
+  // ANY selection change anywhere, regardless of relevance.
+  selectionCount: number
   handlePointerDown: (e: React.PointerEvent) => void
   handlePointerMove: (e: React.PointerEvent) => void
   handlePointerUp: (e: React.PointerEvent) => void
 } {
-  const selectedWidgetIds = useDashboardStore((s) => s.selectedWidgetIds)
+  const selected = useDashboardStore((s) => s.selectedWidgetIds.includes(widget.id))
+  const selectionCount = useDashboardStore((s) => s.selectedWidgetIds.length)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useGridSize()
 
-  const selected = selectedWidgetIds.includes(widget.id)
   const dragState = useRef<DragState | null>(null)
   // rAF-throttles the in-flight sends below, same pattern/reasoning as
   // useAdjusterDrag's own scheduleSend — pointermove can fire far faster
@@ -78,7 +88,7 @@ export function useWidgetDrag(
     if (e.button !== 0) return
     e.stopPropagation()
     const additive = e.shiftKey || e.ctrlKey || e.metaKey
-    const wasSelected = selectedWidgetIds.includes(widget.id)
+    const wasSelected = selected
 
     // Changing selection here (rather than deferring to pointer-up) lets the
     // drag below immediately pick up the right group of origins. If the
@@ -142,5 +152,5 @@ export function useWidgetDrag(
     }
   }
 
-  return { selected, selectedWidgetIds, handlePointerDown, handlePointerMove, handlePointerUp }
+  return { selected, selectionCount, handlePointerDown, handlePointerMove, handlePointerUp }
 }

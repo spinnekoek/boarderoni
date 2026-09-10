@@ -84,6 +84,10 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
         </div>
 
         <div className="device-modal__body">
+          {isBoarderoniAndroidApp() && (
+            <p className="properties__hint">Connected to: {window.location.host}</p>
+          )}
+
           <label className="device-modal__field">
             <span>Friendly name</span>
             <input value={name} placeholder={friendlyDeviceName(device?.userAgent)} onChange={(e) => setName(e.target.value)} />
@@ -101,7 +105,7 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
           {isBoarderoniAndroidApp() && (
             <label className="device-modal__checkbox">
               <input type="checkbox" checked={debugLogging} onChange={(e) => handleDebugLoggingChange(e.target.checked)} />
-              <span>Debug logging (adb logcat -s BoarderoniDebug:D)</span>
+              <span>Debug logging</span>
             </label>
           )}
 

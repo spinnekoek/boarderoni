@@ -35,6 +35,19 @@ off as they're fixed; add new ones as they come up.
       `tryEvaluateExpression` in a renderer, not main) reaches the debug
       panel's console.log sink too, unless it only ever runs server-side
       (main process, no debug panel to show it in).
+- [ ] Number inputs with a `min` clamp fight typing a value that starts
+      below the min — e.g. a width field with `min={minSize}` (10): typing
+      "5" as the first digit of "50" gets clamped to 10 immediately (the
+      field is controlled and clamps on every `onChange`), so the displayed
+      value jumps to "10" and the next keystroke appends onto THAT instead
+      of finishing "50". Root cause: `onChange={(e) => patch({ w:
+      Math.max(minSize, Number(e.target.value)) })}`-style clamping in
+      `PropertiesPanel.tsx` (56 occurrences of `Math.max(minSize, ...)` /
+      `Math.max(1, ...)` in onChange handlers — not just w/h, also
+      squareWidth/circleSize/action size/etc.). Fix likely means clamping
+      on blur (or on the eventual patch commit) instead of on every
+      keystroke, while still allowing an in-progress edit to hold an
+      intermediate below-min value in the input's own local state.
 
 ## Event sources
 

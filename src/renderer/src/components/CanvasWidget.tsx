@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 import { useDashboardStore, useGridSize } from '../store'
 import { getSubDeckWidgets } from '@shared/subDecks'
 import { useEditorSettings } from '../settingsStore'
@@ -16,7 +16,7 @@ import { DcsViewportWidgetContent } from './widgets/DcsViewportWidget'
 import { LabelWidgetContent } from './widgets/LabelWidget'
 import { LineWidgetContent } from './widgets/LineWidget'
 import { resolveActivePositionIndex } from '@shared/switchPosition'
-import { resolveNumericExpr, resolveWidgetVisible, type VariableMap } from '@shared/expr'
+import { resolveNumericExpr, resolveWidgetVisible, editorWidgetPropsEqual, type VariableMap } from '@shared/expr'
 import { getEffectiveStates } from '@shared/states'
 import type { BoxWidget } from '@shared/types'
 
@@ -29,7 +29,12 @@ interface ResizeState {
   origY: number
 }
 
-export function CanvasWidget({
+// memo'd (editorWidgetPropsEqual — see its own comment in shared/expr.ts)
+// for the same reason ViewCanvas.tsx's ViewWidget is: without this, every
+// widget on the editor canvas re-renders and re-evaluates its expressions
+// on every single variables:sync/delta tick, regardless of whether it
+// references the variable that actually changed.
+export const CanvasWidget = memo(function CanvasWidget({
   widget,
   zoom,
   variables,
@@ -40,28 +45,30 @@ export function CanvasWidget({
   variables: VariableMap
   onContextMenu: (e: React.MouseEvent) => void
 }): React.JSX.Element {
-  const { selected, selectedWidgetIds, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
+  const { selected, selectionCount, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
   const deckId = useDashboardStore((s) => s.deckId)
-  const rootWidgets = useDashboardStore((s) => s.dashboard.widgets)
-  const subDecks = useDashboardStore((s) => s.dashboard.subDecks)
-  const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
-  const widgets = useMemo(
-    () => getSubDeckWidgets({ widgets: rootWidgets, subDecks }, editingSubDeckId),
-    [rootWidgets, subDecks, editingSubDeckId]
-  )
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
-  const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
-  const selectedBlockId = useDashboardStore((s) => s.selectedBlockId)
-  const selectBlock = useDashboardStore((s) => s.selectBlock)
-  const snapToGrid = useEditorSettings((s) => s.snapToGrid)
-  const gridSize = useGridSize()
-  const isSoleSelection = selected && selectedWidgetIds.length === 1
-
+  const isSoleSelection = selected && selectionCount === 1
   // Follow whichever tab is active in the properties panel — but only while
   // this is the sole selected widget, so an unselected (or multi-selected)
   // widget always shows its resting Default look. Only meaningful for a
   // button (gauge/adjuster have no states at all).
-  const isSolePreviewTarget = widget.type === 'button' && selected && selectedWidgetIds.length === 1 && (widget.statesEnabled ?? false)
+  const isSolePreviewTarget = widget.type === 'button' && isSoleSelection && (widget.statesEnabled ?? false)
+  // Scoped so a widget only re-renders on an activeStateIndex change while
+  // it's actually the sole preview target — otherwise every widget on the
+  // canvas would re-render every time the properties panel's state tab
+  // changes, even though only the one selected button widget ever reads
+  // this. isSolePreviewTarget itself doesn't depend on activeStateIndex, so
+  // this selector's output stays referentially stable (same primitive 0)
+  // for every widget that isn't the target, regardless of how often the
+  // real activeStateIndex changes elsewhere.
+  const activeStateIndex = useDashboardStore((s) => (isSolePreviewTarget ? s.activeStateIndex : 0))
+  // Same scoping idea as activeStateIndex above — only the sole-selected
+  // widget's own selectedPositionId prop (below) ever reads this.
+  const selectedBlockId = useDashboardStore((s) => (isSoleSelection ? s.selectedBlockId : null))
+  const selectBlock = useDashboardStore((s) => s.selectBlock)
+  const snapToGrid = useEditorSettings((s) => s.snapToGrid)
+  const gridSize = useGridSize()
   const livePressed = useDashboardStore((s) => (widget.type === 'button' ? (s.livePressedWidgetIds[widget.id] ?? false) : false))
   // widget.states/positions are typed as always-present non-empty arrays,
   // but a corrupted/hand-edited save can violate that — fall back to `?? []`
@@ -116,6 +123,16 @@ export function CanvasWidget({
   }
 
   function patch(fields: Partial<BoxWidget>): void {
+    // Reads the live widget list at call time (getState(), same pattern as
+    // useWidgetDrag's own movedWidgets) rather than subscribing to
+    // rootWidgets/subDecks/editingSubDeckId reactively — this only needs
+    // the CURRENT list at the moment of a resize, not a live-tracked one,
+    // and a reactive subscription here would re-render every widget on the
+    // canvas on every single widget edit/drag anywhere in the deck (a new
+    // dashboard.widgets array reference each time) regardless of whether
+    // THIS widget itself changed.
+    const { dashboard, editingSubDeckId } = useDashboardStore.getState()
+    const widgets = getSubDeckWidgets(dashboard, editingSubDeckId)
     // All three BoxWidget members share x/y/w/h, so this merge is safe
     // regardless of which one `widget` actually is — the cast just reflects
     // that TS can't narrow `fields`' shape back to whichever member matched
@@ -279,7 +296,7 @@ export function CanvasWidget({
           {Math.round(widget.w)} × {Math.round(widget.h)}
         </div>
       )}
-      {selected && selectedWidgetIds.length === 1 && (
+      {isSoleSelection && (
         <div
           className={`canvas-widget__resize-handle${widget.type === 'line' ? ' canvas-widget__resize-handle--horizontal' : ''}`}
           // Counter-scales against the canvas's own zoom (see
@@ -294,4 +311,4 @@ export function CanvasWidget({
       )}
     </div>
   )
-}
+}, editorWidgetPropsEqual)

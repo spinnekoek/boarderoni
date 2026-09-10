@@ -1,4 +1,4 @@
-import type { ColorAppearance, Variable, VariableValue, WidgetLabel, WidgetVisibility } from './types'
+import type { ColorAppearance, Variable, VariableValue, Widget, WidgetLabel, WidgetVisibility } from './types'
 import { pickLegibleTextColor } from './color'
 
 export type VariableMap = Record<string, VariableValue>
@@ -212,4 +212,74 @@ export function resolveTextColor(
   if (!label.textColorExpr) return { color: fallback }
   const resolved = evaluateColorExpression(label.textColorExpr, variables)
   return { color: resolved.color ?? fallback, opacity: resolved.opacity }
+}
+
+// Which variable names a widget's own expr fields (colorExpr, textExpr,
+// valueExpr, tick-set labelTextExpr, per-position/per-state exprs, ...)
+// could possibly read — computed by regex-scanning the widget's own JSON
+// rather than enumerating every expr field on every widget type by hand, so
+// a newly added expr field is covered automatically instead of silently
+// falling through some hardcoded list (which would understate dependencies
+// and go stale, a much worse failure than over-rendering). Cached per widget
+// OBJECT (not per id) via WeakMap — cheap to recompute only when the widget
+// itself actually changes (reconcileWidgetList in shared/subDecks.ts already
+// preserves identity for unchanged widgets), not on every variables:sync
+// tick. Returns null ("depends on everything, don't try to scope it")
+// whenever the scan finds a `variables` reference it can't resolve to a
+// literal name — e.g. a computed `variables[someExpr]` lookup — so an
+// unusual case fails safe (always re-renders) instead of silently missing a
+// real dependency.
+//
+// Shared between ViewCanvas.tsx (the deployed view) and Canvas.tsx/
+// CanvasWidget.tsx/MorphCanvasWidget.tsx (the editor) — both back a per-
+// widget memo() comparator with this so a widget only re-renders on a
+// variables tick when a variable it actually references changed, not just
+// because `variables` got a fresh object reference (which happens on every
+// tick regardless of which single variable actually moved — see
+// toVariableMap above).
+const widgetVariableDepsCache = new WeakMap<Widget, Set<string> | null>()
+const VARIABLE_REF_RE = /variables(?:\.(\w+)|\[\\*["'](\w+)\\*["']\])/g
+
+export function widgetVariableDependencies(widget: Widget): Set<string> | null {
+  const cached = widgetVariableDepsCache.get(widget)
+  if (cached !== undefined) return cached
+  const json = JSON.stringify(widget)
+  const deps = new Set<string>()
+  let match: RegExpExecArray | null
+  VARIABLE_REF_RE.lastIndex = 0
+  while ((match = VARIABLE_REF_RE.exec(json))) deps.add((match[1] ?? match[2])!)
+  const result = json.replace(VARIABLE_REF_RE, '').includes('variables') ? null : deps
+  widgetVariableDepsCache.set(widget, result)
+  return result
+}
+
+// A memo() comparator for the editor canvas's per-widget components
+// (CanvasWidget.tsx, MorphCanvasWidget.tsx — generic over W since they take
+// different widget types, BoxWidget vs MorphButtonWidget). widget/zoom are
+// compared normally: widget identity is the cheap "did anything about this
+// widget change at all" check reconcileWidgetList already sets up, and zoom
+// has to be able to force a re-render because it affects this widget's own
+// resize-handle/size-label scale whenever it happens to be the selected one
+// (memo can't tell in advance whether THIS widget is the selected one, so
+// it can't skip zoom-driven re-renders selectively — zoom changes are a
+// discrete, infrequent user gesture, unlike a steady variables tick, so
+// comparing it normally is an acceptable cost). variables uses
+// widgetVariableDependencies' per-widget scoping, same as ViewCanvas.tsx's
+// viewWidgetPropsEqual. Deliberately does NOT take an onContextMenu prop
+// into account — see call sites, which build it as a fresh closure every
+// parent render regardless but functionally identical every time (closes
+// over the same widget.id), so comparing it would defeat memoization for no
+// benefit.
+export function editorWidgetPropsEqual<W extends Widget>(
+  prev: { widget: W; zoom: number; variables: VariableMap },
+  next: { widget: W; zoom: number; variables: VariableMap }
+): boolean {
+  if (prev.widget !== next.widget || prev.zoom !== next.zoom) return false
+  if (prev.variables === next.variables) return true
+  const deps = widgetVariableDependencies(next.widget)
+  if (deps === null) return false
+  for (const name of deps) {
+    if (prev.variables[name] !== next.variables[name]) return false
+  }
+  return true
 }

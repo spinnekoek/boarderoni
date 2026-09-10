@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useDashboardStore, useGridSize } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useWidgetDrag } from '../useWidgetDrag'
@@ -6,7 +6,7 @@ import { morphFootprint, normalizeMorphBlocks, blockNeighbors, neighborCount } f
 import { getSubDeckWidgets } from '@shared/subDecks'
 import { nextId } from '../id'
 import { MorphButtonWidgetContent } from './widgets/MorphButtonWidget'
-import { resolveNumericExpr, resolveWidgetVisible, type VariableMap } from '@shared/expr'
+import { resolveNumericExpr, resolveWidgetVisible, editorWidgetPropsEqual, type VariableMap } from '@shared/expr'
 import type { MorphBlock, MorphButtonWidget, MorphCell } from '@shared/types'
 
 interface ResizeState {
@@ -101,7 +101,9 @@ function useCtrlHeld(): boolean {
   return ctrlHeld
 }
 
-export function MorphCanvasWidget({
+// memo'd (editorWidgetPropsEqual — see its own comment in shared/expr.ts),
+// same reasoning as CanvasWidget.tsx's own memo wrapping.
+export const MorphCanvasWidget = memo(function MorphCanvasWidget({
   widget,
   zoom,
   variables,
@@ -112,17 +114,16 @@ export function MorphCanvasWidget({
   variables: VariableMap
   onContextMenu: (e: React.MouseEvent) => void
 }): React.JSX.Element {
-  const { selected, selectedWidgetIds, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
-  const rootWidgets = useDashboardStore((s) => s.dashboard.widgets)
-  const subDecks = useDashboardStore((s) => s.dashboard.subDecks)
-  const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
-  const widgets = useMemo(
-    () => getSubDeckWidgets({ widgets: rootWidgets, subDecks }, editingSubDeckId),
-    [rootWidgets, subDecks, editingSubDeckId]
-  )
+  const { selected, selectionCount, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
-  const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
-  const selectedBlockId = useDashboardStore((s) => s.selectedBlockId)
+  const isSoleSelection = selected && selectionCount === 1
+  const isSolePreviewTarget = isSoleSelection && (widget.statesEnabled ?? false)
+  // Scoped selectors — see CanvasWidget.tsx's identical comment on
+  // activeStateIndex/selectedBlockId for why this matters (every morph
+  // widget on the canvas would otherwise re-render on every properties-panel
+  // state-tab or block-selection change, not just the sole-selected one).
+  const activeStateIndex = useDashboardStore((s) => (isSolePreviewTarget ? s.activeStateIndex : 0))
+  const selectedBlockId = useDashboardStore((s) => (isSoleSelection ? s.selectedBlockId : null))
   const selectBlock = useDashboardStore((s) => s.selectBlock)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useGridSize()
@@ -131,16 +132,24 @@ export function MorphCanvasWidget({
   const [resizing, setResizing] = useState(false)
   const ctrlHeld = useCtrlHeld()
 
-  const isSolePreviewTarget = selected && selectedWidgetIds.length === 1 && (widget.statesEnabled ?? false)
   const previewState = isSolePreviewTarget ? (widget.states[activeStateIndex] ?? widget.states[0]) : widget.states[0]
 
   function snap(value: number): number {
     return snapToGrid ? Math.round(value / gridSize) * gridSize : Math.round(value)
   }
 
+  // Reads the live widget list at call time rather than subscribing to
+  // rootWidgets/subDecks/editingSubDeckId reactively — see CanvasWidget.tsx's
+  // patch() for the full reasoning (same pattern, same "every widget
+  // re-renders on every deck edit otherwise" cost being avoided).
+  function liveWidgets(): ReturnType<typeof getSubDeckWidgets> {
+    const { dashboard, editingSubDeckId } = useDashboardStore.getState()
+    return getSubDeckWidgets(dashboard, editingSubDeckId)
+  }
+
   function addBlock(cell: MorphCell): void {
     updateWidgets(
-      widgets.map((w) => {
+      liveWidgets().map((w) => {
         if (w.id !== widget.id || w.type !== 'morph') return w
         if (w.blocks.some((b) => b.col === cell.col && b.row === cell.row)) return w
         return normalizeMorphBlocks({ ...w, blocks: [...w.blocks, { id: nextId(), col: cell.col, row: cell.row, perState: {} }] })
@@ -150,7 +159,7 @@ export function MorphCanvasWidget({
 
   function removeBlock(block: MorphBlock): void {
     updateWidgets(
-      widgets.map((w) => {
+      liveWidgets().map((w) => {
         if (w.id !== widget.id || w.type !== 'morph') return w
         if (w.blocks.length <= 1) return w
         return normalizeMorphBlocks({ ...w, blocks: w.blocks.filter((b) => b.id !== block.id) })
@@ -159,7 +168,7 @@ export function MorphCanvasWidget({
   }
 
   function patchCellSize(cellW: number, cellH: number): void {
-    updateWidgets(widgets.map((w) => (w.id === widget.id && w.type === 'morph' ? { ...w, cellW, cellH } : w)))
+    updateWidgets(liveWidgets().map((w) => (w.id === widget.id && w.type === 'morph' ? { ...w, cellW, cellH } : w)))
   }
 
   // Every block shares one size, so dragging this — like a regular button's
@@ -206,7 +215,6 @@ export function MorphCanvasWidget({
   }
 
   const footprint = morphFootprint(widget)
-  const isSoleSelection = selected && selectedWidgetIds.length === 1
   const edgeSpots = computeEdgeSpots(widget.blocks)
   // See CanvasWidget's own comment on the same call — dims rather than
   // hides, so the widget stays selectable/editable, and evaluates the same
@@ -234,7 +242,7 @@ export function MorphCanvasWidget({
         onCellPointerUp={handlePointerUp}
         onCellContextMenu={onContextMenu}
         // isSoleSelection here reflects selection state as of the render
-        // before this click (selected/selectedWidgetIds come from
+        // before this click (selected/selectionCount come from
         // useWidgetDrag, which reads the store at render time) — same
         // "wasSelected" idea useWidgetDrag itself uses. So: a click that's
         // also the click selecting this widget leaves it at the top
@@ -308,4 +316,4 @@ export function MorphCanvasWidget({
       )}
     </div>
   )
-}
+}, editorWidgetPropsEqual)

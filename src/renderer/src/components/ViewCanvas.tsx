@@ -1,11 +1,18 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
-import { isBoarderoniAndroidApp, setKeepScreenOn, setDebugLogging } from '../androidBridge'
+import { isBoarderoniAndroidApp, setKeepScreenOn, setDebugLogging, connectionLost } from '../androidBridge'
 import { getKeepScreenOnPreference, getDebugLoggingPreference } from '../id'
 import { getEffectiveStates } from '@shared/states'
 import { morphFootprint } from '@shared/morph'
-import { resolveColor, resolveNumericExpr, resolveWidgetVisible, toVariableMap, type VariableMap } from '@shared/expr'
+import {
+  resolveColor,
+  resolveNumericExpr,
+  resolveWidgetVisible,
+  toVariableMap,
+  widgetVariableDependencies,
+  type VariableMap
+} from '@shared/expr'
 import { findSubDeck, getSubDeckCanvasSize, getSubDeckWidgets } from '@shared/subDecks'
 import type {
   AdjusterKnobWidget,
@@ -49,6 +56,13 @@ import { DeviceSettingsModal } from './DeviceSettingsModal'
 import { ToastStack } from './ToastStack'
 
 const SETTINGS_GESTURE_FINGER_COUNT = 5
+
+// How long the WebSocket can stay disconnected before falling back to the
+// native Android searching/found-connect screen — see the effect below for
+// the full reasoning. Long enough that store.ts's own 1.5s retry loop gets
+// several real attempts first; short enough that a tablet left frozen on a
+// dead session doesn't sit that way indefinitely.
+const CONNECTION_LOST_GRACE_MS = 30000
 
 // Owns the drag hook — kept separate from the dispatcher below so the hook
 // only ever mounts for an actual AdjusterWidget, not conditionally within a
@@ -527,37 +541,6 @@ function MorphView({ widget, variables, error }: { widget: MorphButtonWidget; va
   )
 }
 
-// Which variable names a widget's own expr fields (colorExpr, textExpr,
-// valueExpr, tick-set labelTextExpr, per-position/per-state exprs, ...)
-// could possibly read — computed by regex-scanning the widget's own JSON
-// rather than enumerating every expr field on every widget type by hand, so
-// a newly added expr field is covered automatically instead of silently
-// falling through some hardcoded list (which would understate dependencies
-// and go stale, a much worse failure than over-rendering). Cached per
-// widget OBJECT (not per id) via WeakMap — cheap to recompute only when the
-// widget itself actually changes (reconcileWidgetList in shared/subDecks.ts
-// already preserves identity for unchanged widgets), not on every
-// variables:sync tick. Returns null ("depends on everything, don't try to
-// scope it") whenever the scan finds a `variables` reference it can't
-// resolve to a literal name — e.g. a computed `variables[someExpr]` lookup
-// — so an unusual case fails safe (always re-renders) instead of silently
-// missing a real dependency.
-const widgetVariableDepsCache = new WeakMap<Widget, Set<string> | null>()
-const VARIABLE_REF_RE = /variables(?:\.(\w+)|\[\\*["'](\w+)\\*["']\])/g
-
-function widgetVariableDependencies(widget: Widget): Set<string> | null {
-  const cached = widgetVariableDepsCache.get(widget)
-  if (cached !== undefined) return cached
-  const json = JSON.stringify(widget)
-  const deps = new Set<string>()
-  let match: RegExpExecArray | null
-  VARIABLE_REF_RE.lastIndex = 0
-  while ((match = VARIABLE_REF_RE.exec(json))) deps.add((match[1] ?? match[2])!)
-  const result = json.replace(VARIABLE_REF_RE, '').includes('variables') ? null : deps
-  widgetVariableDepsCache.set(widget, result)
-  return result
-}
-
 interface ViewWidgetProps {
   widget: Widget
   variables: VariableMap
@@ -745,6 +728,7 @@ export function ViewCanvas(): React.JSX.Element {
   const backgroundColorExpr = useDashboardStore((s) => s.dashboard.backgroundColorExpr)
   const backgroundImageVersion = useDashboardStore((s) => s.dashboard.backgroundImageVersion)
   const deckId = useDashboardStore((s) => s.deckId)
+  const connected = useDashboardStore((s) => s.connected)
   const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
   const backgroundAnchor = useDashboardStore((s) => s.dashboard.backgroundAnchor)
   const errors = useDashboardStore((s) => s.errors)
@@ -776,6 +760,25 @@ export function ViewCanvas(): React.JSX.Element {
   useEffect(() => {
     if (isBoarderoniAndroidApp()) setDebugLogging(getDebugLoggingPreference())
   }, [])
+
+  // Falls back to the native searching/found-connect screen if the
+  // WebSocket stays disconnected for CONNECTION_LOST_GRACE_MS — store.ts's
+  // own close handler already retries every 1.5s on its own for a plain
+  // drop, so a brief blip reconnects well within this window and this
+  // effect's cleanup (re-run on every `connected` change) cancels the timer
+  // before it ever fires. Only reachable while this component stays mounted
+  // with `connected` false the whole time — every OTHER close path
+  // (DECK_CLOSE_CODE_UNKNOWN, DECK_CLOSE_CODE_DENIED, an explicit
+  // disconnect()) sends App.tsx to a different screen entirely, unmounting
+  // this and clearing the timer for free. Android only: there's no
+  // equivalent "native searching screen" to fall back to in a regular
+  // browser, and connectionLost() is already a no-op there regardless (see
+  // androidBridge.ts).
+  useEffect(() => {
+    if (!isBoarderoniAndroidApp() || connected) return
+    const timer = setTimeout(connectionLost, CONNECTION_LOST_GRACE_MS)
+    return () => clearTimeout(timer)
+  }, [connected])
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Guards against re-opening on every touchmove while 5+ fingers stay down,
