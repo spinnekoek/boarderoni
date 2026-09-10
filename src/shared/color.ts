@@ -41,7 +41,23 @@ export function hexToRgb(hex: string): [number, number, number] | null {
 // Converts a hex color + 0-1 opacity into an rgba() string, for widget
 // background/text/border transparency. Falls back to the hex color as-is if
 // it isn't parseable (e.g. already an rgba string).
+//
+// 'transparent' is special-cased to pass straight through, bypassing
+// hexToRgb entirely — cssColorResolver.ts's extended resolver DOES
+// successfully parse it (the browser normalizes it to rgba(0, 0, 0, 0)), but
+// its regex only captures the RGB channels and drops the alpha, so
+// hexToRgb('transparent') comes back as opaque BLACK ([0, 0, 0]) rather than
+// "no color." Every widget whose border/bezel/handle/etc. falls back to the
+// literal string 'transparent' when unset (nearly all of them — see
+// GaugeWidget/AdjusterWidget/EncoderWidget/RockerSwitchWidget/DialSwitchWidget/
+// ToggleSwitchWidget/DropdownWidget/ScreenCaptureWidget/DcsViewportWidget)
+// was rendering a solid black border by default instead of an invisible one
+// as a result. Any OTHER named color legitimately having its own alpha
+// overridden by the requested opacity here is fine/intended — this is
+// specifically about the one sentinel value that means "nothing," not a
+// general fix for named-color alpha handling.
 export function withOpacity(hex: string, opacity: number): string {
+  if (hex === 'transparent') return hex
   const rgb = hexToRgb(hex)
   if (!rgb) return hex
   const [r, g, b] = rgb

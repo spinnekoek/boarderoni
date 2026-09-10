@@ -3226,11 +3226,11 @@ export function PropertiesPanel(): React.JSX.Element {
 
           <div className="properties__grid2">
             <label className="properties__field">
-              <span>Min</span>
+              <span>Min value</span>
               <input type="number" value={gauge.min} onChange={(e) => patchGauge({ min: Number(e.target.value) })} />
             </label>
             <label className="properties__field">
-              <span>Max</span>
+              <span>Max value</span>
               <input type="number" value={gauge.max} onChange={(e) => patchGauge({ max: Number(e.target.value) })} />
             </label>
           </div>
@@ -3465,11 +3465,11 @@ export function PropertiesPanel(): React.JSX.Element {
 
           <div className="properties__grid2">
             <label className="properties__field">
-              <span>Min</span>
+              <span>Min value</span>
               <input type="number" value={gauge.min} onChange={(e) => patchGauge({ min: Number(e.target.value) })} />
             </label>
             <label className="properties__field">
-              <span>Max</span>
+              <span>Max value</span>
               <input type="number" value={gauge.max} onChange={(e) => patchGauge({ max: Number(e.target.value) })} />
             </label>
           </div>
@@ -3984,11 +3984,11 @@ export function PropertiesPanel(): React.JSX.Element {
 
           <div className="properties__grid2">
             <label className="properties__field">
-              <span>Min</span>
+              <span>Min value</span>
               <input type="number" value={adjuster.min} onChange={(e) => patchAdjuster({ min: Number(e.target.value) })} />
             </label>
             <label className="properties__field">
-              <span>Max</span>
+              <span>Max value</span>
               <input type="number" value={adjuster.max} onChange={(e) => patchAdjuster({ max: Number(e.target.value) })} />
             </label>
           </div>
@@ -4040,15 +4040,49 @@ export function PropertiesPanel(): React.JSX.Element {
 
           {(adjuster.handleShape ?? 'circle') !== 'none' && (
             <>
-              <label className="properties__field">
-                <span>Size</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={adjuster.handleSize ?? 14}
-                  onChange={(e) => patchAdjuster({ handleSize: Math.max(1, Number(e.target.value)) })}
-                />
-              </label>
+              {adjuster.handleShape === 'square' ? (
+                <>
+                  <div className="properties__grid2">
+                    <label className="properties__field">
+                      <span>Width</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={adjuster.handleWidth ?? adjuster.handleSize ?? 14}
+                        onChange={(e) => patchAdjuster({ handleWidth: Math.max(1, Number(e.target.value)) })}
+                      />
+                    </label>
+                    <label className="properties__field">
+                      <span>Height</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={adjuster.handleHeight ?? adjuster.handleSize ?? 14}
+                        onChange={(e) => patchAdjuster({ handleHeight: Math.max(1, Number(e.target.value)) })}
+                      />
+                    </label>
+                  </div>
+                  <label className="properties__field">
+                    <span>Radius</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={adjuster.handleRadius ?? 0}
+                      onChange={(e) => patchAdjuster({ handleRadius: Math.max(0, Number(e.target.value)) })}
+                    />
+                  </label>
+                </>
+              ) : (
+                <label className="properties__field">
+                  <span>Size</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={adjuster.handleSize ?? 14}
+                    onChange={(e) => patchAdjuster({ handleSize: Math.max(1, Number(e.target.value)) })}
+                  />
+                </label>
+              )}
               <div className="properties__field">
                 <span>Color</span>
                 <ColorPickerButton
@@ -4374,11 +4408,11 @@ export function PropertiesPanel(): React.JSX.Element {
 
           <div className="properties__grid2">
             <label className="properties__field">
-              <span>Min</span>
+              <span>Min value</span>
               <input type="number" value={adjuster.min} onChange={(e) => patchAdjuster({ min: Number(e.target.value) })} />
             </label>
             <label className="properties__field">
-              <span>Max</span>
+              <span>Max value</span>
               <input type="number" value={adjuster.max} onChange={(e) => patchAdjuster({ max: Number(e.target.value) })} />
             </label>
           </div>

@@ -38,6 +38,11 @@ function AdjusterBar({
 
   const handleShape = widget.handleShape ?? 'circle'
   const handleSize = widget.handleSize ?? 14
+  // Independent width/height only apply to a square handle — a circle is
+  // defined by one diameter (handleSize) and has no corners for handleRadius
+  // to round.
+  const handleWidth = handleShape === 'square' ? (widget.handleWidth ?? handleSize) : handleSize
+  const handleHeight = handleShape === 'square' ? (widget.handleHeight ?? handleSize) : handleSize
   const handleColor = withOpacity(widget.handleColor ?? fillColor, widget.handleOpacity ?? 1)
   const handleBorderWidth = widget.handleBorderWidth ?? 0
   const handleBorderColor = withOpacity(widget.handleBorderColor ?? 'transparent', widget.handleBorderOpacity ?? 1)
@@ -52,9 +57,9 @@ function AdjusterBar({
           className="deck-adjuster__handle"
           style={{
             ...handleStyle,
-            width: handleSize,
-            height: handleSize,
-            borderRadius: handleShape === 'circle' ? '50%' : 0,
+            width: handleWidth,
+            height: handleHeight,
+            borderRadius: handleShape === 'circle' ? '50%' : (widget.handleRadius ?? 0),
             backgroundColor: handleColor,
             borderStyle: handleBorderWidth > 0 ? 'solid' : undefined,
             borderWidth: handleBorderWidth > 0 ? handleBorderWidth : undefined,

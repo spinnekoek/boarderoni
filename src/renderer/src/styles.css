@@ -716,6 +716,80 @@ needs to stretch or round at all. */
 	background: #343a46;
 }
 
+/* A widget type with named variants (see Palette.tsx's WidgetVariant) gets
+   this split-button shell instead of a plain .palette__item: the main
+   button still adds the plain default, the chevron opens a dropdown of
+   variants alongside it. */
+.palette__item-group {
+	display: flex;
+	position: relative;
+	margin-bottom: 8px;
+}
+
+.palette__item-group .palette__item {
+	margin-bottom: 0;
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+	border-right: none;
+}
+
+.palette__item-variant-toggle {
+	flex-shrink: 0;
+	width: 28px;
+	padding: 10px 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: #2a2e37;
+	color: #9098a8;
+	border: 1px solid #3a3f4a;
+	/* Longhand only — a shorthand border-radius here would win over these
+	   (last declaration in source order takes it, regardless of which is
+	   more specific) and re-round every corner, including the two that need
+	   to stay square to join flush with .palette__item's own flat right
+	   edge. That's exactly what was happening before this comment existed. */
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+	border-top-right-radius: 6px;
+	border-bottom-right-radius: 6px;
+	cursor: pointer;
+}
+
+.palette__item-variant-toggle:hover {
+	background: #343a46;
+	color: #e8e8ea;
+}
+
+.palette__item-variant-menu {
+	position: absolute;
+	top: 0;
+	left: 100%;
+	margin-left: 4px;
+	min-width: 140px;
+	z-index: 10;
+	background: #22262e;
+	border: 1px solid #3a3f4a;
+	border-radius: 6px;
+	overflow: hidden;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.palette__item-variant-menu-item {
+	display: block;
+	width: 100%;
+	padding: 8px 10px;
+	background: transparent;
+	color: #e8e8ea;
+	border: none;
+	text-align: left;
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.palette__item-variant-menu-item:hover {
+	background: #343a46;
+}
+
 .palette__hint {
 	margin-top: 16px;
 	font-size: 11px;
@@ -1318,10 +1392,6 @@ button.deck-button:focus-visible {
 /* size/shape/color/border are all set inline per-widget (see AdjusterBar in
 AdjusterWidget.tsx) — only the shadow (not itself a configurable field) lives
 here. */
-.deck-adjuster__handle {
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-}
-
 .deck-encoder {
 	position: absolute;
 	inset: 0;

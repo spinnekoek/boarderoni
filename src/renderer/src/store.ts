@@ -114,12 +114,6 @@ interface DashboardStore {
   // Which of the selected widget's states the editor canvas previews (its
   // properties panel tab) — reset to 0 (Default) on every selection change.
   activeStateIndex: number
-  // Edit mode only — which ButtonWidget/MorphButtonWidget ids a real device
-  // currently has physically held down, from widget:live-press (see its own
-  // comment in shared/types.ts). CanvasWidget.tsx's preview shows a widget's
-  // Clicked state live while its id is in here, same look the device itself
-  // shows, instead of only ever resolving through activeStateExpr/states[0].
-  livePressedWidgetIds: Record<string, boolean>
   devices: DeviceInfo[]
   // View mode only: true between sendHello and either a dashboard:sync
   // (approved) or device:denied (denied) — see ViewCanvas's waiting screen.
@@ -443,7 +437,6 @@ function pickerResetState(): Pick<
   | 'selectedWidgetIds'
   | 'selectedBlockId'
   | 'activeStateIndex'
-  | 'livePressedWidgetIds'
   | 'editingSubDeckId'
   | 'activeSubDeckId'
   | 'activeOverlay'
@@ -458,7 +451,6 @@ function pickerResetState(): Pick<
     selectedWidgetIds: [],
     selectedBlockId: null,
     activeStateIndex: 0,
-    livePressedWidgetIds: {},
     editingSubDeckId: null,
     activeSubDeckId: null,
     activeOverlay: null
@@ -494,7 +486,6 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   selectedWidgetIds: [],
   selectedBlockId: null,
   activeStateIndex: 0,
-  livePressedWidgetIds: {},
   devices: [],
   devicePending: false,
   deviceDenied: false,
@@ -780,13 +771,6 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
           const merged = existing.map((v) => byId.get(v.id)!)
           for (const v of message.variables) if (!existing.some((e) => e.id === v.id)) merged.push(v)
           return { dashboard: { ...s.dashboard, variables: merged } }
-        })
-      } else if (message.type === 'widget:live-press') {
-        set((s) => {
-          const next = { ...s.livePressedWidgetIds }
-          if (message.pressed) next[message.widgetId] = true
-          else delete next[message.widgetId]
-          return { livePressedWidgetIds: next }
         })
       } else if (message.type === 'subdeck:navigate') {
         set({

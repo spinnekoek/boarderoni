@@ -84,11 +84,19 @@ export function useEncoderDrag(widget: EncoderWidget, variables: VariableMap): {
   function handlePointerDown(e: React.PointerEvent): void {
     draggingRef.current = true
     const rect = e.currentTarget.getBoundingClientRect()
-    lastAngleRef.current = angleFromEvent(e, rect)
+    // Snaps the grip to point at wherever was actually pressed, same feel as
+    // AdjusterWidget's own knob — even though an encoder has no absolute
+    // value for that click position to actually MEAN anything (see
+    // valueExpr's own comment), the visual snap is what makes pressing feel
+    // like it did something instead of the grip staying wherever it was
+    // until you start dragging. Purely cosmetic: increment/decrement still
+    // only fire off the DELTA from here as the drag continues, same as
+    // before — this doesn't give the click position itself any meaning.
+    const clickAngle = angleFromEvent(e, rect)
+    lastAngleRef.current = clickAngle
     stepAccumulatorRef.current = 0
-    const restSpin = widget.valueExpr ? (resolveNumericExpr(widget.valueExpr, variables) ?? 0) : 0
-    spinValueRef.current = restSpin
-    setDragSpinDegrees(restSpin)
+    spinValueRef.current = clickAngle
+    setDragSpinDegrees(clickAngle)
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {

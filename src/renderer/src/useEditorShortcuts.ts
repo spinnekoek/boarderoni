@@ -89,6 +89,18 @@ export function useEditorShortcuts(): void {
       } else if (key === 'z' && e.shiftKey) {
         e.preventDefault()
         useHistoryStore.getState().redo()
+      } else if (key === 'a' && !e.shiftKey) {
+        e.preventDefault()
+        const { dashboard, editingSubDeckId, selectWidgets } = useDashboardStore.getState()
+        // Only whichever sub-deck is currently being edited — same scoping
+        // every other shortcut here (nudge, copy) already uses via
+        // getSubDeckWidgets, so this can't reach across into a sub-deck
+        // that isn't even on screen right now.
+        const widgets = getSubDeckWidgets(dashboard, editingSubDeckId)
+        if (widgets.length === 0) return
+        // Not additive — Ctrl+A means "select all," replacing whatever was
+        // already selected, same as every other app's select-all.
+        selectWidgets(widgets.map((w) => w.id))
       }
     }
 

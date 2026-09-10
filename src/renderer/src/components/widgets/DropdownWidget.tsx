@@ -66,7 +66,14 @@ export function DropdownWidgetContent({
   return (
     <div
       className={`deck-dropdown${interactive ? '' : ' deck-dropdown--static'}${isOpen ? ' deck-dropdown--open' : ''}`}
-      style={{ background: trackColor, zIndex: isOpen ? OPEN_Z_INDEX : widget.zIndex }}
+      // borderRadius matches the item's own below — this container's flat
+      // trackColor background otherwise shows through as square corners
+      // peeking past the collapsed item's rounded ones (the item exactly
+      // covers this box when idle, but rounding only its own corners left
+      // this box's corners showing underneath). Can't just clip this box
+      // with overflow:hidden instead — see the CSS rule's own comment on
+      // why held items need to render outside these bounds.
+      style={{ background: trackColor, borderRadius: radius, zIndex: isOpen ? OPEN_Z_INDEX : widget.zIndex }}
       onPointerDown={interactive ? onPointerDown : undefined}
       onPointerMove={interactive ? onPointerMove : undefined}
       onPointerUp={interactive ? onPointerUp : undefined}

@@ -770,7 +770,16 @@ export interface AdjusterSliderWidget extends WidgetVisibility {
   // variant) — so a dashboard saved before these fields existed renders
   // completely unchanged.
   handleShape?: 'circle' | 'square' | 'none'
+  // Diameter for a circle handle. For a square one, handleWidth/handleHeight
+  // take priority when set (independent dimensions instead of one forced
+  // square) — each still falls back to this so an existing square handle
+  // saved before these existed renders unchanged.
   handleSize?: number
+  handleWidth?: number
+  handleHeight?: number
+  // Square-handle-only (a circle has no corners to round) — unset stays the
+  // sharp corners a square handle always had before this existed.
+  handleRadius?: number
   handleColor?: string
   handleOpacity?: number
   handleBorderColor?: string
@@ -2336,16 +2345,6 @@ export type ServerToClient =
   // dashboard with hundreds of variables would otherwise re-send all of them
   // on every single tick just because one changed.
   | { type: 'variables:delta'; variables: Variable[] }
-  // Edit-clients-only (see broadcastToEditClients in main/index.ts), fired
-  // whenever a view device presses/releases a ButtonWidget/MorphButtonWidget
-  // — see triggerAction's own comment for why only those two types. Lets the
-  // editor's own canvas preview (CanvasWidget.tsx) show a button's Clicked
-  // state live while a real device is physically holding it down, which it
-  // otherwise has no way to know at all: pressed/released is purely local
-  // client-side state on whichever device is touching it (usePressRelease in
-  // ViewCanvas.tsx) — the server only ever hears about a press to run its
-  // sequence, never broadcasts it back out, until now.
-  | { type: 'widget:live-press'; widgetId: string; pressed: boolean }
   // detail is only present when the failure happened mid-sequence (any
   // step, however deeply nested inside condition branches, threw inside
   // runSequence) — omitted (not a sentinel value) for a pre-sequence error

@@ -69,26 +69,19 @@ export const CanvasWidget = memo(function CanvasWidget({
   const selectBlock = useDashboardStore((s) => s.selectBlock)
   const snapToGrid = useEditorSettings((s) => s.snapToGrid)
   const gridSize = useGridSize()
-  const livePressed = useDashboardStore((s) => (widget.type === 'button' ? (s.livePressedWidgetIds[widget.id] ?? false) : false))
   // widget.states/positions are typed as always-present non-empty arrays,
   // but a corrupted/hand-edited save can violate that — fall back to `?? []`
   // everywhere below rather than letting a stale/malformed deck blank the
   // whole app (see ErrorBoundary's own comment for what happens without this).
-  // Not the sole preview target: prefer showing a real device's own live
-  // press (widget:live-press — see its own comment in shared/types.ts) over
-  // the resting look, so a button held down on a tablet shows Clicked here
-  // too instead of only on the device itself. Falls back through
-  // getEffectiveStates (same activeStateExpr resolution ViewCanvas.tsx uses
-  // for the deployed view) rather than always states[0], so a live-switching
-  // state expression shows its effect here too instead of only once deployed.
+  // Not the sole preview target: falls back through getEffectiveStates (same
+  // activeStateExpr resolution ViewCanvas.tsx uses for the deployed view)
+  // rather than always states[0], so a live-switching state expression shows
+  // its effect here too instead of only once deployed.
   const previewState =
     widget.type === 'button'
       ? isSolePreviewTarget
         ? ((widget.states ?? [])[activeStateIndex] ?? widget.states?.[0])
-        : (() => {
-            const [defaultState, clickedState] = getEffectiveStates(widget, variables)
-            return (livePressed ? clickedState : null) ?? defaultState ?? widget.states?.[0]
-          })()
+        : (getEffectiveStates(widget, variables)[0] ?? widget.states?.[0])
       : null
   const resizeState = useRef<ResizeState | null>(null)
   const [resizing, setResizing] = useState(false)
