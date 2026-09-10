@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.Network
@@ -16,6 +17,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
@@ -56,12 +58,29 @@ private const val DEFAULT_WEB_PORT = 17334
 
 private const val DISCOVERY_WATCHDOG_MS = 8000L
 
+// TEMP DEBUG LOGGING — added 2026-09-10 to track down the tablet randomly
+// dropping to the "looking for boarderoni" spinner and reconnecting with no
+// user action. Every plausible trigger (NSD service lost, Wi-Fi network
+// callback, WebView main-frame error, Activity onStop/onStart) is tagged
+// below via dlog() (see its definition) so `adb logcat -s BoarderoniDebug:D`
+// pinpoints which one actually fires. Remove this constant, KEY_DEBUG_LOGGING_
+// ENABLED, dlog(), WebAppBridge.setDebugLogging, and every dlog() call site
+// once diagnosed.
+private const val DEBUG_TAG = "BoarderoniDebug"
+
 // Prefs for remembering the manual-connect field across launches — most
 // devices that need the manual fallback (see connectManually) need it every
 // time (the OEM Wi-Fi stacks that drop mDNS don't start working later), so
 // retyping the same IP each launch is pure friction.
 private const val PREFS_NAME = "boarderoni"
 private const val KEY_LAST_MANUAL_INPUT = "last_manual_input"
+
+// TEMP DEBUG LOGGING — persisted (not just in-memory) so a toggle survives
+// app restarts: the whole point is enabling this once, then letting the
+// tablet roam untethered until the bug reproduces, then pulling `adb logcat
+// -d` (dumps the existing on-device ring buffer, no live tail needed)
+// whenever it's next convenient to plug in.
+private const val KEY_DEBUG_LOGGING_ENABLED = "debug_logging_enabled"
 
 class MainActivity : AppCompatActivity() {
 
@@ -86,6 +105,12 @@ class MainActivity : AppCompatActivity() {
     // for the same instance doesn't reload a perfectly fine WebView.
     private var currentTarget: String? = null
 
+    // TEMP DEBUG LOGGING — gates every dlog() call below. Off by default;
+    // toggled from the web app's 5-finger device settings modal (see
+    // WebAppBridge.setDebugLogging), loaded from prefs at the very top of
+    // onCreate so it's already correct before the first dlog() call fires.
+    private var debugLoggingEnabled = false
+
     // Must be registered unconditionally before STARTED (a property
     // initializer runs during construction, ahead of onCreate) — the
     // Activity Result API throws if you try to register once the activity
@@ -102,6 +127,11 @@ class MainActivity : AppCompatActivity() {
         // touching this activity even if the theme lookup ever changes.
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
         super.onCreate(savedInstanceState)
+        // TEMP DEBUG LOGGING — loaded before anything else so it's correct
+        // for the dlog() call on the very next line.
+        debugLoggingEnabled = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_DEBUG_LOGGING_ENABLED, false)
+        dlog("onCreate: savedInstanceState=${savedInstanceState != null}")
 
         // Edge-to-edge: without this, the status/nav bars are laid out as
         // opaque strips outside the content area, and since the dashboard's
@@ -143,8 +173,30 @@ class MainActivity : AppCompatActivity() {
         showSearching()
     }
 
+    // TEMP DEBUG LOGGING — the manifest's android:configChanges list already
+    // covers every config change we've confirmed via logcat before (see its
+    // comment), but if some *other* config change still isn't listed there,
+    // the system skips this callback entirely and destroys/recreates the
+    // Activity instead — which would show up as onStop() immediately
+    // followed by onCreate()+onStart() rather than this line. So: this line
+    // appearing means a covered config change happened (harmless, no
+    // reconnect); onStop() -> onCreate() with no onConfigurationChanged in
+    // between means an uncovered one slipped through and IS the bug.
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        dlog("onConfigurationChanged: $newConfig")
+    }
+
+    // TEMP DEBUG LOGGING — every call site below funnels through here so
+    // the debugLoggingEnabled toggle actually gates something; remove
+    // alongside every dlog() call once diagnosed.
+    private fun dlog(msg: String) {
+        if (debugLoggingEnabled) Log.d(DEBUG_TAG, msg)
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        dlog("onWindowFocusChanged: hasFocus=$hasFocus")
         // System bars can reappear on their own (a swipe-reveal, or coming
         // back from another app/the recents screen) — re-hide every time
         // focus returns rather than fighting the OS mid-gesture.
@@ -205,6 +257,7 @@ class MainActivity : AppCompatActivity() {
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
+                dlog("webView.onPageFinished: url=$url")
                 hideSearching()
             }
 
@@ -213,6 +266,13 @@ class MainActivity : AppCompatActivity() {
                 request: WebResourceRequest?,
                 error: WebResourceError?
             ) {
+                // TEMP DEBUG LOGGING — every main-frame WebView load error
+                // (including a request?.isForMainFrame == false one, logged
+                // here too so we can see it was correctly ignored).
+                dlog(
+                    "webView.onReceivedError: isForMainFrame=${request?.isForMainFrame} " +
+                        "url=${request?.url} errorCode=${error?.errorCode} description=${error?.description}"
+                )
                 if (request?.isForMainFrame == true) {
                     currentTarget = null
                     showSearching(message = getString(R.string.status_lost_connection))
@@ -224,6 +284,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        dlog("onStart")
         acquireMulticastLock()
         registerNetworkCallback()
         ensureNearbyWifiPermissionThenDiscover()
@@ -248,6 +309,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        dlog("onStop")
         cancelRetry()
         cancelDiscoveryWatchdog()
         stopDiscovery()
@@ -355,6 +417,7 @@ class MainActivity : AppCompatActivity() {
             .build()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                dlog("NetworkCallback.onAvailable: network=$network")
                 // Covers switching Wi-Fi networks (different AP, VPN toggle,
                 // etc.) — the previously-resolved IP can't be trusted once
                 // the network itself has changed, so start over.
@@ -366,10 +429,18 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onLost(network: Network) {
+                dlog("NetworkCallback.onLost: network=$network")
                 mainHandler.post {
                     currentTarget = null
                     showSearching(message = getString(R.string.status_no_wifi))
                 }
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                // TEMP DEBUG LOGGING — doesn't change any app state today,
+                // logged only to see whether a capability flap (no
+                // onAvailable/onLost) lines up with a spinner reappearance.
+                dlog("NetworkCallback.onCapabilitiesChanged: network=$network capabilities=$capabilities")
             }
         }
         networkCallback = callback
@@ -391,14 +462,17 @@ class MainActivity : AppCompatActivity() {
         if (discoveryActive) return
         val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) {
+                dlog("Nsd.onDiscoveryStarted: serviceType=$serviceType")
                 discoveryActive = true
             }
 
             override fun onServiceFound(service: NsdServiceInfo) {
+                dlog("Nsd.onServiceFound: $service")
                 resolveService(service)
             }
 
             override fun onServiceLost(service: NsdServiceInfo) {
+                dlog("Nsd.onServiceLost: $service currentTarget=$currentTarget")
                 mainHandler.post {
                     currentTarget = null
                     showSearching()
@@ -406,19 +480,23 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onDiscoveryStopped(serviceType: String) {
+                dlog("Nsd.onDiscoveryStopped: serviceType=$serviceType")
                 discoveryActive = false
             }
 
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                dlog("Nsd.onStartDiscoveryFailed: serviceType=$serviceType errorCode=$errorCode")
                 discoveryActive = false
                 scheduleRediscovery()
             }
 
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
+                dlog("Nsd.onStopDiscoveryFailed: serviceType=$serviceType errorCode=$errorCode")
                 discoveryActive = false
             }
         }
         discoveryListener = listener
+        dlog("startDiscovery: calling nsdManager.discoverServices")
         nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
     }
 
@@ -435,6 +513,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun restartDiscovery() {
+        dlog("restartDiscovery")
         stopDiscovery()
         // Guard rather than re-prompt: this runs unattended from the
         // watchdog every DISCOVERY_WATCHDOG_MS, and calling startDiscovery()
@@ -449,6 +528,7 @@ class MainActivity : AppCompatActivity() {
     private fun resolveService(service: NsdServiceInfo) {
         nsdManager.resolveService(service, object : NsdManager.ResolveListener {
             override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                dlog("Nsd.onResolveFailed: $serviceInfo errorCode=$errorCode")
                 // Transient on most OEMs — the next onServiceFound (mDNS
                 // re-announces periodically) or the retry timer covers it.
             }
@@ -457,6 +537,7 @@ class MainActivity : AppCompatActivity() {
                 val host = serviceInfo.host?.hostAddress ?: return
                 val webPort = serviceInfo.txtValue("webPort")?.toIntOrNull() ?: serviceInfo.port
                 val target = "$host:$webPort"
+                dlog("Nsd.onServiceResolved: target=$target currentTarget=$currentTarget")
                 if (target == currentTarget) return
                 currentTarget = target
                 mainHandler.post { loadMobileLink(host, webPort) }
@@ -470,16 +551,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadMobileLink(host: String, port: Int) {
+        dlog("loadMobileLink: host=$host port=$port")
         webView.loadUrl("http://$host:$port/?mode=view")
     }
 
     private fun showSearching(message: String? = null) {
+        // TEMP DEBUG LOGGING — Log.getStackTraceString so we can see which
+        // caller triggered this particular reappearance of the spinner,
+        // since several independent code paths call showSearching(). Only
+        // worth building the string when logging is actually enabled.
+        if (debugLoggingEnabled) {
+            dlog(
+                "showSearching: message=$message\n" +
+                    Log.getStackTraceString(Throwable()).lineSequence().drop(1).take(5).joinToString("\n")
+            )
+        }
         statusText.text = message ?: getString(R.string.status_searching)
         statusOverlay.visibility = View.VISIBLE
         armDiscoveryWatchdog()
     }
 
     private fun hideSearching() {
+        dlog("hideSearching")
         statusOverlay.visibility = View.GONE
         cancelDiscoveryWatchdog()
     }
@@ -493,6 +586,7 @@ class MainActivity : AppCompatActivity() {
     private fun armDiscoveryWatchdog() {
         cancelDiscoveryWatchdog()
         val runnable = Runnable {
+            dlog("discoveryWatchdog fired")
             restartDiscovery()
             // Keeps retrying every DISCOVERY_WATCHDOG_MS for as long as the
             // searching screen stays up — hideSearching() is what stops it.
@@ -510,6 +604,7 @@ class MainActivity : AppCompatActivity() {
     private fun scheduleRediscovery() {
         cancelRetry()
         val runnable = Runnable {
+            dlog("scheduleRediscovery fired")
             currentTarget = null
             restartDiscovery()
         }
@@ -546,10 +641,29 @@ class MainActivity : AppCompatActivity() {
         // successfully."
         @JavascriptInterface
         fun changeServer() {
+            dlog("WebAppBridge.changeServer called from JS")
             runOnUiThread {
                 currentTarget = null
                 showSearching()
                 restartDiscovery()
+            }
+        }
+
+        // TEMP DEBUG LOGGING — reachable from the web app's 5-finger device
+        // settings modal (see DeviceSettingsModal.tsx), same gating shape as
+        // changeServer above. Persists so the tablet can be sent off
+        // untethered with logging already on; adb logcat -d later dumps
+        // whatever's still in the on-device ring buffer. Remove this method,
+        // its DeviceSettingsModal checkbox, and androidBridge.ts's
+        // setDebugLogging once diagnosed.
+        @JavascriptInterface
+        fun setDebugLogging(enabled: Boolean) {
+            runOnUiThread {
+                debugLoggingEnabled = enabled
+                getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                    .putBoolean(KEY_DEBUG_LOGGING_ENABLED, enabled)
+                    .apply()
+                dlog("WebAppBridge.setDebugLogging: enabled=$enabled")
             }
         }
     }
