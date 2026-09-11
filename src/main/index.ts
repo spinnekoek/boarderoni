@@ -62,6 +62,7 @@ import { PLUGIN_PRODUCERS } from './plugins'
 import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuality, addMjpegViewer } from './screenCapture'
 import { getAppSettings, updateAppSettings } from './appSettings'
 import { getCustomFonts, addCustomFont, deleteCustomFont, updateCustomFontLineHeight, customFontFile } from './customFonts'
+import { getCustomVariants, addCustomVariant, deleteCustomVariant } from './customVariants'
 import { getRestDataSources, updateRestDataSources, createRestDataSource, regenerateRestDataSourceToken } from './restDataSources'
 import { syncRestIncomingServers, getRestListenStatus } from './restIncoming'
 import { isDeviceApproved, approveDevice, revokeDevice, renameApprovedDevice, listApprovedDevices } from './deviceApproval'
@@ -1391,6 +1392,12 @@ function sendInitialState(ws: WebSocket, room: DeckRoom): void {
   // dashboard:sync instead of a brief flash of fallback font until a later
   // fonts:get.
   ws.send(JSON.stringify({ type: 'fonts:list', fonts: getCustomFonts() } satisfies ServerToClient))
+  // Editor-only (see custom-variants:get's own comment in shared/types.ts) —
+  // a deployed view client has no palette to spawn a variant from, so skip
+  // sending state it'll never use, unlike fonts:list just above.
+  if (socketContext.get(ws)?.role === 'edit') {
+    ws.send(JSON.stringify({ type: 'custom-variants:list', variants: getCustomVariants() } satisfies ServerToClient))
+  }
   // Also unasked — a deployed view client never opens Settings/Plugins (the
   // only places that otherwise request this), but still needs
   // enabledPlugins to render a disabled-plugin's widget (e.g. Screen
@@ -1905,6 +1912,16 @@ function restSourcesPayload(): ServerToClient {
 
 function broadcastRestSources(): void {
   const payload = JSON.stringify(restSourcesPayload())
+  for (const [sock, sctx] of socketContext) {
+    if (sctx.role === 'edit' && sock.readyState === WebSocket.OPEN) sock.send(payload)
+  }
+}
+
+// Role-gated same as broadcastRestSources, not broadcastCustomFonts below —
+// see custom-variants:get's own comment in shared/types.ts for why a
+// deployed view client never needs this.
+function broadcastCustomVariants(): void {
+  const payload = JSON.stringify({ type: 'custom-variants:list', variants: getCustomVariants() } satisfies ServerToClient)
   for (const [sock, sctx] of socketContext) {
     if (sctx.role === 'edit' && sock.readyState === WebSocket.OPEN) sock.send(payload)
   }
@@ -2844,6 +2861,23 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         if (ctx.role !== 'edit') break
         updateCustomFontLineHeight(message.fontId, message.lineHeight)
         broadcastCustomFonts()
+        break
+      }
+      case 'custom-variants:get': {
+        if (ctx.role !== 'edit') break
+        ws.send(JSON.stringify({ type: 'custom-variants:list', variants: getCustomVariants() } satisfies ServerToClient))
+        break
+      }
+      case 'custom-variants:save': {
+        if (ctx.role !== 'edit') break
+        addCustomVariant(message.name, message.widgets)
+        broadcastCustomVariants()
+        break
+      }
+      case 'custom-variants:delete': {
+        if (ctx.role !== 'edit') break
+        deleteCustomVariant(message.variantId)
+        broadcastCustomVariants()
         break
       }
       case 'screen-capture:list-displays': {

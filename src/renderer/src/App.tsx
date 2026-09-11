@@ -7,6 +7,7 @@ import { Palette } from './components/Palette'
 import { PropertiesPanel } from './components/PropertiesPanel'
 import { Toolbar } from './components/Toolbar'
 import { ConfirmModal } from './components/ConfirmModal'
+import { PromptModal } from './components/PromptModal'
 import { DeckPicker } from './components/DeckPicker'
 import { DeviceApprovalBanner } from './components/DeviceApprovalBanner'
 import { DebugPanel } from './components/DebugPanel'
@@ -104,6 +105,7 @@ export function App(): React.JSX.Element {
       <DebugPanel />
       <StatusBar />
       <ConfirmModal />
+      <PromptModal />
       <DeviceApprovalBanner />
     </div>
   )

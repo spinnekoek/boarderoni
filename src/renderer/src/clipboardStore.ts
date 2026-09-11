@@ -8,7 +8,12 @@ import type { Widget } from '@shared/types'
 // exactly on top of each other and their source.
 const PASTE_OFFSET = 24
 
-function cloneWidget(widget: Widget, offset: number): Widget {
+// Exported for Palette.tsx's own custom-variant spawn logic — regenerating
+// every nested id (labels/positions/states) the same way a pasted widget
+// needs to is exactly what dropping a saved CustomVariant back onto the
+// canvas needs too, so it reuses this rather than duplicating the per-type
+// switch below.
+export function cloneWidget(widget: Widget, offset: number): Widget {
   if (
     widget.type === 'gauge-bar' ||
     widget.type === 'gauge-arc' ||

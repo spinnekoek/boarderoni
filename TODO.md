@@ -5,6 +5,42 @@ off as they're fixed; add new ones as they come up.
 
 ## Editor UX
 
+- [ ] On deck import, check whether every custom font id (`fontFamily:
+      "custom:<id>"`, see `isCustomFontId`/`CUSTOM_FONT_PREFIX` in
+      `shared/fonts.ts`) referenced by the imported deck's widgets/labels is
+      actually present in this install's custom font list (see
+      `main/customFonts.ts`, `FontsModal.tsx`) — warn if any aren't, and say
+      what happens if the warning's ignored (label falls back to the
+      browser's default font instead of the intended one, so text may look
+      wrong/mismatched-size until the missing font is uploaded via Settings
+      > Custom fonts). Relevant since the widget-variant presets in
+      `Palette.tsx` (added 2026-09-10/11) were deliberately built from
+      custom-font source examples but ship with built-in fonts instead,
+      specifically to dodge this same problem for those — a real imported
+      deck can still hit it.
+- [x] Let users create their own custom widget variants to appear in the
+      split-button dropdowns — implemented (2026-09-11): right-click a
+      widget (or multi-selection) on the canvas → "Save as variant" →
+      name it (new `promptStore.ts`/`PromptModal.tsx`, mirroring
+      `confirmStore`'s own imperative-await shape) → persisted app-wide via
+      a new `CustomVariant` (`shared/types.ts`) round-tripped over
+      `custom-variants:get/save/delete` (`ClientToServer`) and
+      `custom-variants:list` (`ServerToClient`), stored server-side in
+      `main/customVariants.ts` (one JSON manifest in userData, mirroring
+      `customFonts.ts`'s own pattern) and pushed unasked as part of
+      `sendInitialState`, edit-role only (a deployed view client has no
+      palette to use one from). A single-widget variant merges into that
+      widget type's own `PaletteVariantButton` dropdown (every type now
+      conditionally becomes a split button once it has any custom variant,
+      not just the 5 that already had built-in ones); a 2+-widget one (same
+      permissive multi-select threshold "Group" already uses) shows up
+      instead from a new standalone "Custom Variants" palette button
+      (`CustomVariantsButton` in `Palette.tsx`), spawned back via the same
+      `pasteWidgets`/`groupWidgets` primitives regular paste/Group already
+      use. Every dropdown row for a custom (never built-in) variant gets a
+      delete (×) button, gated by the same `useConfirmStore` confirmation
+      dialog every other destructive action in the editor uses, before
+      calling `custom-variants:delete`.
 - [ ] Migrate the remaining plain `properties__code` textareas in
       `PropertiesPanel.tsx` to the CodeMirror-backed `CodeEditor` component
       (syntax highlighting, matches the update-state action code fix from
@@ -59,6 +95,17 @@ off as they're fixed; add new ones as they come up.
       state action), while a scalar return still targets just
       `mapping.variableName` as before. `mapping.variableName` is now
       optional when the expr returns an object.
+- [ ] The random-number example plugin (`shared/plugins/random.ts` +
+      `main/plugins/random.ts`, referenced from CONTRIBUTING.md's "Adding a
+      plugin" walkthrough as the copy-this-file template) only demonstrates
+      output fields (`fields: [{ key: 'value', ... }]`) — it should also grow
+      a "max"/"min" per-instance CONFIG field (via `PluginInstance.config` —
+      see its own comment in `shared/types.ts`) so the template actually
+      shows contributors how to add a configurable field too, not just an
+      output one. Needs a renderer-side config panel (same pattern as
+      `renderer/src/plugins/ScreenCaptureConfigPanel.tsx`) plus the producer
+      reading `instance.config` instead of hardcoding `Math.random()`'s 0–1
+      range.
 
 ## Performance
 
@@ -135,3 +182,12 @@ off as they're fixed; add new ones as they come up.
       `groupId` on `WidgetVisibility`, group/ungroup from the canvas
       right-click menu, click-to-select-whole-group with re-click-to-drill-in.
       No group resize/bounding-box UI, per the original scope.
+- [ ] Investigate adding Windows audio devices as a data source — per-device
+      volume, default output device, mute state, etc. (likely a new plugin
+      kind alongside `shared/plugins/random.ts`'s own template, with a
+      `main/plugins/<kind>.ts` producer polling/subscribing to the actual OS
+      audio state — needs a Windows audio API with Node/Electron bindings,
+      not yet researched) plus a corresponding WidgetAction kind (alongside
+      `KeypressAction`/`CallRestAction` etc. in `shared/types.ts`) to
+      actually set volume/default device/mute from a button or adjuster,
+      not just read it.

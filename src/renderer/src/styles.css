@@ -760,13 +760,26 @@ needs to stretch or round at all. */
 	color: #e8e8ea;
 }
 
+/* CustomVariantsButton's own single full-width toggle — undoes the flat
+   right edge .palette__item-group .palette__item normally gets, since this
+   one has no separate chevron button sitting to its right to join up with. */
+.palette__item-group .palette__item--custom-variants {
+	border-top-right-radius: 6px;
+	border-bottom-right-radius: 6px;
+	border-right: 1px solid #3a3f4a;
+}
+
 .palette__item-variant-menu {
 	position: absolute;
 	top: 0;
 	left: 100%;
 	margin-left: 4px;
 	min-width: 140px;
-	z-index: 10;
+	width: max-content;
+	/* Above .canvas-toolbar's own z-index: 10 (the "Editing: ... · drag empty
+	space to pan" bar) — this menu is a palette overlay, so it should always
+	sit on top of whatever's on the canvas underneath it. */
+	z-index: 20;
 	background: #22262e;
 	border: 1px solid #3a3f4a;
 	border-radius: 6px;
@@ -774,20 +787,59 @@ needs to stretch or round at all. */
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
+/* CustomVariantsButton's own menu — no chevron on its right to anchor
+   beside, so it drops down below the (single, full-width) toggle instead of
+   opening to the side the way PaletteVariantButton's own does. */
+.palette__item-variant-menu--below {
+	top: 100%;
+	left: 0;
+	margin-left: 0;
+	margin-top: 4px;
+	width: 100%;
+}
+
+/* Each row pairs the add button with a delete (×) for a custom variant —
+   plain PaletteVariantButton rows never render the delete half (see its own
+   variant.customVariantId-gated conditional), so this only ever shows next
+   to a user-saved one, never a built-in. */
+.palette__item-variant-menu-row {
+	display: flex;
+	align-items: stretch;
+}
+
 .palette__item-variant-menu-item {
 	display: block;
-	width: 100%;
+	flex: 1;
+	min-width: 0;
 	padding: 8px 10px;
 	background: transparent;
 	color: #e8e8ea;
 	border: none;
 	text-align: left;
 	font-size: 13px;
+	white-space: nowrap;
 	cursor: pointer;
 }
 
 .palette__item-variant-menu-item:hover {
 	background: #343a46;
+}
+
+.palette__item-variant-menu-delete {
+	flex-shrink: 0;
+	width: 26px;
+	background: transparent;
+	color: #6b7280;
+	border: none;
+	border-left: 1px solid #3a3f4a;
+	cursor: pointer;
+	font-size: 14px;
+	line-height: 1;
+}
+
+.palette__item-variant-menu-delete:hover {
+	background: #4d1f1f;
+	color: #e27e7e;
 }
 
 .palette__hint {
@@ -3115,6 +3167,38 @@ button.deck-morph-cell:focus-visible {
 	background: #5c2424;
 }
 
+.prompt-modal__input {
+	display: block;
+	width: 100%;
+	margin: 0 0 20px;
+	padding: 8px 10px;
+	background: #14161b;
+	border: 1px solid #3a3f4a;
+	border-radius: 6px;
+	color: #e8e8ea;
+	font-size: 13px;
+	box-sizing: border-box;
+}
+
+.prompt-modal__input:focus-visible {
+	outline: none;
+	border-color: #5b8def;
+}
+
+.prompt-modal__confirm {
+	padding: 8px 14px;
+	border-radius: 6px;
+	font-size: 13px;
+	cursor: pointer;
+	background: #2d4a8a;
+	color: #cfe0ff;
+	border: 1px solid #3f5fa8;
+}
+
+.prompt-modal__confirm:hover {
+	background: #35569c;
+}
+
 /* Close (×) button shared by every modal's header row except ConfirmModal
    (which has no header — its cancel/confirm buttons already serve that
    role). */
@@ -4245,6 +4329,7 @@ button.deck-morph-cell:focus-visible {
 	border-radius: 6px;
 	padding: 4px;
 	min-width: 160px;
+	width: max-content;
 	box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 	z-index: 1;
 }
@@ -4257,6 +4342,7 @@ button.deck-morph-cell:focus-visible {
 	padding: 6px 8px;
 	border-radius: 4px;
 	font-size: 13px;
+	white-space: nowrap;
 	cursor: pointer;
 }
 

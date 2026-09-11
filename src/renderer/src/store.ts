@@ -4,6 +4,7 @@ import {
   DEFAULT_DASHBOARD,
   type ApprovedDeviceSummary,
   type ClientToServer,
+  type CustomVariant,
   type Dashboard,
   type DeckSummary,
   type DeviceInfo,
@@ -167,6 +168,14 @@ interface DashboardStore {
   // FontsModal to have something to call on mount, matching every other
   // panel's own convention.
   customFonts: CustomFont[]
+  // App-wide, user-saved widget-variant presets (see CustomVariant's own
+  // comment in shared/types.ts) — empty until first synced. Editor-only
+  // (never sent to a 'view' client, unlike customFonts above — see
+  // custom-variants:get's own comment), so it arrives unasked as part of
+  // sendInitialState the same way, just gated server-side instead of here.
+  customVariants: CustomVariant[]
+  saveCustomVariant: (name: string, widgets: Widget[]) => void
+  deleteCustomVariant: (variantId: string) => void
   // ScreenCaptureWidget's Properties monitor dropdown — null until first
   // requested (see PropertiesPanel.tsx, fetched once its Region section
   // mounts), same "null vs. empty" convention as dcsBiosAircraft above.
@@ -511,7 +520,16 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   restDataSources: [],
   restDataSourcesLanAddress: null,
   customFonts: [],
+  customVariants: [],
   screenCaptureDisplays: null,
+
+  saveCustomVariant: (name, widgets) => {
+    send({ type: 'custom-variants:save', name, widgets })
+  },
+
+  deleteCustomVariant: (variantId) => {
+    send({ type: 'custom-variants:delete', variantId })
+  },
 
   requestScreenCaptureDisplays: () => {
     send({ type: 'screen-capture:list-displays' })
@@ -858,6 +876,8 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // open to react to).
         syncCustomFontFaces(message.fonts)
         registerCustomFonts(message.fonts)
+      } else if (message.type === 'custom-variants:list') {
+        set({ customVariants: message.variants })
       } else if (message.type === 'dashboard:external-change') {
         // Only ever arrives in edit mode — the server only broadcasts this
         // to edit-role sockets in the first place (see

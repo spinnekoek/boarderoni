@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useDashboardStore } from '../store'
 import { useConfirmStore } from '../confirmStore'
+import { usePromptStore } from '../promptStore'
 import { useClipboardStore } from '../clipboardStore'
 import { useStyleClipboardStore } from '../styleClipboardStore'
 import { getSubDeckWidgets } from '@shared/subDecks'
@@ -26,6 +27,7 @@ export function ContextMenu({
   const removeWidgets = useDashboardStore((s) => s.removeWidgets)
   const groupWidgets = useDashboardStore((s) => s.groupWidgets)
   const ungroupWidgets = useDashboardStore((s) => s.ungroupWidgets)
+  const saveCustomVariant = useDashboardStore((s) => s.saveCustomVariant)
   const copy = useClipboardStore((s) => s.copy)
   const paste = useClipboardStore((s) => s.paste)
   const canPaste = useClipboardStore((s) => s.widgets.length > 0)
@@ -33,6 +35,7 @@ export function ContextMenu({
   const pasteStyle = useStyleClipboardStore((s) => s.pasteStyle)
   const styleClipboardType = useStyleClipboardStore((s) => s.entry?.widgetType)
   const confirm = useConfirmStore((s) => s.confirm)
+  const prompt = usePromptStore((s) => s.prompt)
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Only meaningful once widgetIds is set (a right-click on a widget, not
@@ -146,6 +149,28 @@ export function ContextMenu({
     onClose()
   }
 
+  // A single selected widget saves as a single-widget variant (see its own
+  // type's split-button dropdown in Palette.tsx); 2+ saves as a group
+  // variant (Palette's standalone "Custom Variants" button) — same
+  // permissive "any multi-select, not just an already-formed group"
+  // threshold canGroup's own "Group" action uses. x/y normalized so the
+  // saved widget(s)' own top-left sits at (0, 0) — see CustomVariant's own
+  // comment in shared/types.ts for why: the palette adds the spawn position
+  // back on, so a variant saved from anywhere on the canvas always drops in
+  // wherever the user's currently looking, not back at its original spot.
+  async function handleSaveVariant(): Promise<void> {
+    if (selectedWidgets.length === 0) return
+    onClose()
+    const name = await prompt('Name this variant:', { confirmLabel: 'Save' })
+    if (!name) return
+    const minX = Math.min(...selectedWidgets.map((w) => w.x))
+    const minY = Math.min(...selectedWidgets.map((w) => w.y))
+    saveCustomVariant(
+      name,
+      selectedWidgets.map((w) => ({ ...w, x: w.x - minX, y: w.y - minY }))
+    )
+  }
+
   return (
     <div ref={menuRef} className="context-menu" style={{ left: x, top: y }} onContextMenu={(e) => e.preventDefault()}>
       {widgetIds && (
@@ -180,6 +205,10 @@ export function ContextMenu({
           </button>
           <button type="button" className="context-menu__item" disabled={!canUngroup} onClick={handleUngroup}>
             Ungroup
+          </button>
+          <div className="context-menu__divider" />
+          <button type="button" className="context-menu__item" onClick={handleSaveVariant}>
+            Save as variant
           </button>
           <div className="context-menu__divider" />
           <button type="button" className="context-menu__item context-menu__item--danger" onClick={handleDelete}>

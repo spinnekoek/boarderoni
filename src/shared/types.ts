@@ -1884,6 +1884,25 @@ export type BoxWidget =
   | LabelWidget
   | LineWidget
 
+// A user-saved, named preset (see Palette.tsx's own built-in
+// WidgetVariant<W> arrays, e.g. TOGGLE_SWITCH_VARIANTS, added 2026-09-10/11)
+// — app-wide, not per-deck, same "not scoped to one deck" reasoning as
+// CustomFont. `widgets` holds the raw saved widget config(s) with x/y
+// normalized so the group's (or single widget's) own top-left sits at
+// (0, 0) — the palette adds pos.x/pos.y back on spawn, same convention
+// WidgetVariant.build(pos) already uses. A single-widget variant
+// (widgets.length === 1) slots into that widget's own type's split-button
+// dropdown; a 2+-widget one (saved from a multi-selection, same
+// canGroup-shaped permissiveness ContextMenu's own "Group" action uses) is
+// a GROUP variant, offered from the palette's standalone "Custom Variants"
+// button instead, since it has no single type to hang off of, and gets
+// re-grouped with a fresh groupId when spawned back onto a canvas.
+export interface CustomVariant {
+  id: string
+  name: string
+  widgets: Widget[]
+}
+
 // Widgets driven by the WidgetState/statesEnabled/activeStateExpr machinery
 // — used to narrow getEffectiveStates now that Widget includes types
 // without those fields.
@@ -2272,6 +2291,15 @@ export type ClientToServer =
   // CustomFont.lineHeight's own comment in shared/fonts.ts for why this is
   // per-font rather than a per-label field.
   | { type: 'fonts:update'; fontId: string; lineHeight: number | null }
+  // App-wide, not per-deck (see CustomVariant's own comment) — same
+  // edit-role-only, full-list-broadcast-back shape as fonts:*/rest-sources:*
+  // above. Unlike fonts:list, custom-variants:list is editor-only (never
+  // pushed to a 'view' client — a deployed view has no palette to use a
+  // variant from), so there's no equivalent of fonts:list's own
+  // both-roles reasoning here.
+  | { type: 'custom-variants:get' }
+  | { type: 'custom-variants:save'; name: string; widgets: Widget[] }
+  | { type: 'custom-variants:delete'; variantId: string }
   | { type: 'screen-capture:list-displays' }
   // Opens a native full-screen overlay (see main/screenCapture.ts) on the
   // chosen display for a drag-to-select rectangle. Unlike
@@ -2415,6 +2443,12 @@ export type ServerToClient =
   // content — same "full current list either way" reasoning as
   // rest-sources:list.
   | { type: 'fonts:list'; fonts: CustomFont[] }
+  // Reply to custom-variants:get, and pushed to every 'edit'-role client
+  // (see broadcastCustomVariants in main/index.ts) after a
+  // custom-variants:save/delete, plus once more as part of sendInitialState
+  // — same "full current list either way" reasoning as fonts:list, just
+  // edit-only (see custom-variants:get's own comment in ClientToServer).
+  | { type: 'custom-variants:list'; variants: CustomVariant[] }
   | { type: 'screen-capture:displays'; displays: { id: number; label: string; bounds: ScreenRegion }[] }
   // Targeted at the ONE socket that triggered the navigate-subdeck action,
   // never broadcast — which deck view is "current" is per-client UI state,
