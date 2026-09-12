@@ -8,8 +8,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --build --force",
-    "test": "vitest run",
-    "build:android": "bash android/build-android.sh"
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "",
