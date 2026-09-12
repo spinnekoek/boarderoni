@@ -1,0 +1,31 @@
+name: Release
+
+# Native deps (native-sound-mixer, sharp, node-screenshots, @nut-tree-fork/
+# nut-js) ship prebuilt binaries per platform/arch — building on the actual
+# target OS avoids cross-compile headaches, hence windows-latest rather than
+# building a Windows target from a Linux runner.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

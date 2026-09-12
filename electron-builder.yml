@@ -1,0 +1,46 @@
+appId: com.spinnekoek.boarderoni
+productName: Boarderoni
+
+directories:
+  output: dist
+
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+  - "!**/*.map"
+
+# Several runtime dependencies ship prebuilt native .node binaries
+# (native-sound-mixer, @nut-tree-fork/libnut-win32, @img/sharp-win32-x64,
+# node-screenshots-win32-x64-msvc) that can't load from inside an asar
+# archive without per-package asarUnpack entries, and the DCS-BIOS/screen-
+# capture/OCR/windows-audio worker_threads.Worker scripts (see
+# main/workerHost.ts, electron.vite.config.ts's extra rollup inputs) are
+# resolved via join(__dirname, '<name>Worker.js') at runtime, which is a
+# path shape only ever tested unpacked (dev). Disabling asar entirely for
+# this first packaging pass sidesteps both classes of risk rather than
+# hand-verifying every native/worker path still resolves correctly once
+# archived — worth revisiting (asar: true + the asarUnpack globs above)
+# once a packaged build has actually been smoke-tested.
+asar: false
+
+win:
+  target:
+    - nsis
+  icon: resources/icon.ico
+  # DCS (and similar elevated games) run as admin; Windows UIPI silently
+  # drops synthetic keystrokes (nut-js/SendInput, main/index.ts) sent from a
+  # non-elevated process to an elevated one, so boarderoni needs to run at
+  # the same integrity level for macros to reach the game — see TODO.md's
+  # Packaging section.
+  requestedExecutionLevel: requireAdministrator
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+
+publish:
+  provider: github
+  owner: spinnekoek
+  repo: boarderoni
