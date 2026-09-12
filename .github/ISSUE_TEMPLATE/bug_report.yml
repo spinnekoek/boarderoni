@@ -1,0 +1,48 @@
+name: Bug report
+description: Something isn't working right
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Boarderoni version
+      description: Shown in the desktop app's window title bar
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Where did this happen?
+      options:
+        - Desktop editor
+        - Mobile (Android) view client
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: plugins
+    attributes:
+      label: Relevant plugins/widgets involved
+      description: e.g. Windows Audio, DCS-BIOS, Screen Capture, a specific widget type
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Toolbar > Console, or the terminal output if running from source
