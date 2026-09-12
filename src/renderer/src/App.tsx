@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo } from 'react'
+import { useEffect, useLayoutEffect, useMemo } from 'react'
 import { useDashboardStore } from './store'
 import { getLastDeckId } from './id'
 import { Canvas } from './components/Canvas'
@@ -19,13 +19,21 @@ function readMode(): 'edit' | 'view' {
   return params.get('mode') === 'view' ? 'view' : 'edit'
 }
 
+// Passed by main/index.ts's createEditorWindow as a query param (same
+// mechanism as mode above) rather than read from package.json directly —
+// the renderer bundle is also served as-is to Android view clients, which
+// have no window title bar to show it in and no reason to know it.
+function readVersion(): string {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('version') ?? ''
+}
+
 export function App(): React.JSX.Element {
   const mode = useMemo(readMode, [])
+  const version = useMemo(readVersion, [])
   const deckId = useDashboardStore((s) => s.deckId)
   const connect = useDashboardStore((s) => s.connect)
   const connectLobby = useDashboardStore((s) => s.connectLobby)
-  const disconnect = useDashboardStore((s) => s.disconnect)
-  const connected = useDashboardStore((s) => s.connected)
   const dashboardName = useDashboardStore((s) => s.dashboard.name)
   const devicePending = useDashboardStore((s) => s.devicePending)
   const deviceDenied = useDashboardStore((s) => s.deviceDenied)
@@ -48,6 +56,17 @@ export function App(): React.JSX.Element {
       connectLobby()
     }
   }, [])
+
+  // Editor-only (see readVersion above — a view client's WebView title bar
+  // isn't visible anyway): reflects the loaded deck's own name in the OS
+  // window title, in addition to the same name already shown in-app
+  // (header, moved into Toolbar's "← Decks" button's neighborhood). Plain
+  // document.title assignment — Electron's default 'page-title-updated'
+  // handling reflects it to the actual window chrome with no IPC needed.
+  useEffect(() => {
+    if (mode !== 'edit') return
+    document.title = deckId !== null ? `${dashboardName} - Boarderoni v${version}` : `Boarderoni v${version}`
+  }, [mode, deckId, dashboardName, version])
 
   // Applies whether or not a deck has been chosen yet — a pending/denied
   // view device shouldn't see even the deck list, let alone a dashboard
@@ -86,17 +105,6 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="app">
-      <header className="app__bar">
-        <div className="app__bar-left">
-          <button className="app__back" onClick={disconnect}>
-            ← Decks
-          </button>
-          <span className="app__title">{dashboardName}</span>
-        </div>
-        <span className={`app__status app__status--${connected ? 'on' : 'off'}`}>
-          {connected ? 'connected' : 'disconnected'}
-        </span>
-      </header>
       <Toolbar />
       <div className="app__body">
         <Palette />

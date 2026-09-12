@@ -39,6 +39,7 @@ export function Toolbar(): React.JSX.Element {
   const canRedo = useHistoryStore((s) => s.future.length > 0)
   const undo = useHistoryStore((s) => s.undo)
   const redo = useHistoryStore((s) => s.redo)
+  const disconnect = useDashboardStore((s) => s.disconnect)
 
   const devices = useDashboardStore((s) => s.devices)
 
@@ -46,6 +47,9 @@ export function Toolbar(): React.JSX.Element {
 
   return (
     <div className="toolbar">
+      <button type="button" className="toolbar__button" onClick={disconnect}>
+        ← Decks
+      </button>
       <button type="button" className="toolbar__button" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={undo}>
         Undo
       </button>

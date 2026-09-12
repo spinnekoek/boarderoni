@@ -1,6 +1,6 @@
 {
   "name": "boarderoni",
-  "version": "1.0.0",
+  "version": "0.1.0-alpha.1",
   "description": "Boarderoni: design button/macro dashboards on desktop, drive them from an Android WebView client",
   "main": "./out/main/index.js",
   "scripts": {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from 'electron'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import {
   readFile,
@@ -3164,6 +3164,40 @@ function saveWindowState(win: BrowserWindow): void {
   writeFileSync(windowStateFile, JSON.stringify(bounds), 'utf-8')
 }
 
+// Menu.setApplicationMenu(null) below (app.whenReady) drops Electron's
+// default File/Edit/View/Window menu bar entirely — removing it also
+// silently drops its accelerators, so the handful actually worth keeping
+// (DevTools, reload, zoom, fullscreen — "general Electron stuff") are
+// reimplemented here via a raw before-input-event listener instead.
+function registerWindowShortcuts(win: BrowserWindow): void {
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return
+    const key = input.key.toLowerCase()
+    if ((input.control && input.shift && key === 'i') || key === 'f12') {
+      win.webContents.toggleDevTools()
+      event.preventDefault()
+    } else if ((input.control && input.shift && key === 'r') || (input.shift && key === 'f5')) {
+      win.webContents.reloadIgnoringCache()
+      event.preventDefault()
+    } else if ((input.control && key === 'r') || key === 'f5') {
+      win.webContents.reload()
+      event.preventDefault()
+    } else if (input.control && (key === '=' || key === '+')) {
+      win.webContents.setZoomLevel(win.webContents.getZoomLevel() + 0.5)
+      event.preventDefault()
+    } else if (input.control && key === '-') {
+      win.webContents.setZoomLevel(win.webContents.getZoomLevel() - 0.5)
+      event.preventDefault()
+    } else if (input.control && key === '0') {
+      win.webContents.setZoomLevel(0)
+      event.preventDefault()
+    } else if (key === 'f11') {
+      win.setFullScreen(!win.isFullScreen())
+      event.preventDefault()
+    }
+  })
+}
+
 function createEditorWindow(): void {
   const state = loadWindowState()
   const win = new BrowserWindow({
@@ -3186,6 +3220,8 @@ function createEditorWindow(): void {
   win.on('move', scheduleSaveWindowState)
   win.on('close', () => saveWindowState(win))
 
+  registerWindowShortcuts(win)
+
   // Renderer console output (including ErrorBoundary's componentDidCatch
   // logs) otherwise only reaches DevTools, invisible from the terminal
   // running electron-vite dev — relay it here so a renderer crash is
@@ -3195,13 +3231,18 @@ function createEditorWindow(): void {
   })
 
   if (devServerUrl) {
-    win.loadURL(`${devServerUrl}?mode=edit`)
+    win.loadURL(`${devServerUrl}?mode=edit&version=${encodeURIComponent(app.getVersion())}`)
   } else {
-    win.loadFile(join(rendererDist, 'index.html'), { query: { mode: 'edit' } })
+    win.loadFile(join(rendererDist, 'index.html'), { query: { mode: 'edit', version: app.getVersion() } })
   }
 }
 
 app.whenReady().then(() => {
+  // Drops the default File/Edit/View/Window menu bar — see
+  // registerWindowShortcuts above for the accelerators this would otherwise
+  // take with it.
+  Menu.setApplicationMenu(null)
+
   createEditorWindow()
 
   app.on('activate', () => {

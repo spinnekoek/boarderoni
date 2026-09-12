@@ -138,40 +138,6 @@ body {
 	opacity: 0.6;
 }
 
-.app__bar {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 10px 16px;
-	background: #1c1f26;
-	border-bottom: 1px solid #2a2e37;
-}
-
-.app__bar-left {
-	display: flex;
-	align-items: center;
-	gap: 12px;
-}
-
-.app__back {
-	background: #2a2e37;
-	color: #9098a8;
-	border: 1px solid #3a3f4a;
-	border-radius: 4px;
-	padding: 4px 10px;
-	font-size: 12px;
-	cursor: pointer;
-}
-
-.app__back:hover {
-	background: #343a46;
-	color: #e8e8ea;
-}
-
-.app__title {
-	font-weight: 600;
-}
-
 .app__status {
 	font-size: 12px;
 	padding: 2px 8px;
@@ -3419,7 +3385,11 @@ button.deck-morph-cell:focus-visible {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	z-index: 100;
+	/* Above .toast-stack's z-index: 1000 (action-error toasts) — this modal
+	   (5-finger gesture → device settings, or the APK-install QR one) should
+	   stay on top of a deployed-view action-error toast firing underneath
+	   it, not get buried by one. */
+	z-index: 1100;
 }
 
 .device-modal {
