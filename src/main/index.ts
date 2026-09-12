@@ -45,6 +45,7 @@ import {
   type SendDcsCommandAction,
   type SequenceStep,
   type ServerToClient,
+  type SetWindowsAudioAction,
   type StepPath,
   type SwitchPosition,
   type Variable,
@@ -63,6 +64,16 @@ import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuali
 import { getAppSettings, updateAppSettings } from './appSettings'
 import { getCustomFonts, addCustomFont, deleteCustomFont, updateCustomFontLineHeight, customFontFile } from './customFonts'
 import { getCustomVariants, addCustomVariant, deleteCustomVariant } from './customVariants'
+import {
+  listDevices as listWindowsAudioDevices,
+  getSnapshot as getWindowsAudioSnapshot,
+  setVolume as setWindowsAudioVolume,
+  setMute as setWindowsAudioMute,
+  listSessions as listWindowsAudioSessions,
+  getSessionSnapshot as getWindowsAudioSessionSnapshot,
+  setSessionVolume as setWindowsAudioSessionVolume,
+  setSessionMute as setWindowsAudioSessionMute
+} from './windowsAudio/connectionManager'
 import { getRestDataSources, updateRestDataSources, createRestDataSource, regenerateRestDataSourceToken } from './restDataSources'
 import { syncRestIncomingServers, getRestListenStatus } from './restIncoming'
 import { isDeviceApproved, approveDevice, revokeDevice, renameApprovedDevice, listApprovedDevices } from './deviceApproval'
@@ -1818,6 +1829,58 @@ async function runSendDcsCommand(room: DeckRoom, action: SendDcsCommandAction, t
   await sendDcsBiosCommand(action.identifier, argument)
 }
 
+// Same enabledPlugins gate / $value-shorthand precedence as
+// runSendDcsCommand above, just against the windows-audio worker instead of
+// DCS-BIOS. volume and muteAction are independent — either, both, or
+// neither can be set on one action (undefined muteAction means "don't
+// touch mute"). action.appName set means "target this app's own session"
+// instead of a device — see SetWindowsAudioAction's own comment in
+// shared/types.ts; the two modes are otherwise identical, just resolved
+// against a different target function/label here.
+async function runSetWindowsAudioAction(room: DeckRoom, action: SetWindowsAudioAction, trigger?: TriggerValue): Promise<void> {
+  if (!getAppSettings().enabledPlugins.includes('windowsAudio')) {
+    throw new Error('Windows Audio is disabled in Settings')
+  }
+
+  const isSession = action.appName !== undefined
+  const targetLabel = isSession ? `application "${action.appName}"` : `device "${action.deviceName || 'default'}"`
+  const setVolume = isSession ? (percent: number) => setWindowsAudioSessionVolume(action.appName!, percent) : (percent: number) => setWindowsAudioVolume(action.deviceName, percent)
+  const setMute = isSession ? (muted: boolean) => setWindowsAudioSessionMute(action.appName!, muted) : (muted: boolean) => setWindowsAudioMute(action.deviceName, muted)
+  const getSnapshot = isSession ? () => getWindowsAudioSessionSnapshot(action.appName!) : () => getWindowsAudioSnapshot(action.deviceName)
+
+  if (action.volume !== undefined || action.volumeExpr) {
+    let volume = action.volume ?? ''
+    const volumeExpr =
+      action.volumeExpr && action.volumeExpr.trim()
+        ? action.volumeExpr
+        : volume.trim() === DCS_COMMAND_VALUE_SHORTHAND
+          ? `return variables.${DCS_COMMAND_VALUE_SHORTHAND};`
+          : undefined
+    if (volumeExpr) {
+      const variableMap = toVariableMap(room.dashboard.variables ?? [])
+      const result = withLogRoom(room, () =>
+        trigger ? evaluateMappingExpression(volumeExpr, trigger.value, variableMap, trigger.index) : tryEvaluateExpression(volumeExpr, variableMap)
+      )
+      if (!result.ok) throw new Error(result.error)
+      volume = String(result.value)
+    }
+    const percent = Number(volume)
+    if (!Number.isFinite(percent)) throw new Error(`Windows Audio: "${volume}" isn't a number`)
+    await setVolume(percent)
+  }
+
+  if (action.muteAction === 'mute' || action.muteAction === 'unmute') {
+    await setMute(action.muteAction === 'mute')
+  } else if (action.muteAction === 'toggle') {
+    // toggle needs the CURRENT mute state first — the one extra round trip
+    // this costs only happens for 'toggle', not the far more common
+    // explicit mute/unmute above.
+    const current = await getSnapshot()
+    if (!current) throw new Error(`Windows Audio: ${targetLabel} not found`)
+    await setMute(!current.muted)
+  }
+}
+
 // Posts a CallRestAction's target RestDataSource's outgoing payload — same
 // variables-in-scope/$value-while-dragging convention as runSendDcsCommand
 // above, just resolving N named placeholders instead of one argument. Uses
@@ -2090,6 +2153,10 @@ async function runActionStep(room: DeckRoom, action: WidgetAction, trigger: Trig
   }
   if (action.kind === 'call-rest') {
     await runCallRestAction(room, action, trigger)
+    return
+  }
+  if (action.kind === 'set-windows-audio') {
+    await runSetWindowsAudioAction(room, action, trigger)
     return
   }
   if (action.kind === 'navigate-subdeck') {
@@ -2878,6 +2945,18 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         if (ctx.role !== 'edit') break
         deleteCustomVariant(message.variantId)
         broadcastCustomVariants()
+        break
+      }
+      case 'windows-audio:list-devices': {
+        if (ctx.role !== 'edit') break
+        const devices = await listWindowsAudioDevices()
+        ws.send(JSON.stringify({ type: 'windows-audio:devices', devices } satisfies ServerToClient))
+        break
+      }
+      case 'windows-audio:list-sessions': {
+        if (ctx.role !== 'edit') break
+        const sessions = await listWindowsAudioSessions()
+        ws.send(JSON.stringify({ type: 'windows-audio:sessions', sessions } satisfies ServerToClient))
         break
       }
       case 'screen-capture:list-displays': {

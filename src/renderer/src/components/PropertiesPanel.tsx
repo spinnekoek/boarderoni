@@ -5,6 +5,7 @@ import { useConfirmStore } from '../confirmStore'
 import { nextId, isSectionOpen, setSectionOpen, getLastDcsAircraft, setLastDcsAircraft } from '../id'
 import { usePropertiesExpansionStore, expandAllSections, collapseAllSections } from '../propertiesExpansionStore'
 import { fuzzyScore } from '../fuzzyMatch'
+import { WindowsAudioTargetPicker } from '../plugins/WindowsAudioTargetPicker'
 import { FONT_OPTIONS, resolveFont, customFontToOption } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, pickAutoBorderColor, pickLegibleTextColor } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING, DCS_COMMAND_VALUE_SHORTHAND } from '@shared/constants'
@@ -55,6 +56,7 @@ import type {
   RockerSwitchWidget,
   ScreenCaptureWidget,
   SendDcsCommandAction,
+  SetWindowsAudioAction,
   SequenceStep,
   SquareBorderStyle,
   StatefulWidget,
@@ -454,6 +456,16 @@ function LabelFields({
   const isTextColorExpr = label.textColorExpr !== undefined
   const isAutoTextColor = label.textColor == null && !isTextColorExpr
   const isTextExpr = label.textExpr !== undefined
+  // Remembers the last non-empty textExpr across a toggle-off-then-back-on
+  // — without this, clicking × (which unconditionally clears to undefined)
+  // then ƒx again started a real, already-written expression over from a
+  // blank string with no way back short of Ctrl+Z. Same fix
+  // SendDcsCommandActionEditor's own Value field already uses for this
+  // exact shape.
+  const textExprDraftRef = useRef(label.textExpr ?? '')
+  useEffect(() => {
+    if (label.textExpr) textExprDraftRef.current = label.textExpr
+  }, [label.textExpr])
   const [textExprExpanded, setTextExprExpanded] = useState(false)
   // Every LabelFields instance reads this directly (rather than the 9-odd
   // call sites threading it down as a prop) — same "just read the store"
@@ -491,7 +503,7 @@ function LabelFields({
               ×
             </button>
           ) : (
-            <button type="button" className="color-picker-button__fx" title="Use an expression" onClick={() => onChange({ textExpr: '' })}>
+            <button type="button" className="color-picker-button__fx" title="Use an expression" onClick={() => onChange({ textExpr: textExprDraftRef.current })}>
               ƒx
             </button>
           )}
@@ -1162,6 +1174,15 @@ function ActionFields({
   const callableRestSources = restDataSources.filter((s) => s.enabled && s.outgoing.url.trim())
   const selectedRestSource = action.kind === 'call-rest' ? restDataSources.find((s) => s.id === action.dataSourceId) : undefined
 
+  // Same "own selector" reasoning as subDecks/restDataSources above, and
+  // same null-reads-as-enabled convention dcsBiosActionEnabled's own prop
+  // uses (see its computation in the top-level PropertiesPanel component)
+  // — just read directly here instead of threading a second boolean prop
+  // through every one of dcsBiosActionEnabled's many call sites for what's
+  // otherwise the exact same gate.
+  const enabledPlugins = useDashboardStore((s) => s.enabledPlugins)
+  const windowsAudioActionEnabled = enabledPlugins === null || enabledPlugins.includes('windowsAudio')
+
   return (
     <>
       <label className="properties__field properties__field--inline">
@@ -1179,6 +1200,7 @@ function ActionFields({
             else if (kind === 'open-overlay')
               onChange({ kind: 'open-overlay', subDeckId: subDecks[0]?.id ?? '', edge: 'right', size: 320, sizeUnit: 'px' })
             else if (kind === 'close-overlay') onChange({ kind: 'close-overlay' })
+            else if (kind === 'set-windows-audio') onChange({ kind: 'set-windows-audio', deviceName: '' })
             else if (kind.startsWith('call-rest:')) onChange({ kind: 'call-rest', dataSourceId: kind.slice('call-rest:'.length), values: [] })
           }}
         >
@@ -1186,6 +1208,7 @@ function ActionFields({
           <option value="keypress">Keypress</option>
           <option value="update-state">Update state</option>
           {(dcsBiosActionEnabled || action.kind === 'send-dcs-command') && <option value="send-dcs-command">Send DCS command</option>}
+          {(windowsAudioActionEnabled || action.kind === 'set-windows-audio') && <option value="set-windows-audio">Set Windows Audio</option>}
           <option value="navigate-subdeck">Navigate to screen</option>
           <option value="open-overlay">Open overlay</option>
           <option value="close-overlay">Close overlay</option>
@@ -1270,6 +1293,8 @@ function ActionFields({
         </p>
       ) : action.kind === 'send-dcs-command' ? (
         <SendDcsCommandActionEditor action={action} onPatch={(fields) => onChange({ ...action, ...fields })} variableHint={variableHint} />
+      ) : action.kind === 'set-windows-audio' ? (
+        <SetWindowsAudioActionEditor action={action} onPatch={(fields) => onChange({ ...action, ...fields })} variableHint={variableHint} />
       ) : (
         // Narrowed by every kind check above, but TS doesn't retain that
         // narrowing inside the onChange closure below (a callback could in
@@ -2154,6 +2179,98 @@ function SendDcsCommandActionEditor({
           )}
         </>
       )}
+    </>
+  )
+}
+
+// Editor for a ButtonWidget/AdjusterWidget's SetWindowsAudioAction — a
+// device picker (same options as WindowsAudioConfigPanel's own), a Volume
+// field with the same plain-value/$value-shorthand/expression precedence
+// SendDcsCommandActionEditor's own Value field uses, and a Mute action
+// select. No "Test" button here (unlike SendDcsCommandActionEditor) — DCS
+// commands are cheap and inert to test blind; a live volume/mute change is
+// neither, so it isn't offered as a one-click try-it.
+function SetWindowsAudioActionEditor({
+  action,
+  onPatch,
+  variableHint
+}: {
+  action: SetWindowsAudioAction
+  onPatch: (fields: Partial<SetWindowsAudioAction>) => void
+  // See ActionFields' own doc comment.
+  variableHint?: string
+}): React.JSX.Element {
+  const isExpr = action.volumeExpr !== undefined
+
+  return (
+    <>
+      <label className="properties__field">
+        <span>Target</span>
+        <WindowsAudioTargetPicker
+          deviceName={action.deviceName}
+          appName={action.appName}
+          onChangeDeviceName={(deviceName) => onPatch({ deviceName })}
+          onChangeAppName={(appName) => onPatch({ appName })}
+        />
+      </label>
+
+      <label className="properties__field">
+        <span>Volume</span>
+        <div className="properties__file-row">
+          {isExpr ? (
+            <span className="properties__hint-inline">Using expression below</span>
+          ) : (
+            <input
+              value={action.volume ?? ''}
+              placeholder="0-100, leave blank to only touch mute"
+              onChange={(e) => onPatch({ volume: e.target.value })}
+              title={`Type ${DCS_COMMAND_VALUE_SHORTHAND} to send the value that triggered this action, same as an expression of "return variables.${DCS_COMMAND_VALUE_SHORTHAND};" below`}
+            />
+          )}
+          {isExpr ? (
+            <button type="button" className="color-picker-button__clear" title="Use a fixed value instead" onClick={() => onPatch({ volumeExpr: undefined })}>
+              ×
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="color-picker-button__fx"
+              title={`Compute the value with an expression — or type ${DCS_COMMAND_VALUE_SHORTHAND} in the Volume field above as shorthand for "return variables.${DCS_COMMAND_VALUE_SHORTHAND};"`}
+              onClick={() => onPatch({ volumeExpr: '' })}
+            >
+              ƒx
+            </button>
+          )}
+        </div>
+      </label>
+      {isExpr && (
+        <div className="properties__field">
+          <span>Expression</span>
+          <div className="color-picker-button__expr-panel">
+            <div className="color-picker-button__expr-editor-wrap">
+              <CodeEditor
+                value={action.volumeExpr ?? ''}
+                onChange={(code) => onPatch({ volumeExpr: code })}
+                placeholder={variableHint ? `return ${variableHint};` : 'return variables.my_variable;'}
+                minimal
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      <label className="properties__field">
+        <span>Mute</span>
+        <select
+          value={action.muteAction ?? 'none'}
+          onChange={(e) => onPatch({ muteAction: e.target.value === 'none' ? undefined : (e.target.value as SetWindowsAudioAction['muteAction']) })}
+        >
+          <option value="none">Don&rsquo;t change</option>
+          <option value="mute">Mute</option>
+          <option value="unmute">Unmute</option>
+          <option value="toggle">Toggle</option>
+        </select>
+      </label>
     </>
   )
 }

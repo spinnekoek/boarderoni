@@ -682,6 +682,135 @@ needs to stretch or round at all. */
 	text-align: center;
 }
 
+/* Windows Audio's own device picker (see WindowsAudioDevicePicker.tsx,
+   shared by WindowsAudioConfigPanel and SetWindowsAudioActionEditor) —
+   flags whichever row is (or tracks) the system's current default output
+   device, both on the closed toggle and on that row inside the open list.
+   A native <select>/<option> can't host anything but plain text, which is
+   why this is a custom listbox instead of one. */
+.windows-audio__default-tag {
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	background: #14532d;
+	color: #4ade80;
+	border: 1px solid #22c55e;
+	border-radius: 999px;
+	padding: 2px 8px;
+	font-size: 11px;
+	line-height: 1.4;
+	white-space: nowrap;
+}
+
+.windows-audio-device-picker {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+}
+
+.windows-audio-device-picker__toggle {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	padding: 6px 10px;
+	background: #14161b;
+	border: 1px solid #3a3f4a;
+	border-radius: 6px;
+	color: #e8e8ea;
+	font-size: 13px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.windows-audio-device-picker__toggle:hover {
+	border-color: #4a5160;
+}
+
+.windows-audio-device-picker__toggle-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.windows-audio-device-picker__chevron {
+	flex-shrink: 0;
+	color: #9098a8;
+}
+
+.windows-audio-device-picker__menu {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	right: 0;
+	margin-top: 4px;
+	max-height: 240px;
+	overflow-y: auto;
+	background: #22262e;
+	border: 1px solid #3a3f4a;
+	border-radius: 6px;
+	box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+	z-index: 20;
+}
+
+.windows-audio-device-picker__row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	width: 100%;
+	padding: 8px 10px;
+	background: transparent;
+	border: none;
+	color: #e8e8ea;
+	font-size: 13px;
+	text-align: left;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.windows-audio-device-picker__row span:first-child {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.windows-audio-device-picker__row:hover {
+	background: #343a46;
+}
+
+/* Device vs. Application mode toggle (see WindowsAudioTargetPicker.tsx) —
+   a plain two-segment tab strip sitting above the actual device/session
+   picker row. */
+.windows-audio-target-picker__mode {
+	display: flex;
+	gap: 4px;
+	margin-bottom: 6px;
+}
+
+.windows-audio-target-picker__mode-button {
+	flex: 1;
+	padding: 6px 10px;
+	background: #14161b;
+	border: 1px solid #3a3f4a;
+	border-radius: 6px;
+	color: #9098a8;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.windows-audio-target-picker__mode-button:hover {
+	color: #e8e8ea;
+	border-color: #4a5160;
+}
+
+.windows-audio-target-picker__mode-button--active {
+	background: #2d4a8a;
+	border-color: #3f5fa8;
+	color: #cfe0ff;
+}
+
 .debug-panel__message {
 	color: #e8e8ea;
 }
@@ -1897,6 +2026,16 @@ button.deck-morph-cell:focus-visible {
 	pointer-events: none;
 }
 
+/* VariantWarningToasts' own — top-anchored instead of ToastStack's default
+   bottom, and stacking downward (new ones append below, not above) since
+   there's no "most recent at the bottom of the viewport" reason to prefer
+   column-reverse up here the way ToastStack's own bottom placement has. */
+.toast-stack--top {
+	top: 16px;
+	bottom: auto;
+	flex-direction: column;
+}
+
 .toast {
 	pointer-events: auto;
 	cursor: pointer;
@@ -1910,6 +2049,62 @@ button.deck-morph-cell:focus-visible {
 	background: #3a1f22;
 	border: 1px solid #6b2b2b;
 	color: #f0d8d8;
+}
+
+/* VariantWarningToasts' own — a widget variant referencing variables that
+   aren't configured yet, not a runtime failure, so amber rather than
+   .toast--error's red. Bolder/brighter than a plain toast (thick left
+   accent stripe, brighter border, glow) plus the icon in
+   VariantWarningToasts.tsx's own title — meant to read as "warning" at a
+   glance, not just another status toast. .toast__message's own color is
+   hardcoded to the error red below, so it needs its own override here too,
+   not just the background/border. */
+.toast--warning {
+	position: relative;
+	/* Only the explicit dismiss (×) button closes this one, unlike
+	   ToastStack's own toast (still click-anywhere via .toast's shared
+	   cursor: pointer) — override that inherited affordance so hovering the
+	   card body doesn't look clickable when it no longer is. */
+	cursor: default;
+	padding-right: 28px;
+	background: #3a3320;
+	border: 1px solid #a3821f;
+	border-left: 4px solid #f5b800;
+	color: #f0e6d8;
+	box-shadow:
+		0 4px 16px rgba(0, 0, 0, 0.4),
+		0 0 0 1px rgba(245, 184, 0, 0.15);
+}
+
+.toast__dismiss {
+	position: absolute;
+	top: 6px;
+	right: 8px;
+	background: transparent;
+	border: none;
+	color: #cbb676;
+	font-size: 16px;
+	line-height: 1;
+	cursor: pointer;
+	padding: 2px;
+}
+
+.toast__dismiss:hover {
+	color: #ffd666;
+}
+
+.toast--warning .toast__message {
+	color: #f0e6d8;
+}
+
+.toast--warning .toast__title {
+	color: #ffd666;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+}
+
+.toast__icon {
+	margin-right: 4px;
 }
 
 .toast__title {

@@ -6,6 +6,7 @@ import { datetimeProducer } from './datetime'
 import { dcsbiosProducer } from './dcsbios'
 import { screenCaptureProducer } from './screenCapture'
 import { randomProducer } from './random'
+import { windowsAudioProducer } from './windowsAudio'
 
 export type { PluginProducer } from './types'
 
@@ -13,5 +14,6 @@ export const PLUGIN_PRODUCERS: Record<string, PluginProducer> = {
   datetime: datetimeProducer,
   dcsbios: dcsbiosProducer,
   screenCapture: screenCaptureProducer,
-  random: randomProducer
+  random: randomProducer,
+  windowsAudio: windowsAudioProducer
 }

@@ -12,6 +12,7 @@ import { dcsViewportsPlugin } from './dcsViewports'
 import { screenCapturePlugin } from './screenCapture'
 import { randomPlugin } from './random'
 import { restPlugin } from './rest'
+import { windowsAudioPlugin } from './windowsAudio'
 
 export type { PluginField, PluginTypeMeta } from './types'
 
@@ -21,7 +22,8 @@ export const PLUGIN_TYPES: PluginTypeMeta[] = [
   dcsViewportsPlugin,
   screenCapturePlugin,
   randomPlugin,
-  restPlugin
+  restPlugin,
+  windowsAudioPlugin
 ]
 
 export function getPluginType(kind: string): PluginTypeMeta | undefined {

@@ -57,6 +57,7 @@
     "@tanstack/react-virtual": "^3.14.9",
     "bonjour-service": "^1.4.4",
     "codemirror": "^6.0.2",
+    "native-sound-mixer": "^3.4.6-win",
     "node-screenshots": "^0.2.8",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",

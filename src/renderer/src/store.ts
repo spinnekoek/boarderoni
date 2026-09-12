@@ -181,6 +181,15 @@ interface DashboardStore {
   // mounts), same "null vs. empty" convention as dcsBiosAircraft above.
   screenCaptureDisplays: { id: number; label: string; bounds: ScreenRegion }[] | null
   requestScreenCaptureDisplays: () => void
+  // Windows Audio plugin's own device picker (WindowsAudioConfigPanel) and
+  // the SetWindowsAudioAction editor's device dropdown — same "null until
+  // first requested" convention as screenCaptureDisplays above.
+  windowsAudioDevices: { name: string; isDefault: boolean }[] | null
+  requestWindowsAudioDevices: () => void
+  // Same convention, for "Application" mode's own picker (currently-active
+  // app audio sessions, see WindowsAudioTargetPicker.tsx).
+  windowsAudioSessions: { name: string; appName: string }[] | null
+  requestWindowsAudioSessions: () => void
   // No reply to await here — the picked region reaches every client
   // (including this one) through the normal dashboard:sync broadcast, same
   // as background-image:upload's result does (see screen-capture:pick-region's
@@ -522,6 +531,8 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   customFonts: [],
   customVariants: [],
   screenCaptureDisplays: null,
+  windowsAudioDevices: null,
+  windowsAudioSessions: null,
 
   saveCustomVariant: (name, widgets) => {
     send({ type: 'custom-variants:save', name, widgets })
@@ -529,6 +540,14 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   deleteCustomVariant: (variantId) => {
     send({ type: 'custom-variants:delete', variantId })
+  },
+
+  requestWindowsAudioDevices: () => {
+    send({ type: 'windows-audio:list-devices' })
+  },
+
+  requestWindowsAudioSessions: () => {
+    send({ type: 'windows-audio:list-sessions' })
   },
 
   requestScreenCaptureDisplays: () => {
@@ -819,6 +838,10 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         pushRemoteDebugLog(message.message)
       } else if (message.type === 'devices:sync') {
         set({ devices: message.devices })
+      } else if (message.type === 'windows-audio:devices') {
+        set({ windowsAudioDevices: message.devices })
+      } else if (message.type === 'windows-audio:sessions') {
+        set({ windowsAudioSessions: message.sessions })
       } else if (message.type === 'screen-capture:displays') {
         set({ screenCaptureDisplays: message.displays })
       } else if (message.type === 'dcsbios:aircraft-list') {

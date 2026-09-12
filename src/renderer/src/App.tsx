@@ -8,6 +8,7 @@ import { PropertiesPanel } from './components/PropertiesPanel'
 import { Toolbar } from './components/Toolbar'
 import { ConfirmModal } from './components/ConfirmModal'
 import { PromptModal } from './components/PromptModal'
+import { VariantWarningToasts } from './components/VariantWarningToasts'
 import { DeckPicker } from './components/DeckPicker'
 import { DeviceApprovalBanner } from './components/DeviceApprovalBanner'
 import { DebugPanel } from './components/DebugPanel'
@@ -106,6 +107,7 @@ export function App(): React.JSX.Element {
       <StatusBar />
       <ConfirmModal />
       <PromptModal />
+      <VariantWarningToasts />
       <DeviceApprovalBanner />
     </div>
   )

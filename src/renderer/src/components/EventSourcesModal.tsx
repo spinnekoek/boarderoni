@@ -10,7 +10,7 @@ import { ExpressionEditorModal } from './ExpressionEditorModal'
 import { getPluginType, instantiablePluginTypes, type PluginTypeMeta } from '@shared/plugins'
 import type { Plugin, PluginMapping } from '@shared/types'
 import type { DcsBiosFieldCatalogEntry } from '@shared/dcsBiosTypes'
-import { PLUGIN_CONFIG_PANELS, defaultDcsBiosConfig, DEFAULT_OCR_INTERVAL_MS } from '../plugins'
+import { PLUGIN_CONFIG_PANELS, defaultDcsBiosConfig, DEFAULT_OCR_INTERVAL_MS, defaultWindowsAudioConfig } from '../plugins'
 
 // Kept to a single line deliberately — CodeMirror's placeholder extension
 // renders an embedded "\n" as an actual second visual row, so the empty
@@ -472,6 +472,7 @@ export function EventSourcesModal({ onClose }: { onClose: () => void }): React.J
   function defaultConfigFor(kind: string): Record<string, unknown> | undefined {
     if (kind === 'dcsbios') return defaultDcsBiosConfig(dcsBiosSettings?.defaultUpdateHz)
     if (kind === 'screenCapture') return { intervalMs: DEFAULT_OCR_INTERVAL_MS }
+    if (kind === 'windowsAudio') return defaultWindowsAudioConfig()
     return undefined
   }
 

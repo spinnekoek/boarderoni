@@ -5,6 +5,32 @@ off as they're fixed; add new ones as they come up.
 
 ## Editor UX
 
+- [ ] Make the "Edit expression" modal (`ExpressionEditorModal.tsx`,
+      `.expr-modal`) resizable — currently a fixed-size overlay, which gets
+      cramped for a longer expression. Properties panel's own drag-to-resize
+      handle (`.properties__scroll` split, see the resize-handle bug fixed
+      2026-09-10) is the closest existing precedent for a resize
+      interaction in this codebase, though this is a centered modal rather
+      than a docked panel so the handle placement/logic won't carry over
+      directly.
+- [ ] Bug: a rotated widget's selection box (the `.canvas-widget--selected`
+      glint ring) doesn't rotate along with it. `CanvasWidget.tsx`'s own
+      outer wrapper only applies a rotation transform for `LineWidget`
+      (`lineRotateAngle`, line 208) — every other rotate-capable widget
+      (Button, ToggleSwitch, DialSwitch, AdjusterKnob, ...) applies its own
+      `rotateAngle`/`rotateAngleExpr` transform somewhere inside its own
+      content renderer, deeper than the outer wrapper the selection ring is
+      drawn on — so the visible widget spins but the selection box drawn
+      around it stays axis-aligned. Fix likely means hoisting the rotation
+      transform (or at least mirroring its value) up to the same outer
+      `.canvas-widget` wrapper for every rotatable type, not just lines.
+- [ ] Collapsible event sources. `EventSourcesModal.tsx` currently shows one
+      source at a time via tabs (`activeSourceId`/`events-modal__tab`), which
+      already avoids a long flat list — but wasn't scoped further than that
+      when this was noted, so it's not clear yet whether "collapsible" means
+      the tab strip itself (once there are many sources), the field-mapping
+      list within one source's own panel, or both. Needs an actual look at
+      what's getting unwieldy before picking an approach.
 - [ ] On deck import, check whether every custom font id (`fontFamily:
       "custom:<id>"`, see `isCustomFontId`/`CUSTOM_FONT_PREFIX` in
       `shared/fonts.ts`) referenced by the imported deck's widgets/labels is
@@ -139,6 +165,57 @@ off as they're fixed; add new ones as they come up.
       or scoped; likely area is `src/main/deviceApproval.ts` (device
       persistence) and how `approvedDevices`/`devices` get read back on
       reconnect (`store.ts`).
+- [ ] Main process has no `process.on('unhandledRejection', ...)` handler —
+      a rejected promise anywhere that isn't already inside a try/catch
+      (e.g. a bug in a plugin producer's async tick, or in a WS message
+      handler's own async work) surfaces only as a raw
+      `UnhandledPromiseRejectionWarning` in the terminal, easy to miss and
+      not visible anywhere in-app (debug console, toasts, etc.) — this is
+      exactly what happened investigating the windowsAudio worker crash on
+      2026-09-11, where the warning was the only clue something was wrong
+      before the real segfault. Should at least log it clearly (maybe
+      through the same sink `pushRemoteDebugLog`/`action:log` already use)
+      instead of relying on whoever's watching the raw terminal to notice.
+      Separately, unrelated noise seen in the same terminal output: a
+      `(node:PID) [DEP0040] DeprecationWarning: The 'punycode' module is
+      deprecated` line on every startup — comes from some dependency still
+      using Node's built-in `punycode` internally (not our own code; not
+      yet tracked down which one — `bonjour-service` and/or `ws` are the
+      likely suspects given mDNS/WebSocket both have historically pulled it
+      in), worth a `npm ls punycode`-style hunt to find and update/replace
+      whichever dependency triggers it once there's time to chase it.
+- [ ] Bug: an Adjuster (slider/knob) widget's own rendered handle position
+      can get stuck ignoring a live variable change that isn't an echo of
+      its own last drag. `useAdjusterDrag.ts`'s reconciliation effect
+      (~line 232) deliberately keeps rendering from the local `dragFraction`
+      after a drag ends — rather than snapping straight to whatever
+      `valueExpr` currently resolves to — until the variable comes back
+      within `RECONCILE_EPSILON` (0.01) of that drag's own final value, so
+      there's no visible jump while waiting for the server's own confirming
+      broadcast of THIS drag to arrive. The gap: it can't tell "this is my
+      own drag settling" apart from "something unrelated changed this
+      variable" — found via the `windowsAudio` plugin (drag the Adjuster on
+      one device, then change the same volume from Windows' own slider —
+      the widget stays pinned at the old dragged position until the new
+      value happens to sweep back near it, reading as stuck/sluggish rather
+      than live). The widget's own comment already anticipated a related
+      case (another device dragging the same on-screen widget) but the fix
+      there has the same gap — it only reconciles by coincidentally passing
+      near the old value, not by recognizing a genuinely new external
+      value. Needs an actual design decision (e.g. some way to tell an echo
+      of this drag apart from an unrelated external change) before
+      touching it — this hook is shared by every Adjuster in the app, not
+      windowsAudio-specific.
+- [x] Bug: clicking a label's fx (ƒx) toggle off (the × button) permanently
+      discarded the whole expression, with no confirmation and no way back
+      short of Ctrl+Z — fixed (2026-09-12). `LabelFields` in
+      `PropertiesPanel.tsx` now keeps a `textExprDraftRef` (same shape
+      `SendDcsCommandActionEditor`'s own Value field already used) that
+      remembers the last non-empty `textExpr` across a toggle-off-then-
+      back-on, so clicking ƒx again restores what was there instead of
+      starting from a blank string. Still worth checking every OTHER fx/×
+      toggle in this file for the same gap — this was only the one
+      actually reported (label text specifically), not a full audit.
 
 ## Packaging (not yet started)
 
@@ -182,12 +259,40 @@ off as they're fixed; add new ones as they come up.
       `groupId` on `WidgetVisibility`, group/ungroup from the canvas
       right-click menu, click-to-select-whole-group with re-click-to-drill-in.
       No group resize/bounding-box UI, per the original scope.
-- [ ] Investigate adding Windows audio devices as a data source — per-device
-      volume, default output device, mute state, etc. (likely a new plugin
-      kind alongside `shared/plugins/random.ts`'s own template, with a
-      `main/plugins/<kind>.ts` producer polling/subscribing to the actual OS
-      audio state — needs a Windows audio API with Node/Electron bindings,
-      not yet researched) plus a corresponding WidgetAction kind (alongside
-      `KeypressAction`/`CallRestAction` etc. in `shared/types.ts`) to
-      actually set volume/default device/mute from a button or adjuster,
-      not just read it.
+- [x] Windows audio devices as a data source + action — implemented
+      (2026-09-11) as the `windowsAudio` plugin, on `native-sound-mixer`
+      (real N-API addon, ships prebuilt `.node` binaries, confirmed
+      worker_threads-safe via a throwaway spike before committing to it —
+      see `main/windowsAudio/`). Entirely off the main thread, mirroring
+      `dcsBios/worker.ts`'s own isolation: `main/windowsAudio/worker.ts`
+      owns every WASAPI/COM call (device enumeration, volume/mute get/set,
+      native `Device.on('volume'|'mute', ...)` push events, plus a 2s
+      rescan for the one thing with no push event — the default device
+      changing, or a hot-plugged device appearing), bridged to the plugin
+      framework through `connectionManager.ts` (`WorkerHost`-based, same
+      shared-worker/ref-counted shape as `dcsBios/connectionManager.ts`).
+      Event source fields: `volume` (0-100), `muted`, `deviceName` — picked
+      per-instance via `WindowsAudioConfigPanel.tsx`'s device dropdown
+      (`''` tracks whichever device is currently default, following it
+      across a switch; anything else is an exact device name — the library
+      exposes no stable device id, so name is the only handle there is,
+      with the obvious fragility if a device gets renamed/replaced).
+      Action: `SetWindowsAudioAction` (`shared/types.ts`) — volume (plain
+      value or expression, same `$value`-shorthand precedence
+      `SendDcsCommandAction` uses) and an independent mute/unmute/toggle,
+      edited via `SetWindowsAudioActionEditor` in PropertiesPanel.tsx. Explicitly NOT in this pass: peak/meter level
+      reporting (native-sound-mixer has no such API — would need a small
+      custom N-API binding wrapping `IAudioMeterInformation`, scoped
+      separately) and per-application (session) volume, which the library
+      DOES support but wasn't wired up.
+- [ ] Big one: investigate macOS support viability. Boarderoni is currently
+      Windows-only in practice even though it's plain Electron/React —
+      known Windows-specific pieces that'd need a cross-platform story (or
+      an explicit "unsupported on Mac" carve-out) before this is real:
+      `nut-js`/`SendInput` keystroke injection in `src/main/index.ts` (the
+      packaging TODO above already flags this as Windows-UIPI-specific),
+      the DCS Viewports plugin's virtual-display-driver + MonitorSetup.lua
+      export flow (see `main/dcsViewports/`), and the new Windows-audio
+      plugin being investigated just above. Not scoped beyond that yet —
+      needs an actual audit of what else assumes Windows (file paths,
+      registry reads, etc.) before estimating how big a lift this is.

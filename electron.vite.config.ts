@@ -38,7 +38,8 @@ export default defineConfig({
           index: resolve(__dirname, 'src/main/index.ts'),
           dcsBiosWorker: resolve(__dirname, 'src/main/dcsBios/worker.ts'),
           screenCaptureWorker: resolve(__dirname, 'src/main/screenCaptureWorker.ts'),
-          ocrWorker: resolve(__dirname, 'src/main/ocrWorker.ts')
+          ocrWorker: resolve(__dirname, 'src/main/ocrWorker.ts'),
+          windowsAudioWorker: resolve(__dirname, 'src/main/windowsAudio/worker.ts')
         }
       }
     }

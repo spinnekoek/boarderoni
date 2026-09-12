@@ -25,6 +25,8 @@ function actionKindTitle(action: WidgetAction): string {
       // aircraft either: actionTitle only receives the widget itself, no
       // external instance list to look a name up in.
       return 'Call REST'
+    case 'set-windows-audio':
+      return 'Set Windows Audio'
   }
 }
 

@@ -145,6 +145,39 @@ export interface CallRestAction {
   values: CallRestPlaceholderValue[]
 }
 
+// Only offered in the properties panel while 'windowsAudio' is enabled in
+// Settings — or if a widget already has one configured, same
+// don't-silently-break-an-existing-button convention SendDcsCommandAction's
+// own comment describes for 'dcsbios'. `deviceName` is '' for "whichever
+// device is currently the default output" or an exact name from
+// windows-audio:devices — native-sound-mixer's Device has no stable id
+// (see main/windowsAudio/worker.ts's own comment), so name is the only
+// handle there is; renaming/replacing hardware can silently break a
+// by-name pick, same risk a REST source's own free-text field carries.
+// `volume` is the static 0-100 value sent unless `volumeExpr` is set, same
+// plain-value/expr-override precedence as SendDcsCommandAction.argument/
+// argumentExpr; both unset means "don't touch volume, only muteAction (if
+// set)". `muteAction` is a tri-state action rather than a plain boolean so
+// "leave mute alone" (undefined) is distinguishable from "unmute" (false
+// would be ambiguous with "not set" otherwise).
+// `appName` is undefined for device mode (the shape above) or set to
+// target one application's own audio session instead — see
+// windows-audio:sessions for where its options come from. Additive rather
+// than a nested discriminated union so an action saved before app-session
+// targeting existed still reads the same (device mode, `deviceName` as
+// before) with no migration needed. A session is always on whichever
+// device is CURRENTLY the system default (see
+// main/windowsAudio/connectionManager.ts's own comment on why), so
+// `deviceName` is simply ignored while `appName` is set.
+export interface SetWindowsAudioAction {
+  kind: 'set-windows-audio'
+  deviceName: string
+  appName?: string
+  volume?: string
+  volumeExpr?: string
+  muteAction?: 'mute' | 'unmute' | 'toggle'
+}
+
 export type WidgetAction =
   | NoneAction
   | KeypressAction
@@ -154,6 +187,7 @@ export type WidgetAction =
   | OpenOverlayAction
   | CloseOverlayAction
   | CallRestAction
+  | SetWindowsAudioAction
 
 // A pause between two steps in an event's sequence (see SequenceStep) —
 // not a field on the following action step, so it can be added/removed/
@@ -2300,6 +2334,17 @@ export type ClientToServer =
   | { type: 'custom-variants:get' }
   | { type: 'custom-variants:save'; name: string; widgets: Widget[] }
   | { type: 'custom-variants:delete'; variantId: string }
+  // Windows-only, edit-role gate enforced same as fonts:*/rest-sources:*
+  // (see custom-variants:get above) — lists every render (output) device
+  // native-sound-mixer's worker can see, for the plugin's own device
+  // picker (renderer/src/plugins/WindowsAudioConfigPanel.tsx) and the
+  // SetWindowsAudioAction editor's device dropdown.
+  | { type: 'windows-audio:list-devices' }
+  // Same gating as windows-audio:list-devices, listing currently-active
+  // app audio sessions on the system's default device instead — for
+  // "Application" mode in that same device picker (see
+  // WindowsAudioTargetPicker.tsx).
+  | { type: 'windows-audio:list-sessions' }
   | { type: 'screen-capture:list-displays' }
   // Opens a native full-screen overlay (see main/screenCapture.ts) on the
   // chosen display for a drag-to-select rectangle. Unlike
@@ -2449,6 +2494,15 @@ export type ServerToClient =
   // — same "full current list either way" reasoning as fonts:list, just
   // edit-only (see custom-variants:get's own comment in ClientToServer).
   | { type: 'custom-variants:list'; variants: CustomVariant[] }
+  // Reply to windows-audio:list-devices — `name` is the only handle
+  // available (see SetWindowsAudioAction's own comment on why there's no
+  // id), `isDefault` marks whichever one is currently the system default
+  // render device.
+  | { type: 'windows-audio:devices'; devices: { name: string; isDefault: boolean }[] }
+  // Reply to windows-audio:list-sessions — appName is the only handle a
+  // session has either (see SetWindowsAudioAction's own comment), name is
+  // a possibly-blank display label.
+  | { type: 'windows-audio:sessions'; sessions: { name: string; appName: string }[] }
   | { type: 'screen-capture:displays'; displays: { id: number; label: string; bounds: ScreenRegion }[] }
   // Targeted at the ONE socket that triggered the navigate-subdeck action,
   // never broadcast — which deck view is "current" is per-client UI state,

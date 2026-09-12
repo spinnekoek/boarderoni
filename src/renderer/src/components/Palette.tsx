@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useEditorSettings } from '../settingsStore'
 import { useConfirmStore } from '../confirmStore'
+import { useVariantWarningStore } from '../variantWarningStore'
 import { DEFAULT_FONT_ID } from '@shared/fonts'
 import { DEFAULT_WIDGET_COLOR } from '@shared/color'
 import { isWidgetTypeGatedByDisabledPlugin } from '@shared/plugins'
@@ -24,8 +25,37 @@ import type {
   RockerSwitchWidget,
   ScreenCaptureWidget,
   ToggleSwitchWidget,
+  Variable,
   Widget
 } from '@shared/types'
+
+// $value/$index are synthesized from a widget's own trigger context (see
+// TriggerValue in main/index.ts), never real Variable entries a dashboard
+// would define — excluded so a perfectly normal variant (e.g. one whose
+// argumentExpr is just `return variables.$value;`) never gets flagged.
+const TRIGGER_PSEUDO_VARIABLES = new Set(['$value', '$index'])
+
+// Scans a just-placed variant's widget(s) for every `variables.NAME`
+// reference (across whatever expression fields it happens to use —
+// valueExpr, tickSet labelTextExpr, activePositionExpr, action
+// argumentExpr, ...) and returns whichever of those names isn't in this
+// dashboard's own Variable list yet. A plain regex over the serialized
+// widget(s) rather than walking each widget type's own specific fields —
+// robust to new expression fields being added later without this needing
+// to know about each one. Used to warn (see useVariantWarningStore) that a
+// variant referencing e.g. HUD_BALANCE will look inert/wrong until that
+// variable actually exists — most of the built-in aircraft-panel variants
+// (and any custom one saved from a real working example) reference
+// specific names like this.
+function findMissingVariantVariables(widgets: Widget[], existingVariables: Variable[]): string[] {
+  const referenced = new Set<string>()
+  const pattern = /variables\.([A-Za-z_$][\w$]*)/g
+  const json = JSON.stringify(widgets)
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(json))) referenced.add(match[1])
+  const existingNames = new Set(existingVariables.map((v) => v.name))
+  return [...referenced].filter((name) => !TRIGGER_PSEUDO_VARIABLES.has(name) && !existingNames.has(name))
+}
 
 // A named, fully-preset alternative to a widget type's own plain default
 // below — picked from the small chevron menu next to that widget's palette
@@ -280,6 +310,64 @@ const BUTTON_VARIANTS: WidgetVariant<ButtonWidget>[] = [
       ],
       labels: [{ id: nextId(), text: '' }]
     })
+  },
+  {
+    // Toggles the default output device's mute via a set-windows-audio
+    // action (deviceName left blank targets the default device, see
+    // SetWindowsAudioAction's own comment in shared/types.ts) and reflects
+    // its state with a volume-level FontAwesome icon plus a pink glow while
+    // muted. Requires the Windows Audio plugin's default-device fields
+    // (DEFAULT_DEVICE_MUTED/DEFAULT_DEVICE_VOLUME) mapped from an event
+    // source — see findMissingVariantVariables's warning toast above.
+    name: 'Volume Mute Button',
+    build: (pos) => ({
+      id: nextId(),
+      type: 'button',
+      x: pos.x,
+      y: pos.y,
+      w: 70,
+      h: 50,
+      events: {
+        press: [
+          {
+            kind: 'action',
+            id: nextId(),
+            action: { kind: 'set-windows-audio', deviceName: '', muteAction: 'toggle' }
+          }
+        ],
+        release: [],
+        doublePress: [],
+        triplePress: []
+      },
+      statesEnabled: false,
+      states: [
+        {
+          id: nextId(),
+          name: 'Default',
+          labels: [
+            {
+              id: nextId(),
+              text: '{{icon:fa-volume-xmark}}',
+              fontFamily: 'inter',
+              align: 'center',
+              verticalAlign: 'center',
+              fontSize: 21,
+              textExpr:
+                "if (variables.DEFAULT_DEVICE_MUTED) return '{{icon:fa-volume-xmark}}';\nif (variables.DEFAULT_DEVICE_VOLUME > 80) return '{{icon:fa-volume-high}}';\nif (variables.DEFAULT_DEVICE_VOLUME > 40) return '{{icon:fa-volume}}';\nif (variables.DEFAULT_DEVICE_VOLUME > 0) return '{{icon:fa-volume-low}}';\n\nreturn '{{icon:fa-volume-off}}';\n"
+            }
+          ],
+          radiusTopLeft: 10,
+          radiusTopRight: 10,
+          radiusBottomRight: 10,
+          radiusBottomLeft: 10,
+          color: '#3a3f4a',
+          glowColor: '#e2547b',
+          glowColorExpr: "if (variables.DEFAULT_DEVICE_MUTED) return { color: '#e2547b' }",
+          colorExpr: "if (variables.DEFAULT_DEVICE_MUTED) return '#e2547b';\n\nreturn '#3a3f4a';\n"
+        }
+      ],
+      labels: [{ id: nextId(), text: '' }]
+    })
   }
 ]
 
@@ -415,6 +503,57 @@ const ADJUSTER_KNOB_VARIANTS: WidgetVariant<AdjusterKnobWidget>[] = [
       squareBorderRadius: 39,
       squareBorderWidth: 0,
       valueExpr: 'return variables.HUD_AOA_INDEXER;'
+    })
+  }
+]
+
+// A vertical volume-fader slider driving a set-windows-audio action's volume
+// (deviceName left blank targets the default device, same convention as
+// Volume Mute Button above) — valueExpr/label mirror the live level back off
+// DEFAULT_DEVICE_VOLUME so the handle tracks external changes too.
+const ADJUSTER_SLIDER_VARIANTS: WidgetVariant<AdjusterSliderWidget>[] = [
+  {
+    name: 'Volume Slider',
+    build: (pos) => ({
+      id: nextId(),
+      type: 'adjuster-slider',
+      x: pos.x,
+      y: pos.y,
+      w: 70,
+      h: 270,
+      orientation: 'vertical',
+      min: 0,
+      max: 100,
+      events: {
+        press: [],
+        release: [],
+        move: [
+          {
+            kind: 'action',
+            id: nextId(),
+            action: { kind: 'set-windows-audio', deviceName: '', volume: '$value' }
+          }
+        ],
+        doublePress: [],
+        triplePress: []
+      },
+      fill: { color: '#5b8def' },
+      track: { color: '#2a2e37' },
+      labels: [
+        {
+          id: nextId(),
+          text: 'zz',
+          align: 'center',
+          verticalAlign: 'bottom',
+          textExpr: 'return variables.DEFAULT_DEVICE_VOLUME;'
+        }
+      ],
+      valueExpr: 'return variables.DEFAULT_DEVICE_VOLUME;',
+      handleShape: 'square',
+      handleWidth: 32,
+      handleHeight: 12,
+      handleRadius: 3,
+      handleColor: '#3a3f4a'
     })
   }
 ]
@@ -844,6 +983,8 @@ export function Palette(): React.JSX.Element {
   const groupWidgets = useDashboardStore((s) => s.groupWidgets)
   const customVariants = useDashboardStore((s) => s.customVariants)
   const deleteCustomVariant = useDashboardStore((s) => s.deleteCustomVariant)
+  const dashboardVariables = useDashboardStore((s) => s.dashboard.variables) ?? []
+  const pushVariantWarning = useVariantWarningStore((s) => s.pushWarning)
   const camera = useEditorSettings((s) => s.camera)
   // null (not yet arrived — see main/index.ts's sendInitialState) reads as
   // enabled, same "don't flash a wrong state before the real one lands"
@@ -889,6 +1030,19 @@ export function Palette(): React.JSX.Element {
       }))
   }
 
+  // Shared by both variant-placement handlers below — see
+  // findMissingVariantVariables' own comment for what this is warning
+  // about and why.
+  function warnIfMissingVariables(widgets: Widget[]): void {
+    const missing = findMissingVariantVariables(widgets, dashboardVariables)
+    if (missing.length === 0) return
+    pushVariantWarning(
+      `This variant uses variable${missing.length > 1 ? 's' : ''} that aren't set up yet: ${missing.join(', ')}. Add ${
+        missing.length > 1 ? 'them' : 'it'
+      } in Variables (or map an event source) for it to work as designed.`
+    )
+  }
+
   // Single handler for every widget type's variant dropdown — a variant's
   // own build(pos) already fully describes the widget, so there's nothing
   // type-specific left to do once it's picked.
@@ -896,6 +1050,7 @@ export function Palette(): React.JSX.Element {
     const widget = variant.build(spawnPosition())
     addWidget(widget)
     selectWidget(widget.id)
+    warnIfMissingVariables([widget])
   }
 
   // 2+-widget CustomVariants — offered from the standalone "Custom Variants"
@@ -910,6 +1065,7 @@ export function Palette(): React.JSX.Element {
     const cloned = variant.widgets.map((w) => ({ ...cloneWidget(w, 0), x: pos.x + w.x, y: pos.y + w.y }))
     pasteWidgets(cloned)
     groupWidgets(cloned.map((w) => w.id))
+    warnIfMissingVariables(cloned)
   }
 
   function handleAddButton(): void {
@@ -1349,7 +1505,7 @@ export function Palette(): React.JSX.Element {
   const morphVariants = customVariantsFor('morph')
   const barGaugeVariants = customVariantsFor('gauge-bar')
   const arcGaugeVariants = [...ARC_GAUGE_VARIANTS, ...customVariantsFor('gauge-arc')]
-  const sliderVariants = customVariantsFor('adjuster-slider')
+  const sliderVariants = [...ADJUSTER_SLIDER_VARIANTS, ...customVariantsFor('adjuster-slider')]
   const knobVariants = [...ADJUSTER_KNOB_VARIANTS, ...customVariantsFor('adjuster-knob')]
   const encoderVariants = customVariantsFor('encoder')
   const rockerVariants = customVariantsFor('switch-rocker')
@@ -1428,19 +1584,13 @@ export function Palette(): React.JSX.Element {
         onSelectVariant={handleSelectVariant}
         onDeleteVariant={deleteCustomVariant}
       />
-      {sliderVariants.length > 0 ? (
-        <PaletteVariantButton<AdjusterSliderWidget>
-          label="+ Slider"
-          onAddPlain={handleAddSlider}
-          variants={sliderVariants}
-          onSelectVariant={handleSelectVariant}
-          onDeleteVariant={deleteCustomVariant}
-        />
-      ) : (
-        <button className="palette__item" onClick={handleAddSlider}>
-          + Slider
-        </button>
-      )}
+      <PaletteVariantButton<AdjusterSliderWidget>
+        label="+ Slider"
+        onAddPlain={handleAddSlider}
+        variants={sliderVariants}
+        onSelectVariant={handleSelectVariant}
+        onDeleteVariant={deleteCustomVariant}
+      />
       <PaletteVariantButton<AdjusterKnobWidget>
         label="+ Knob"
         onAddPlain={handleAddKnob}
