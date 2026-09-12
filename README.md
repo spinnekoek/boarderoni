@@ -6,6 +6,58 @@ style macro boards, and DCS World cockpit exports.
 
 See `CONTRIBUTING.md` for the codebase layout and plugin-authoring walkthrough.
 
+## Disclaimer
+
+This project was built almost entirely with Claude. I had a lot of ideas
+for what a better dashboard/macro editor could look like, but not the time
+to build it all myself — so I used my own software engineering background
+(Node.js) to guide the design and test every step along the way, rather than
+writing most of the code by hand.
+
+## Status: Alpha
+
+Boarderoni works and is actively used, but it's pre-1.0 and under active
+development:
+
+- The dashboard file format can still change between versions (a migration
+  path is kept for existing saves, but always back up a deck you care about
+  before updating).
+- Windows only for now — several plugins (Windows Audio, some DCS-BIOS/
+  input pieces) depend on Windows-specific native modules; other platforms
+  aren't tested and may not work at all.
+- No auto-update yet — you'll need to grab new installers manually from
+  [Releases](../../releases) for now.
+- Expect rough edges, and please open an issue if you hit one.
+
+## Features
+
+- **Visual editor** — drag/drop/resize/rotate widgets, multi-select, grouping,
+  undo/redo, snap-to-grid, a live debug console for expression output.
+- **15 widget types** — Button, Morph Button, Bar Gauge, Arc Gauge, Adjuster
+  Slider, Adjuster Knob, Encoder, Rocker Switch, Dial Switch, Toggle Switch,
+  Dropdown, Screen Capture, DCS Viewport, Label, Line.
+- **Custom widget variants** — save your own styled widget (or multi-widget
+  group) as a reusable preset, alongside a set of built-in aircraft-panel-
+  style presets.
+- **Expressions everywhere** — nearly every visual property (color, text,
+  position, value, active state, ...) can be a small JS expression reading
+  live variables instead of a fixed value.
+- **Custom fonts**, multiple screens per deck (sub-decks) with in-editor
+  navigation, and a live variables system synced in real time to every
+  connected device.
+- **Mobile companion app** — an Android WebView client that pairs with the
+  desktop over your local network (mDNS auto-discovery, per-device approval),
+  no cloud/account required.
+- **Plugins** (event sources + actions):
+  - **DCS-BIOS** — read/write DCS World cockpit state over its UDP export.
+  - **DCS Viewports** — multi-monitor MFCD/cockpit display export.
+  - **Windows Audio** — device and per-application volume/mute, on a
+    dedicated worker thread so it never blocks the UI.
+  - **Screen Capture + OCR** — stream or poll a screen region, optionally
+    recognizing text/numbers from it.
+  - **REST Data Sources** — poll or receive from any HTTP API.
+  - **Date & Time** — clock/calendar values for labels and expressions.
+
 ## Support
 
 If Boarderoni's useful to you, consider supporting development:
