@@ -216,6 +216,21 @@ off as they're fixed; add new ones as they come up.
       starting from a blank string. Still worth checking every OTHER fx/×
       toggle in this file for the same gap — this was only the one
       actually reported (label text specifically), not a full audit.
+- [ ] Placing a variant whose widget(s) use an action tied to a currently-
+      disabled plugin (e.g. the built-in Volume Mute Button/Volume Slider
+      variants' `set-windows-audio` action, if the Windows Audio plugin is
+      off in Settings) should raise a warning the same way the missing-
+      variables toast does (`findMissingVariantVariables` in `Palette.tsx`,
+      `variantWarningStore.ts`/`VariantWarningToasts.tsx`) — right now it
+      silently places a widget whose action will just throw
+      `"<Plugin> is disabled in Settings"` (see `runSetWindowsAudioAction`
+      in `main/index.ts`) the first time it fires, with no indication at
+      placement time that anything's wrong. Needs a scan similar to the
+      variable one — walk the variant's widget(s) for action kinds gated by
+      `isWidgetTypeGatedByDisabledPlugin`-style plugin checks (or whatever
+      each plugin's action kind is) and cross-reference against
+      `enabledPlugins` — probably reusing the same toast UI/store, just a
+      second warning source feeding into it.
 
 ## Packaging (not yet started)
 
@@ -227,6 +242,21 @@ off as they're fixed; add new ones as they come up.
       (`nut-js`/`SendInput` in `src/main/index.ts`) sent from a
       non-elevated boarderoni due to Windows UIPI — both processes need to be
       at the same integrity level for macros to reach the game.
+- [ ] Auto-update, once there's an actual second machine that needs to stay
+      in sync — pair electron-builder with the `electron-updater` runtime
+      package (`autoUpdater.checkForUpdatesAndNotify()` or manual
+      check/download/`quitAndInstall()` calls in the main process).
+      electron-builder emits a `latest.yml` alongside the Windows installer;
+      `electron-updater` polls a feed URL (simplest: GitHub Releases,
+      electron-builder can auto-publish there via `GH_TOKEN` and
+      `electron-updater` reads the repo's releases directly with no extra
+      infra) and stages the new installer for the next restart. Windows NSIS
+      updates work unsigned (just a SmartScreen warning without a cert); a
+      mac build would need a real code-signing cert for auto-update to work
+      at all (Gatekeeper blocks unsigned auto-updates) — not a concern yet
+      since there's no mac build. Deliberately skipped for the first
+      packaging pass (see this section's own items above) since it's a
+      clean add-on later.
 
 ## Data model
 
