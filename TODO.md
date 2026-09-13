@@ -110,6 +110,23 @@ off as they're fixed; add new ones as they come up.
       on blur (or on the eventual patch commit) instead of on every
       keystroke, while still allowing an in-progress edit to hold an
       intermediate below-min value in the input's own local state.
+- [ ] Replace plain native `<select>` dropdowns app-wide with the custom
+      listbox built for Windows Audio device pickers
+      (`WindowsAudioDevicePicker.tsx`, `.windows-audio-device-picker*` in
+      styles.css) — a toggle button + absolutely-positioned menu of row
+      buttons, closes on outside-click/Escape, and (the reason it exists)
+      can render arbitrary JSX per row instead of a `<select>`'s
+      plain-text-only `<option>`s (e.g. the "Default" tag next to one row).
+      Currently hardcoded to `{name, isDefault}` device rows and
+      `windows-audio-device-picker__*` class names — needs genericizing
+      (generic item type + a per-row render prop, generic class names)
+      before it can drop in everywhere. Candidate call sites once that
+      exists: target-deck pickers (RestDataSourcesSettingsPanel.tsx), the
+      action-kind picker and every action-specific dropdown in
+      PropertiesPanel.tsx (including the Method select just added to
+      RestWebhookTargetsSettingsPanel.tsx), DCS-BIOS aircraft/interface
+      pickers, sub-deck/overlay-edge pickers — anywhere a plain `<select>`
+      is used today.
 
 ## Event sources
 
@@ -231,17 +248,37 @@ off as they're fixed; add new ones as they come up.
       each plugin's action kind is) and cross-reference against
       `enabledPlugins` — probably reusing the same toast UI/store, just a
       second warning source feeding into it.
+- [ ] Starting a second instance while one's already running produces a
+      confusing crash instead of a clear error: `bonjour-service`'s mDNS
+      advertisement throws `Error: Service name is already in use on the
+      network` (unhandled — see the other TODO item on that gap), and
+      Chromium logs a pile of `Unable to move/create cache: Access is
+      denied` (GPU disk cache) from the second instance colliding with the
+      first over the same userData directory — the app just silently exits
+      rather than surfacing anything useful. Should detect this up front
+      and fail with a clear message instead: try binding SERVER_PORT
+      (`main/index.ts`) first thing and exit cleanly with "Boarderoni is
+      already running" if it's in use (a `net.createServer().listen()` +
+      `'EADDRINUSE'` check, or similar), rather than limping into the mDNS/
+      cache errors below it.
 
-## Packaging (not yet started)
+## Packaging
 
-- [ ] When we eventually package boarderoni (electron-builder/forge, currently
-      not set up at all — only `electron-vite` dev commands exist), set the
-      Windows execution level to `requireAdministrator` in the packager
-      config (e.g. electron-builder's `win.requestedExecutionLevel`). Reason:
-      games like DCS that run elevated silently swallow synthetic keystrokes
+- [x] electron-builder set up (`electron-builder.yml`, `npm run dist`/
+      `dist:dir`) — Windows NSIS target, asar disabled for now (see that
+      file's own comment). GitHub Actions release workflow
+      (`.github/workflows/release.yml`) builds and publishes on any pushed
+      `v*` tag.
+- [ ] Deliberately NOT running elevated (`win.requestedExecutionLevel:
+      requireAdministrator`) for now — decided not needed until proven
+      otherwise. Revisit if it turns out to actually be a problem: games
+      like DCS that run elevated can silently swallow synthetic keystrokes
       (`nut-js`/`SendInput` in `src/main/index.ts`) sent from a
-      non-elevated boarderoni due to Windows UIPI — both processes need to be
-      at the same integrity level for macros to reach the game.
+      non-elevated boarderoni due to Windows UIPI — both processes need to
+      be at the same integrity level for macros to reach the game. If that
+      shows up in practice, the fix is just adding
+      `requestedExecutionLevel: requireAdministrator` back into
+      `electron-builder.yml`'s `win:` section.
 - [ ] Auto-update, once there's an actual second machine that needs to stay
       in sync — pair electron-builder with the `electron-updater` runtime
       package (`autoUpdater.checkForUpdatesAndNotify()` or manual

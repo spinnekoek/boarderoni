@@ -12,6 +12,7 @@ import { dcsViewportsPlugin } from './dcsViewports'
 import { screenCapturePlugin } from './screenCapture'
 import { randomPlugin } from './random'
 import { restPlugin } from './rest'
+import { restWebhookTargetsPlugin } from './restWebhookTargets'
 import { windowsAudioPlugin } from './windowsAudio'
 
 export type { PluginField, PluginTypeMeta } from './types'
@@ -23,6 +24,7 @@ export const PLUGIN_TYPES: PluginTypeMeta[] = [
   screenCapturePlugin,
   randomPlugin,
   restPlugin,
+  restWebhookTargetsPlugin,
   windowsAudioPlugin
 ]
 

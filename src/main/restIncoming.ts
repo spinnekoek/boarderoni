@@ -41,13 +41,12 @@ function restPluginEnabled(): boolean {
   return getAppSettings().enabledPlugins.includes('rest')
 }
 
-// Only {enabled, port, bearerToken} matter here — a mapping/target-deck/
-// outgoing edit doesn't need a restart since the request handler re-fetches
-// the live source on every request (see below), same "no restart needed for
-// mapping edits" reasoning syncPlugins' own pluginSignature
-// already documents.
+// Only {enabled, port, bearerToken} matter here — a mapping/target-deck
+// edit doesn't need a restart since the request handler re-fetches the live
+// source on every request (see below), same "no restart needed for mapping
+// edits" reasoning syncPlugins' own pluginSignature already documents.
 function signatureOf(source: RestDataSource): string {
-  return JSON.stringify({ enabled: source.enabled, port: source.incoming.port, bearerToken: source.incoming.bearerToken })
+  return JSON.stringify({ enabled: source.enabled, port: source.port, bearerToken: source.bearerToken })
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -79,7 +78,7 @@ async function handleRequest(
     res.end(JSON.stringify({ error: 'Only POST is accepted' }))
     return
   }
-  if (req.headers.authorization !== `Bearer ${source.incoming.bearerToken}`) {
+  if (req.headers.authorization !== `Bearer ${source.bearerToken}`) {
     res.writeHead(401, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Invalid or missing bearer token' }))
     return
@@ -144,7 +143,7 @@ export function syncRestIncomingServers(emit: (sourceId: string, flattened: Reco
     server.on('error', (err) => {
       listenStatus.set(source.id, { listening: false, listenError: err instanceof Error ? err.message : String(err) })
     })
-    server.listen(source.incoming.port, () => {
+    server.listen(source.port, () => {
       listenStatus.set(source.id, { listening: true })
     })
     runningServers.set(source.id, { server, signature: signatureOf(source) })

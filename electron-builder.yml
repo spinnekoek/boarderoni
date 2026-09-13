@@ -28,12 +28,6 @@ win:
   target:
     - nsis
   icon: resources/icon.ico
-  # DCS (and similar elevated games) run as admin; Windows UIPI silently
-  # drops synthetic keystrokes (nut-js/SendInput, main/index.ts) sent from a
-  # non-elevated process to an elevated one, so boarderoni needs to run at
-  # the same integrity level for macros to reach the game — see TODO.md's
-  # Packaging section.
-  requestedExecutionLevel: requireAdministrator
 
 nsis:
   oneClick: false

@@ -54,15 +54,20 @@ const POSITION_STYLE_KEYS = [
   'activeOpacity'
 ] as const satisfies readonly (keyof SwitchPosition)[]
 
-type PositionStyle = Partial<Pick<SwitchPosition, (typeof POSITION_STYLE_KEYS)[number]>> & { labels: LabelStyle[] }
+type PositionStyle = Partial<Pick<SwitchPosition, (typeof POSITION_STYLE_KEYS)[number]>> & { name: string; labels: LabelStyle[] }
 
 function stylePositions(positions: SwitchPosition[]): PositionStyle[] {
-  return positions.map((position) => ({ ...pick(position, POSITION_STYLE_KEYS), labels: styleLabels(position.labels) }))
+  return positions.map((position) => ({ ...pick(position, POSITION_STYLE_KEYS), name: position.name, labels: styleLabels(position.labels) }))
 }
 
+// Matched by `name`, not array index — a position/state is user-renamed and
+// reordered freely (see PropertiesPanel.tsx), so "index 1" in the source
+// isn't reliably "index 1" in the target. A source entry with no
+// same-named counterpart in the target is just skipped — copy style never
+// creates positions/states that aren't already there.
 function applyPositionStyles(positions: SwitchPosition[], styles: PositionStyle[]): SwitchPosition[] {
-  return positions.map((position, i) => {
-    const style = styles[i]
+  return positions.map((position) => {
+    const style = styles.find((s) => s.name === position.name)
     if (!style) return position
     return { ...position, ...style, labels: applyLabelStyles(position.labels, style.labels) }
   })
@@ -86,18 +91,24 @@ const STATE_STYLE_KEYS = [
   'borderColor',
   'borderColorExpr',
   'backgroundOpacity',
-  'borderOpacity'
+  'borderOpacity',
+  'glowColor',
+  'glowColorExpr',
+  'glowOpacity'
 ] as const satisfies readonly (keyof WidgetState)[]
 
-type StateStyle = Partial<Pick<WidgetState, (typeof STATE_STYLE_KEYS)[number]>> & { labels: LabelStyle[] }
+type StateStyle = Partial<Pick<WidgetState, (typeof STATE_STYLE_KEYS)[number]>> & { name: string; labels: LabelStyle[] }
 
 function styleStates(states: WidgetState[]): StateStyle[] {
-  return states.map((state) => ({ ...pick(state, STATE_STYLE_KEYS), labels: styleLabels(state.labels) }))
+  return states.map((state) => ({ ...pick(state, STATE_STYLE_KEYS), name: state.name, labels: styleLabels(state.labels) }))
 }
 
+// Matched by `name`, not array index — see applyPositionStyles' comment
+// above, same reasoning applies to states (e.g. a source's "Clicked" style
+// has nowhere to go if the target hasn't had that state enabled/added yet).
 function applyStateStyles(states: WidgetState[], styles: StateStyle[]): WidgetState[] {
-  return states.map((state, i) => {
-    const style = styles[i]
+  return states.map((state) => {
+    const style = styles.find((s) => s.name === state.name)
     if (!style) return state
     return { ...state, ...style, labels: applyLabelStyles(state.labels, style.labels) }
   })

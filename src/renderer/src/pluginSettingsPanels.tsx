@@ -1,6 +1,7 @@
 import { DcsBiosSettingsPanel } from './components/DcsBiosSettingsPanel'
 import { DcsViewportsSettingsPanel } from './components/DcsViewportsSettingsPanel'
 import { RestDataSourcesSettingsPanel } from './components/RestDataSourcesSettingsPanel'
+import { RestWebhookTargetsSettingsPanel } from './components/RestWebhookTargetsSettingsPanel'
 
 // Registry of per-kind APP-WIDE settings panels, keyed by PluginTypeMeta.kind
 // (see shared/plugins). Distinct from renderer/src/plugins' PLUGIN_CONFIG_PANELS
@@ -12,12 +13,17 @@ import { RestDataSourcesSettingsPanel } from './components/RestDataSourcesSettin
 // panel for kinds present in this map. This is the
 // actual extension point for a future plugin: add a shared/plugins entry,
 // optionally a producer, and optionally one line here — nothing else needs
-// to change. 'rest' is a core plugin (see PluginTypeMeta.core) — it reuses
-// this exact same slot even though it has no per-dashboard instances of its
-// own; RestDataSourcesSettingsPanel already manages its own list
-// internally, unaffected by any of this.
+// to change. 'rest'/'restWebhookTargets' are both core plugins (see
+// PluginTypeMeta.core) — each reuses this exact same slot even though
+// neither has per-dashboard instances of its own; RestDataSourcesSettingsPanel/
+// RestWebhookTargetsSettingsPanel each manage their own list internally,
+// unaffected by any of this. The two used to be one combined panel behind
+// a single 'rest' kind — split alongside RestDataSource/RestWebhookTarget
+// themselves (see shared/types.ts) since incoming and outgoing are
+// unrelated concerns.
 export const PLUGIN_SETTINGS_PANELS: Partial<Record<string, React.ComponentType>> = {
   dcsbios: DcsBiosSettingsPanel,
   dcsViewports: DcsViewportsSettingsPanel,
-  rest: RestDataSourcesSettingsPanel
+  rest: RestDataSourcesSettingsPanel,
+  restWebhookTargets: RestWebhookTargetsSettingsPanel
 }

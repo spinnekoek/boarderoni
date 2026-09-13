@@ -5,6 +5,9 @@
 // object, so `update` here replaces the whole array — the Settings panel
 // always round-trips its full locally-edited draft, same as
 // DcsBiosSettingsPanel's Save button does for its one settings object.
+// Incoming-only — see RestWebhookTarget/restWebhookTargets.ts for the
+// unrelated outgoing direction, split out from what used to be this same
+// entity's `outgoing` half.
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -19,12 +22,26 @@ function dataFilePath(): string {
 
 let cached: RestDataSource[] | null = null
 
+// Tolerates a pre-split file still shaped like the old combined entity
+// (`{ incoming: {port, bearerToken, targetDeckId, mappings}, outgoing }`) —
+// lifts the incoming half up flat and drops outgoing, rather than losing an
+// existing source's port/token/mappings/target-deck the first time this
+// runs after upgrading.
+function normalize(raw: unknown): RestDataSource[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((entry) => {
+    const legacyIncoming = (entry as { incoming?: Partial<RestDataSource> }).incoming
+    if (!legacyIncoming) return entry as RestDataSource
+    const { id, name, enabled } = entry as { id: string; name: string; enabled: boolean }
+    return { id, name, enabled, ...legacyIncoming } as RestDataSource
+  })
+}
+
 export function getRestDataSources(): RestDataSource[] {
   if (cached) return cached
   try {
     const raw = readFileSync(dataFilePath(), 'utf-8')
-    const parsed = JSON.parse(raw)
-    cached = Array.isArray(parsed) ? parsed : []
+    cached = normalize(JSON.parse(raw))
   } catch {
     cached = []
   }
@@ -44,7 +61,7 @@ export function updateRestDataSources(sources: RestDataSource[]): RestDataSource
 // (surfaced back via rest-sources:list's listening/listenError, see
 // main/restIncoming.ts).
 function nextDefaultPort(existing: RestDataSource[]): number {
-  const used = new Set(existing.map((s) => s.incoming.port))
+  const used = new Set(existing.map((s) => s.port))
   let port = DEFAULT_PORT_START
   while (used.has(port)) port++
   return port
@@ -56,24 +73,16 @@ export function createRestDataSource(name: string): RestDataSource {
     id: randomUUID(),
     name,
     enabled: true,
-    incoming: {
-      port: nextDefaultPort(existing),
-      bearerToken: randomBytes(24).toString('base64url'),
-      targetDeckId: '',
-      mappings: []
-    },
-    outgoing: {
-      url: '',
-      payloadTemplate: '{}'
-    }
+    port: nextDefaultPort(existing),
+    bearerToken: randomBytes(24).toString('base64url'),
+    targetDeckId: '',
+    mappings: []
   }
   updateRestDataSources([...existing, source])
   return source
 }
 
 export function regenerateRestDataSourceToken(sourceId: string): RestDataSource[] {
-  const next = getRestDataSources().map((s) =>
-    s.id === sourceId ? { ...s, incoming: { ...s.incoming, bearerToken: randomBytes(24).toString('base64url') } } : s
-  )
+  const next = getRestDataSources().map((s) => (s.id === sourceId ? { ...s, bearerToken: randomBytes(24).toString('base64url') } : s))
   return updateRestDataSources(next)
 }

@@ -123,25 +123,25 @@ export interface NoneAction {
 // One placeholder's resolved value within a CallRestAction — same
 // value/argumentExpr split as SendDcsCommandAction.argument/argumentExpr:
 // `expr` (when set) takes precedence over the static `value`. `placeholder`
-// matches a {{name}} token found in the target RestDataSource's
-// outgoing.payloadTemplate at execution time (see extractPlaceholders in
-// shared/restPlaceholders.ts) — a stale entry whose token no longer exists
-// in the template is simply ignored, not an error.
+// matches a {{name}} token found in the target RestWebhookTarget's
+// payloadTemplate OR any of its headers' own values at execution time (see
+// extractAllPlaceholders in shared/restPlaceholders.ts) — a stale entry
+// whose token no longer exists anywhere is simply ignored, not an error.
 export interface CallRestPlaceholderValue {
   placeholder: string
   value: string
   expr?: string
 }
 
-// Posts a configured RestDataSource's outgoing payload (see main/index.ts's
+// Posts a configured RestWebhookTarget's payload (see main/index.ts's
 // runCallRestAction). Only offered in the properties panel for a
-// currently-enabled, outgoing-configured RestDataSource — or if a widget
-// already has one configured, so disabling/deleting the source later
-// doesn't silently break existing buttons (same convention
-// SendDcsCommandAction's own comment describes for 'dcsbios').
+// currently-enabled RestWebhookTarget — or if a widget already has one
+// configured, so disabling/deleting the target later doesn't silently break
+// existing buttons (same convention SendDcsCommandAction's own comment
+// describes for 'dcsbios').
 export interface CallRestAction {
   kind: 'call-rest'
-  dataSourceId: string
+  targetId: string
   values: CallRestPlaceholderValue[]
 }
 
@@ -2067,41 +2067,87 @@ export interface Plugin {
 // shared/flattenJson.ts), not a catalog key from PLUGIN_TYPES.
 export type RestIncomingMapping = PluginMapping
 
-// A configured, persistent, app-wide REST integration — unlike Plugin,
-// this is NOT per-Dashboard and NOT one of PLUGIN_TYPES' fixed kinds:
-// the user creates any number of these from the Settings page (see
+// A configured, persistent, app-wide REST *webhook receiver* — unlike
+// Plugin, this is NOT per-Dashboard and NOT one of PLUGIN_TYPES' fixed
+// kinds: the user creates any number of these from the Settings page (see
 // main/restDataSources.ts), each independently named, ported, and tokened.
+// Deliberately incoming-only — this app running an http.createServer and
+// mapping whatever arrives into some deck's Variables (same event-source
+// shape as datetime/dcsbios/etc., just user-configured instead of
+// built-in). See RestWebhookTarget for the unrelated outgoing direction
+// (this app POSTing out, invoked by a button's CallRestAction) — the two
+// used to be bundled into one entity's `incoming`/`outgoing` halves, split
+// apart since they don't share a URL/audience and are wired into
+// completely different parts of the app (an event source vs. an action
+// target).
 export interface RestDataSource {
   id: string
   name: string
   enabled: boolean
-  incoming: {
-    port: number
-    // Generated server-side at creation (see createRestDataSource in
-    // main/restDataSources.ts) — checked against an incoming request's
-    // Authorization: Bearer <token> header (see main/restIncoming.ts).
-    bearerToken: string
-    // Which deck's Variables this source's mappings write into (Variables
-    // are per-Dashboard — see Dashboard.variables — so an app-wide REST
-    // source has to pick one).
-    targetDeckId: string
-    mappings: RestIncomingMapping[]
-  }
-  outgoing: {
-    url: string
-    // Raw JSON text with {{placeholderName}} tokens used as bare (unquoted)
-    // JSON values — substitution always does JSON.stringify(resolvedValue)
-    // (see runCallRestAction in main/index.ts), so a template like
-    // {"temp": {{temperature}}, "unit": {{unit}}} works whether a
-    // placeholder resolves to a number, string, or boolean.
-    payloadTemplate: string
-  }
+  port: number
+  // Generated server-side at creation (see createRestDataSource in
+  // main/restDataSources.ts) — checked against an incoming request's
+  // Authorization: Bearer <token> header (see main/restIncoming.ts).
+  bearerToken: string
+  // Which deck's Variables this source's mappings write into (Variables
+  // are per-Dashboard — see Dashboard.variables — so an app-wide REST
+  // source has to pick one).
+  targetDeckId: string
+  mappings: RestIncomingMapping[]
 }
 
 // RestDataSource plus its live http.createServer status (see
 // main/restIncoming.ts) — what actually travels over the wire in
 // rest-sources:list, and what the renderer store/Settings panel work with.
 export type RestDataSourceStatus = RestDataSource & { listening: boolean; listenError?: string }
+
+export type RestHttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+
+// One request header on a RestWebhookTarget — `value` may contain
+// {{placeholderName}} tokens, same plain-string substitution mechanism as
+// `payloadTemplate`'s own tokens (see extractPlaceholders in
+// shared/restPlaceholders.ts and runCallRestAction in main/index.ts). No
+// separate `expr` field on the header itself: a templated value is resolved
+// through the exact same CallRestAction.values entries the body's own
+// placeholders use, so an auth token can be computed once and reused in
+// both a header and the body if needed.
+export interface RestWebhookHeader {
+  id: string
+  key: string
+  value: string
+}
+
+// A configured, persistent, app-wide REST *webhook target* — the outgoing
+// counterpart split out of the old combined RestDataSource (see that
+// interface's own comment). No listener, no per-deck concept: it's just a
+// method/URL/headers/payload template a CallRestAction can point at (see
+// CallRestAction.targetId), same "a button's action references a
+// configured, independently-named thing" shape as SendDcsCommandAction
+// referencing an aircraft/command pair. Managed from the same Settings page
+// as RestDataSource but as its own list (see main/restWebhookTargets.ts) —
+// no listening status to report, so unlike RestDataSourceStatus there's no
+// extra wire-shape wrapper needed.
+export interface RestWebhookTarget {
+  id: string
+  name: string
+  enabled: boolean
+  method: RestHttpMethod
+  url: string
+  // Auth/custom headers — Content-Type: application/json is still added
+  // automatically (see runCallRestAction) whenever a body is actually sent
+  // and the user hasn't already set their own Content-Type here.
+  headers: RestWebhookHeader[]
+  // Raw text sent as-is (after {{placeholderName}} substitution) as the
+  // request body — write it exactly as the final JSON should look, quotes
+  // and all: a string placeholder goes inside its own quotes
+  // ("temp": "{{temperature}}"), a number/boolean one doesn't
+  // ("count": {{count}}). Substitution (see runCallRestAction in
+  // main/index.ts) is a plain, unvalidated string replace — a malformed
+  // result is on whoever wrote the template, not something guessed at or
+  // rejected here. Ignored entirely for a GET request — no body is sent
+  // regardless of what's here.
+  payloadTemplate: string
+}
 
 // One additional, nameable view within a deck — its own widgets, same
 // shape/behavior as the deck's own root view, reachable via
@@ -2307,12 +2353,20 @@ export type ClientToServer =
   // Settings modal only, edit-role only (enforced server-side) — same
   // admin-action reasoning as device:list-approved/revoke above.
   | { type: 'rest-sources:get' }
-  // Server generates id/incoming.bearerToken (see createRestDataSource in
+  // Server generates id/bearerToken (see createRestDataSource in
   // main/restDataSources.ts) — a renderer never mints its own token.
   | { type: 'rest-sources:create'; name: string }
   | { type: 'rest-sources:update'; sources: RestDataSource[] }
   | { type: 'rest-sources:regenerate-token'; sourceId: string }
   | { type: 'rest-sources:delete'; sourceId: string }
+  // The outgoing counterpart's own message family, split out from
+  // rest-sources:* alongside RestWebhookTarget (see its own comment) —
+  // same edit-role-only, full-list-broadcast-back shape, just no token to
+  // generate and no regenerate-token equivalent.
+  | { type: 'rest-webhook-targets:get' }
+  | { type: 'rest-webhook-targets:create'; name: string }
+  | { type: 'rest-webhook-targets:update'; targets: RestWebhookTarget[] }
+  | { type: 'rest-webhook-targets:delete'; targetId: string }
   // App-wide, not per-deck (see main/customFonts.ts) — same "admin action,
   // edit-role only, full list broadcast back either way" shape as
   // rest-sources:*, except the resulting fonts:list also goes to 'view'
@@ -2482,6 +2536,10 @@ export type ServerToClient =
   // used for /api/apk-info) so the Settings panel can build
   // http://<lanAddress>:<port> without a second HTTP round trip.
   | { type: 'rest-sources:list'; sources: RestDataSourceStatus[]; lanAddress: string | null }
+  // Reply to rest-webhook-targets:get/create/update/delete — no listening
+  // status to report (a target has no listener, see RestWebhookTarget's own
+  // comment), so unlike rest-sources:list this is just the plain list.
+  | { type: 'rest-webhook-targets:list'; targets: RestWebhookTarget[] }
   // Reply to fonts:get, and pushed to every connected client (both roles —
   // see broadcastCustomFonts) after a fonts:upload/delete, plus once more as
   // part of sendInitialState for a client that just got real dashboard

@@ -8,7 +8,9 @@ import type { PluginTypeMeta } from './types'
 // list of named REST integrations is still managed there exactly as before,
 // unaffected by any of this. Disabling this kind stops every REST listener
 // from binding its port at all, regardless of each individual source's own
-// `enabled` flag (see main/restIncoming.ts).
+// `enabled` flag (see main/restIncoming.ts). Incoming-only — see
+// restWebhookTargetsPlugin for the unrelated outgoing direction, split out
+// of what used to be this same kind's own combined entity.
 export const restPlugin: PluginTypeMeta = {
   kind: 'rest',
   label: 'REST Data Sources',

@@ -54,8 +54,7 @@ import { isMiddlePosition as isMiddleTogglePosition, momentarySpringBackIndex } 
 import { useDropdownDrag } from '../useDropdownDrag'
 import { DeviceSettingsModal } from './DeviceSettingsModal'
 import { ToastStack } from './ToastStack'
-
-const SETTINGS_GESTURE_FINGER_COUNT = 5
+import { useSettingsGesture } from '../useSettingsGesture'
 
 // How long the WebSocket can stay disconnected before falling back to the
 // native Android searching/found-connect screen — see the effect below for
@@ -780,36 +779,7 @@ export function ViewCanvas(): React.JSX.Element {
     return () => clearTimeout(timer)
   }, [connected])
 
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  // Guards against re-opening on every touchmove while 5+ fingers stay down,
-  // and resets once every finger has lifted so the next 5-finger touch can
-  // open it again.
-  const gestureFiredRef = useRef(false)
-
-  function handleTouchStart(e: React.TouchEvent): void {
-    if (e.touches.length >= SETTINGS_GESTURE_FINGER_COUNT && !gestureFiredRef.current) {
-      gestureFiredRef.current = true
-      setSettingsOpen(true)
-    }
-  }
-
-  function handleTouchEnd(e: React.TouchEvent): void {
-    if (e.touches.length === 0) gestureFiredRef.current = false
-  }
-
-  // The 5-finger gesture's keyboard equivalent — for opening this same
-  // modal from a regular desktop browser (e.g. testing the appUrl link from
-  // MobileAppModal in Chrome), where there's no touchscreen to 5-finger tap.
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent): void {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
-      if (e.key.toLowerCase() !== 'i') return
-      e.preventDefault()
-      setSettingsOpen(true)
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  const { settingsOpen, closeSettings, handleTouchStart, handleTouchEnd } = useSettingsGesture()
 
   return (
     <div
@@ -851,7 +821,7 @@ export function ViewCanvas(): React.JSX.Element {
           onDismiss={closeOverlay}
         />
       )}
-      {settingsOpen && <DeviceSettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <DeviceSettingsModal onClose={closeSettings} hasDeck />}
       <ToastStack />
     </div>
   )

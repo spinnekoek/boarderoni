@@ -52,7 +52,7 @@ import type {
   NavigateSubDeckAction,
   OpenOverlayAction,
   OverlayEdge,
-  RestDataSourceStatus,
+  RestWebhookTarget,
   RockerSwitchWidget,
   ScreenCaptureWidget,
   SendDcsCommandAction,
@@ -69,7 +69,7 @@ import type {
   WidgetLabel,
   WidgetState
 } from '@shared/types'
-import { extractPlaceholders } from '@shared/restPlaceholders'
+import { extractAllPlaceholders } from '@shared/restPlaceholders'
 import { stepTitle } from '@shared/actionTitle'
 import type { DcsBiosCommandCatalogEntry, DcsBiosInputInterface } from '@shared/dcsBiosTypes'
 import { DCS_AIRCRAFT_CATALOG } from '@shared/dcsViewportsCatalog'
@@ -1162,19 +1162,19 @@ function ActionFields({
   // through all of them just for this one default/picker.
   const subDecks = useDashboardStore((s) => s.dashboard.subDecks) ?? []
 
-  // Same "own selector" reasoning as subDecks above — restDataSources is
+  // Same "own selector" reasoning as subDecks above — restWebhookTargets is
   // fetched once at the top-level PropertiesPanel component (see its own
-  // requestRestDataSources effect), this just reads the cached result. Only
-  // sources that are enabled AND have an outgoing URL configured are offered
-  // as a new action-kind option, but an already-selected-and-since-removed
-  // source still gets a (labeled) option so it doesn't silently vanish —
+  // requestRestWebhookTargets effect), this just reads the cached result.
+  // Only targets that are enabled AND have a URL configured are offered as
+  // a new action-kind option, but an already-selected-and-since-removed
+  // target still gets a (labeled) option so it doesn't silently vanish —
   // same "don't break an existing button" reasoning dcsBiosActionEnabled
   // uses for send-dcs-command above.
-  const restDataSources = useDashboardStore((s) => s.restDataSources)
-  const callableRestSources = restDataSources.filter((s) => s.enabled && s.outgoing.url.trim())
-  const selectedRestSource = action.kind === 'call-rest' ? restDataSources.find((s) => s.id === action.dataSourceId) : undefined
+  const restWebhookTargets = useDashboardStore((s) => s.restWebhookTargets)
+  const callableRestTargets = restWebhookTargets.filter((t) => t.enabled && t.url.trim())
+  const selectedRestTarget = action.kind === 'call-rest' ? restWebhookTargets.find((t) => t.id === action.targetId) : undefined
 
-  // Same "own selector" reasoning as subDecks/restDataSources above, and
+  // Same "own selector" reasoning as subDecks/restWebhookTargets above, and
   // same null-reads-as-enabled convention dcsBiosActionEnabled's own prop
   // uses (see its computation in the top-level PropertiesPanel component)
   // — just read directly here instead of threading a second boolean prop
@@ -1188,7 +1188,7 @@ function ActionFields({
       <label className="properties__field properties__field--inline">
         <span>Action</span>
         <select
-          value={action.kind === 'call-rest' ? `call-rest:${action.dataSourceId}` : action.kind}
+          value={action.kind === 'call-rest' ? `call-rest:${action.targetId}` : action.kind}
           onChange={(e) => {
             const kind = e.target.value
             if (kind === 'none') onChange({ kind: 'none' })
@@ -1201,7 +1201,7 @@ function ActionFields({
               onChange({ kind: 'open-overlay', subDeckId: subDecks[0]?.id ?? '', edge: 'right', size: 320, sizeUnit: 'px' })
             else if (kind === 'close-overlay') onChange({ kind: 'close-overlay' })
             else if (kind === 'set-windows-audio') onChange({ kind: 'set-windows-audio', deviceName: '' })
-            else if (kind.startsWith('call-rest:')) onChange({ kind: 'call-rest', dataSourceId: kind.slice('call-rest:'.length), values: [] })
+            else if (kind.startsWith('call-rest:')) onChange({ kind: 'call-rest', targetId: kind.slice('call-rest:'.length), values: [] })
           }}
         >
           <option value="none">No action</option>
@@ -1212,14 +1212,14 @@ function ActionFields({
           <option value="navigate-subdeck">Navigate to screen</option>
           <option value="open-overlay">Open overlay</option>
           <option value="close-overlay">Close overlay</option>
-          {callableRestSources.map((source) => (
-            <option key={source.id} value={`call-rest:${source.id}`}>
-              Call {source.name}
+          {callableRestTargets.map((target) => (
+            <option key={target.id} value={`call-rest:${target.id}`}>
+              Call {target.name}
             </option>
           ))}
-          {action.kind === 'call-rest' && !callableRestSources.some((s) => s.id === action.dataSourceId) && (
-            <option value={`call-rest:${action.dataSourceId}`}>
-              Call {selectedRestSource ? `${selectedRestSource.name} (disabled)` : '(deleted REST source)'}
+          {action.kind === 'call-rest' && !callableRestTargets.some((t) => t.id === action.targetId) && (
+            <option value={`call-rest:${action.targetId}`}>
+              Call {selectedRestTarget ? `${selectedRestTarget.name} (disabled)` : '(deleted REST webhook target)'}
             </option>
           )}
         </select>
@@ -1302,7 +1302,7 @@ function ActionFields({
         // already true at this point in the ternary, not a real unsafe leap.
         <CallRestActionEditor
           action={action as CallRestAction}
-          restDataSources={restDataSources}
+          restWebhookTargets={restWebhookTargets}
           onPatch={(fields) => onChange({ ...(action as CallRestAction), ...fields })}
           variableHint={variableHint}
         />
@@ -2299,7 +2299,15 @@ function CallRestPlaceholderRow({
   }, [entry.expr])
 
   return (
-    <label className="properties__field">
+    // Plain div, not <label> — once isExpr is true this row has TWO
+    // labelable descendants (the × clear button, the ⤢ expand button)
+    // alongside CodeMirror's own contenteditable area, which ISN'T a
+    // labelable form control. A <label> forwards any click that doesn't
+    // land on a labelable element to the first one it contains — so a
+    // click meant to focus the code editor was silently re-fired as a
+    // click on the × button instead, clearing the expression the instant
+    // you tried to start typing in it.
+    <div className="properties__field">
       <span>{entry.placeholder}</span>
       <div className="properties__file-row">
         {isExpr ? (
@@ -2342,40 +2350,41 @@ function CallRestPlaceholderRow({
       {expanded && (
         <ExpressionEditorModal value={entry.expr ?? ''} onChange={(code) => onPatch({ expr: code })} placeholder={placeholder} onClose={() => setExpanded(false)} />
       )}
-    </label>
+    </div>
   )
 }
 
 // CallRestAction's editor — one row per {{placeholder}} token currently
-// found in the target RestDataSource's outgoing.payloadTemplate (see
-// extractPlaceholders in shared/restPlaceholders.ts), reconciled live
-// against action.values by placeholder name. A stale values entry whose
-// token no longer exists in the template just isn't rendered (and is
-// ignored at execution — see runCallRestAction in main/index.ts); it isn't
-// deleted from the array either, in case the token comes back.
+// found in the target RestWebhookTarget's payloadTemplate OR any of its
+// headers' own values (see extractAllPlaceholders in
+// shared/restPlaceholders.ts), reconciled live against action.values by
+// placeholder name. A stale values entry whose token no longer exists
+// anywhere just isn't rendered (and is ignored at execution — see
+// runCallRestAction in main/index.ts); it isn't deleted from the array
+// either, in case the token comes back.
 function CallRestActionEditor({
   action,
-  restDataSources,
+  restWebhookTargets,
   onPatch,
   variableHint
 }: {
   action: CallRestAction
-  restDataSources: RestDataSourceStatus[]
+  restWebhookTargets: RestWebhookTarget[]
   onPatch: (fields: Partial<CallRestAction>) => void
   // See ActionFields' own doc comment.
   variableHint?: string
 }): React.JSX.Element {
-  const source = restDataSources.find((s) => s.id === action.dataSourceId)
-  if (!source) {
-    return <p className="properties__hint dcsbios-settings__error">This REST data source no longer exists — pick a different action.</p>
+  const target = restWebhookTargets.find((t) => t.id === action.targetId)
+  if (!target) {
+    return <p className="properties__hint dcsbios-settings__error">This REST webhook target no longer exists — pick a different action.</p>
   }
 
-  const placeholders = extractPlaceholders(source.outgoing.payloadTemplate)
+  const placeholders = extractAllPlaceholders([target.payloadTemplate, ...target.headers.map((h) => h.value)])
   if (placeholders.length === 0) {
     return (
       <p className="properties__hint">
-        This source's outgoing payload template has no placeholders yet — add a {'{{name}}'} token to it in Settings
-        to fill in a value here.
+        This target's payload template or headers have no placeholders yet — add a {'{{name}}'} token to either in
+        Settings to fill in a value here.
       </p>
     )
   }
@@ -2792,15 +2801,20 @@ export function PropertiesPanel(): React.JSX.Element {
   }, [enabledPlugins, requestAppSettings])
   const dcsBiosActionEnabled = enabledPlugins === null || enabledPlugins.includes('dcsbios')
 
-  // Populates ActionFields' own restDataSources selector (see its comment)
-  // without requiring the Settings modal to have been opened first this
-  // session — same "fetch once per PropertiesPanel mount" shape as
-  // enabledPlugins above, just with no null-vs-empty distinction to
-  // guard on (restDataSources starts at [], same as approvedDevices).
-  const requestRestDataSources = useDashboardStore((s) => s.requestRestDataSources)
+  // Populates ActionFields' own restWebhookTargets selector (see its
+  // comment) without requiring the Settings modal to have been opened first
+  // this session. `connected` guards this the same way the ScreenCapture
+  // effect below documents — this component mounts before the WebSocket's
+  // own 'open' event, and send() silently drops a message on a not-yet-open
+  // socket with no retry, so without this the very first request routinely
+  // got lost, leaving every "Call REST" action reading as a deleted target
+  // forever (even though the action itself still worked — that round trip
+  // happens well after the socket's long since connected).
+  const restWebhookTargetsConnected = useDashboardStore((s) => s.connected)
+  const requestRestWebhookTargets = useDashboardStore((s) => s.requestRestWebhookTargets)
   useEffect(() => {
-    requestRestDataSources()
-  }, [requestRestDataSources])
+    if (restWebhookTargetsConnected) requestRestWebhookTargets()
+  }, [restWebhookTargetsConnected, requestRestWebhookTargets])
 
   // Same "fetch once if null" shape as enabledPlugins above, for
   // ScreenCaptureWidget's monitor dropdown — plus `connected` in the deps:

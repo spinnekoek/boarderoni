@@ -11,7 +11,16 @@ import { useEscapeToClose } from '../useEscapeToClose'
 import { friendlyDeviceName } from '@shared/deviceName'
 import { changeServer, isBoarderoniAndroidApp, setKeepScreenOn, setDebugLogging } from '../androidBridge'
 
-export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React.JSX.Element {
+export function DeviceSettingsModal({
+  onClose,
+  hasDeck
+}: {
+  onClose: () => void
+  // False from DeckPicker's view-mode branch (gesture opened this from the
+  // deck list itself, before any deck is loaded) — "Change deck" would just
+  // disconnect() a connection that was never made, so it's hidden there.
+  hasDeck: boolean
+}): React.JSX.Element {
   const devices = useDashboardStore((s) => s.devices)
   const renameDevice = useDashboardStore((s) => s.renameDevice)
   const disconnect = useDashboardStore((s) => s.disconnect)
@@ -90,7 +99,11 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
 
           <label className="device-modal__field">
             <span>Friendly name</span>
-            <input value={name} placeholder={friendlyDeviceName(device?.userAgent)} onChange={(e) => setName(e.target.value)} />
+            <input
+            value={name}
+            placeholder={friendlyDeviceName(device?.userAgent ?? navigator.userAgent)}
+            onChange={(e) => setName(e.target.value)}
+          />
           </label>
 
           {isBoarderoniAndroidApp() && (
@@ -109,9 +122,11 @@ export function DeviceSettingsModal({ onClose }: { onClose: () => void }): React
             </label>
           )}
 
-          <button className="device-modal__change-deck" onClick={handleChangeDeck}>
-            Change deck
-          </button>
+          {hasDeck && (
+            <button className="device-modal__change-deck" onClick={handleChangeDeck}>
+              Change deck
+            </button>
+          )}
 
           <button className="device-modal__change-deck" onClick={handleForceRefresh}>
             Force refresh

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useConfirmStore } from '../confirmStore'
+import { useSettingsGesture } from '../useSettingsGesture'
 import { SERVER_PORT } from '@shared/constants'
 import type { DeckSummary } from '@shared/types'
+import { DeviceSettingsModal } from './DeviceSettingsModal'
 
 function apiUrl(path: string): string {
   const host = window.location.hostname || 'localhost'
@@ -37,6 +39,13 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
 
   const canManage = mode === 'edit'
   const decks = canManage ? restDecks : lobbyDecks
+
+  // Same 5-finger/Ctrl+I gesture ViewCanvas uses to reach device settings
+  // while a deck is loaded — view-mode only, mirroring where
+  // DeviceSettingsModal was already reachable from before this. There's no
+  // deck connection to disconnect from here, so DeviceSettingsModal hides
+  // its "Change deck" button (hasDeck={false}) in this branch.
+  const settingsGesture = useSettingsGesture(mode === 'view')
 
   function load(): void {
     setError(null)
@@ -156,7 +165,12 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
   }
 
   return (
-    <div className="deck-picker">
+    <div
+      className="deck-picker"
+      onTouchStart={settingsGesture.handleTouchStart}
+      onTouchEnd={settingsGesture.handleTouchEnd}
+      onTouchCancel={settingsGesture.handleTouchEnd}
+    >
       <div className="deck-picker__panel">
         <h1 className="deck-picker__title">Decks</h1>
 
@@ -271,6 +285,9 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
           </div>
         )}
       </div>
+      {settingsGesture.settingsOpen && (
+        <DeviceSettingsModal onClose={settingsGesture.closeSettings} hasDeck={false} />
+      )}
     </div>
   )
 }

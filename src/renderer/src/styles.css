@@ -4100,6 +4100,21 @@ button.deck-morph-cell:focus-visible {
 	display: none;
 }
 
+/* Replaces the hidden native marker above — without this, nothing on the
+   row hints it's expandable at all (the Target deck/mappings fields hide
+   entirely until it's clicked open). */
+.settings-modal__source-summary::before {
+	content: '▸';
+	flex-shrink: 0;
+	color: #8a8f99;
+	font-size: 20px;
+	transition: transform 0.15s ease;
+}
+
+.settings-modal__source[open] > .settings-modal__source-summary::before {
+	transform: rotate(90deg);
+}
+
 .settings-modal__source-panel {
 	margin-top: 12px;
 	padding-top: 12px;

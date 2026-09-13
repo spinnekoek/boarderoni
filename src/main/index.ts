@@ -58,7 +58,7 @@ import { getEventSteps, flattenSequenceSteps } from '../shared/widgetEvents'
 import { FONT_MIME_BY_EXTENSION, fontExtension } from '../shared/fonts'
 import { findSubDeck, findWidgetAnywhere, allDeckWidgets } from '../shared/subDecks'
 import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression, setExpressionConsoleSink, stringifyExpressionLogArgs } from '../shared/expr'
-import { extractPlaceholders } from '../shared/restPlaceholders'
+import { extractAllPlaceholders } from '../shared/restPlaceholders'
 import { PLUGIN_PRODUCERS } from './plugins'
 import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuality, addMjpegViewer } from './screenCapture'
 import { getAppSettings, updateAppSettings } from './appSettings'
@@ -76,6 +76,7 @@ import {
 } from './windowsAudio/connectionManager'
 import { getRestDataSources, updateRestDataSources, createRestDataSource, regenerateRestDataSourceToken } from './restDataSources'
 import { syncRestIncomingServers, getRestListenStatus } from './restIncoming'
+import { getRestWebhookTargets, updateRestWebhookTargets, createRestWebhookTarget } from './restWebhookTargets'
 import { isDeviceApproved, approveDevice, revokeDevice, renameApprovedDevice, listApprovedDevices } from './deviceApproval'
 import { displayDeviceName } from '../shared/deviceName'
 import {
@@ -1022,21 +1023,21 @@ function sequenceStepsForWidget(widget: Widget): SequenceStep[] {
 
 // Surfaces the two ways an imported deck can be structurally fine but still
 // not work correctly on this machine (see the research behind this
-// feature): a CallRestAction pointing at a REST data source id that only
-// ever existed in the exporting machine's own rest-data-sources.json (never
-// part of the export — see RestDataSource's own "NOT per-Dashboard" comment
-// in shared/types.ts), and a ScreenCaptureWidget's region, which is
-// absolute virtual-desktop pixel coordinates tied to the exporting
-// machine's own monitor layout. Neither of these crashes anything — they
-// just silently do the wrong thing — so this doesn't block the import, it
-// just tells the user what to go re-link/re-pick afterward.
+// feature): a CallRestAction pointing at a REST webhook target id that only
+// ever existed in the exporting machine's own rest-webhook-targets.json
+// (never part of the export — see RestWebhookTarget's own "NOT
+// per-Dashboard" comment in shared/types.ts), and a ScreenCaptureWidget's
+// region, which is absolute virtual-desktop pixel coordinates tied to the
+// exporting machine's own monitor layout. Neither of these crashes anything
+// — they just silently do the wrong thing — so this doesn't block the
+// import, it just tells the user what to go re-link/re-pick afterward.
 function collectImportWarnings(dashboard: Dashboard): string[] {
-  const dataSourceIds = new Set(getRestDataSources().map((s) => s.id))
+  const targetIds = new Set(getRestWebhookTargets().map((t) => t.id))
   const warnings: string[] = []
   for (const widget of allDeckWidgets(dashboard)) {
     for (const step of flattenSequenceSteps(sequenceStepsForWidget(widget))) {
-      if (step.kind === 'action' && step.action.kind === 'call-rest' && !dataSourceIds.has(step.action.dataSourceId)) {
-        warnings.push(`A ${widget.type} widget references a REST data source that doesn't exist on this machine — re-link it after import.`)
+      if (step.kind === 'action' && step.action.kind === 'call-rest' && !targetIds.has(step.action.targetId)) {
+        warnings.push(`A ${widget.type} widget references a REST webhook target that doesn't exist on this machine — re-link it after import.`)
       }
     }
     if (widget.type === 'screen-capture' && widget.region) {
@@ -1342,7 +1343,13 @@ const httpServer = createServer((req, res) => {
     sendJson(res, 200, {
       available,
       url: available && lanAddress ? `http://${lanAddress}:${SERVER_PORT}/download/apk` : null,
-      appUrl: lanAddress ? `http://${lanAddress}:${webPort}/?mode=view` : null
+      appUrl: lanAddress ? `http://${lanAddress}:${webPort}/?mode=view` : null,
+      // Read by the Android app's probeAndShowFoundPrompt (MainActivity.kt)
+      // to show which desktop version it found, alongside its own
+      // BuildConfig.VERSION_NAME — this endpoint was already the "always
+      // answers regardless of dev/packaged mode" probe target, so it's the
+      // natural place to also carry this rather than adding a second route.
+      version: app.getVersion()
     })
     return
   }
@@ -1881,20 +1888,26 @@ async function runSetWindowsAudioAction(room: DeckRoom, action: SetWindowsAudioA
   }
 }
 
-// Posts a CallRestAction's target RestDataSource's outgoing payload — same
+// Posts/sends a CallRestAction's target RestWebhookTarget's request — same
 // variables-in-scope/$value-while-dragging convention as runSendDcsCommand
 // above, just resolving N named placeholders instead of one argument. Uses
 // the runtime's global fetch — this app's first outbound HTTP request
 // anywhere; everything else here only ever serves requests.
 async function runCallRestAction(room: DeckRoom, action: CallRestAction, trigger?: TriggerValue): Promise<void> {
-  const source = getRestDataSources().find((s) => s.id === action.dataSourceId)
-  if (!source || !source.enabled) {
-    throw new Error('This REST data source is disabled or no longer exists')
+  const target = getRestWebhookTargets().find((t) => t.id === action.targetId)
+  if (!target || !target.enabled) {
+    throw new Error('This REST webhook target is disabled or no longer exists')
   }
 
+  // Resolved once across every {{name}} token found in EITHER the body or
+  // any header value (see extractAllPlaceholders) — a header and the body
+  // referencing the same placeholder (e.g. a computed signature used in
+  // both) get the identical resolved value, and an expr with a visible
+  // side effect (a console.log) only runs once, not once per place it's
+  // substituted into.
   const variableMap = toVariableMap(room.dashboard.variables ?? [])
-  let payloadText = source.outgoing.payloadTemplate
-  for (const name of extractPlaceholders(payloadText)) {
+  const resolvedByName = new Map<string, unknown>()
+  for (const name of extractAllPlaceholders([target.payloadTemplate, ...target.headers.map((h) => h.value)])) {
     const entry = action.values.find((v) => v.placeholder === name)
     let resolved: unknown = null
     const expr = entry?.expr
@@ -1907,21 +1920,31 @@ async function runCallRestAction(room: DeckRoom, action: CallRestAction, trigger
     } else if (entry?.value !== undefined) {
       resolved = entry.value
     }
-    payloadText = payloadText.replaceAll(`{{${name}}}`, JSON.stringify(resolved))
+    resolvedByName.set(name, resolved)
   }
 
-  let payload: unknown
-  try {
-    payload = JSON.parse(payloadText)
-  } catch {
-    throw new Error('Outgoing payload template is not valid JSON once placeholders are filled in')
+  // Plain string substitution, full stop — the author writes the literal
+  // template exactly as it should look (quotes and all), and each
+  // {{name}} token is replaced with the plain string form of whatever it
+  // resolved to. No JSON-awareness, no validation: a malformed result is
+  // on whoever configured the template, not something to guess-fix or
+  // reject here (same as a header value already worked).
+  function substitute(text: string): string {
+    let out = text
+    for (const [name, resolved] of resolvedByName) out = out.replaceAll(`{{${name}}}`, String(resolved))
+    return out
   }
 
-  const res = await fetch(source.outgoing.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  })
+  const headers: Record<string, string> = {}
+  const hasBody = target.method !== 'GET'
+  if (hasBody) headers['Content-Type'] = 'application/json'
+  for (const header of target.headers) {
+    if (header.key.trim()) headers[header.key] = substitute(header.value)
+  }
+
+  const body = hasBody ? substitute(target.payloadTemplate) : undefined
+
+  const res = await fetch(target.url, { method: target.method, headers, body })
   if (!res.ok) throw new Error(`REST call failed: ${res.status} ${res.statusText}`)
 }
 
@@ -1934,12 +1957,12 @@ async function runCallRestAction(room: DeckRoom, action: CallRestAction, trigger
 function applyRestIncoming(sourceId: string, flattened: Record<string, unknown>): void {
   const source = getRestDataSources().find((s) => s.id === sourceId)
   if (!source) return
-  const room = getOrLoadRoom(source.incoming.targetDeckId)
+  const room = getOrLoadRoom(source.targetDeckId)
   if (!room) return
 
   const variableMap = toVariableMap(room.dashboard.variables ?? [])
   const updates: Record<string, unknown> = {}
-  for (const mapping of source.incoming.mappings) {
+  for (const mapping of source.mappings) {
     if (!(mapping.field in flattened)) continue
     const rawValue = flattened[mapping.field]
     if (mapping.expr && mapping.expr.trim()) {
@@ -1975,6 +1998,20 @@ function restSourcesPayload(): ServerToClient {
 
 function broadcastRestSources(): void {
   const payload = JSON.stringify(restSourcesPayload())
+  for (const [sock, sctx] of socketContext) {
+    if (sctx.role === 'edit' && sock.readyState === WebSocket.OPEN) sock.send(payload)
+  }
+}
+
+// Same "full current list either way" shape as restSourcesPayload/
+// broadcastRestSources above, for the separate outgoing-only webhook-target
+// list — no listening status to merge in since a target has no listener.
+function restWebhookTargetsPayload(): ServerToClient {
+  return { type: 'rest-webhook-targets:list', targets: getRestWebhookTargets() }
+}
+
+function broadcastRestWebhookTargets(): void {
+  const payload = JSON.stringify(restWebhookTargetsPayload())
   for (const [sock, sctx] of socketContext) {
     if (sctx.role === 'edit' && sock.readyState === WebSocket.OPEN) sock.send(payload)
   }
@@ -2883,7 +2920,15 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         // round-trips the whole object on every edit rather than stripping
         // those fields itself, so this is where they're dropped before
         // anything gets persisted to disk.
-        const sanitized = message.sources.map(({ id, name, enabled, incoming, outgoing }) => ({ id, name, enabled, incoming, outgoing }))
+        const sanitized = message.sources.map(({ id, name, enabled, port, bearerToken, targetDeckId, mappings }) => ({
+          id,
+          name,
+          enabled,
+          port,
+          bearerToken,
+          targetDeckId,
+          mappings
+        }))
         updateRestDataSources(sanitized)
         syncRestIncomingServers(applyRestIncoming)
         broadcastRestSources()
@@ -2901,6 +2946,38 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         updateRestDataSources(getRestDataSources().filter((s) => s.id !== message.sourceId))
         syncRestIncomingServers(applyRestIncoming)
         broadcastRestSources()
+        break
+      }
+      case 'rest-webhook-targets:get': {
+        if (ctx.role !== 'edit') break
+        ws.send(JSON.stringify(restWebhookTargetsPayload()))
+        break
+      }
+      case 'rest-webhook-targets:create': {
+        if (ctx.role !== 'edit') break
+        createRestWebhookTarget(message.name)
+        broadcastRestWebhookTargets()
+        break
+      }
+      case 'rest-webhook-targets:update': {
+        if (ctx.role !== 'edit') break
+        const sanitized = message.targets.map(({ id, name, enabled, method, url, headers, payloadTemplate }) => ({
+          id,
+          name,
+          enabled,
+          method,
+          url,
+          headers,
+          payloadTemplate
+        }))
+        updateRestWebhookTargets(sanitized)
+        broadcastRestWebhookTargets()
+        break
+      }
+      case 'rest-webhook-targets:delete': {
+        if (ctx.role !== 'edit') break
+        updateRestWebhookTargets(getRestWebhookTargets().filter((t) => t.id !== message.targetId))
+        broadcastRestWebhookTargets()
         break
       }
       case 'fonts:get': {

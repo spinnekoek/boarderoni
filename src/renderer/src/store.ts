@@ -12,6 +12,7 @@ import {
   type OverlaySizeUnit,
   type RestDataSource,
   type RestDataSourceStatus,
+  type RestWebhookTarget,
   type ScreenRegion,
   type SequenceStep,
   type ServerToClient,
@@ -156,11 +157,17 @@ interface DashboardStore {
   // requested. EventSourcesModal's add-picker filters PLUGIN_TYPES by this.
   enabledPlugins: string[] | null
   // App-wide, user-created REST data sources (see main/restDataSources.ts) —
-  // empty until first requested. PluginsModal's RestDataSourcesSettingsPanel
-  // manages the full list; PropertiesPanel's ActionFields reads it to offer
-  // a "Call <name>" action per enabled, outgoing-configured source.
+  // incoming-only now (see RestDataSource's own comment on the split from
+  // RestWebhookTarget below) — empty until first requested. PluginsModal's
+  // RestDataSourcesSettingsPanel manages the full list.
   restDataSources: RestDataSourceStatus[]
   restDataSourcesLanAddress: string | null
+  // App-wide, user-created REST webhook targets (see
+  // main/restWebhookTargets.ts) — the outgoing counterpart, split out of
+  // what used to be restDataSources' own outgoing half. Empty until first
+  // requested. PropertiesPanel's ActionFields reads it to offer a "Call
+  // <name>" action per enabled target.
+  restWebhookTargets: RestWebhookTarget[]
   // App-wide, user-uploaded fonts (see main/customFonts.ts) — empty until
   // first synced. Unlike restDataSources, arrives unasked as part of
   // sendInitialState (see its own comment in main/index.ts), so it's rarely
@@ -228,6 +235,10 @@ interface DashboardStore {
   updateRestDataSources: (sources: RestDataSource[]) => void
   regenerateRestDataSourceToken: (sourceId: string) => void
   deleteRestDataSource: (sourceId: string) => void
+  requestRestWebhookTargets: () => void
+  createRestWebhookTarget: (name: string) => void
+  updateRestWebhookTargets: (targets: RestWebhookTarget[]) => void
+  deleteRestWebhookTarget: (targetId: string) => void
   requestCustomFonts: () => void
   // dataUrl comes from a plain <input type="file"> + FileReader.readAsDataURL
   // (see FontsModal.tsx), same client-reads-the-file-itself shape as
@@ -528,6 +539,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   enabledPlugins: null,
   restDataSources: [],
   restDataSourcesLanAddress: null,
+  restWebhookTargets: [],
   customFonts: [],
   customVariants: [],
   screenCaptureDisplays: null,
@@ -650,6 +662,22 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   deleteRestDataSource: (sourceId) => {
     send({ type: 'rest-sources:delete', sourceId })
+  },
+
+  requestRestWebhookTargets: () => {
+    send({ type: 'rest-webhook-targets:get' })
+  },
+
+  createRestWebhookTarget: (name) => {
+    send({ type: 'rest-webhook-targets:create', name })
+  },
+
+  updateRestWebhookTargets: (targets) => {
+    send({ type: 'rest-webhook-targets:update', targets })
+  },
+
+  deleteRestWebhookTarget: (targetId) => {
+    send({ type: 'rest-webhook-targets:delete', targetId })
   },
 
   requestCustomFonts: () => {
@@ -888,6 +916,8 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set({ enabledPlugins: message.enabledPlugins })
       } else if (message.type === 'rest-sources:list') {
         set({ restDataSources: message.sources, restDataSourcesLanAddress: message.lanAddress })
+      } else if (message.type === 'rest-webhook-targets:list') {
+        set({ restWebhookTargets: message.targets })
       } else if (message.type === 'fonts:list') {
         set({ customFonts: message.fonts })
         // Both side effects outside the render tree, not component effects —
