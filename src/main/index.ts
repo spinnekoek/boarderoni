@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, shell, Tray } from 'electron'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import {
   readFile,
@@ -3206,9 +3206,16 @@ try {
   console.error('[boarderoni] mDNS advertisement failed to start', err)
 }
 
+// Set once an actual quit has been requested (tray "Quit", before-quit,
+// etc.) so the editor window's own 'close' handler below knows to let the
+// close through instead of hiding to tray.
+let isQuitting = false
+
 app.on('before-quit', () => {
+  isQuitting = true
   mdnsService?.stop()
   bonjour.destroy()
+  tray?.destroy()
 })
 
 try {
@@ -3216,6 +3223,9 @@ try {
 } catch {
   // best-effort, not critical if the config surface differs across versions
 }
+
+let editorWindow: BrowserWindow | null = null
+let tray: Tray | null = null
 
 interface WindowState {
   x?: number
@@ -3287,6 +3297,10 @@ function createEditorWindow(): void {
       preload: join(__dirname, '../preload/index.js')
     }
   })
+  editorWindow = win
+  win.on('closed', () => {
+    if (editorWindow === win) editorWindow = null
+  })
 
   let saveTimeout: NodeJS.Timeout | null = null
   function scheduleSaveWindowState(): void {
@@ -3295,7 +3309,22 @@ function createEditorWindow(): void {
   }
   win.on('resize', scheduleSaveWindowState)
   win.on('move', scheduleSaveWindowState)
-  win.on('close', () => saveWindowState(win))
+  win.on('close', (event) => {
+    saveWindowState(win)
+    // The server (and any connected deployed views) should keep running
+    // unattended after the editor window closes — only an explicit Quit
+    // (tray menu / before-quit) should actually end the process.
+    if (isQuitting) return
+    event.preventDefault()
+    win.hide()
+    // Windows-only (Tray.displayBalloon is a no-op elsewhere) — the app has
+    // no other indicator that closing the window didn't quit it.
+    tray?.displayBalloon({
+      title: 'Boarderoni is still running',
+      content: 'The server keeps running in the background. Use the tray icon to reopen the editor or quit.',
+      icon: nativeImage.createFromPath(join(__dirname, '../../resources/icon.ico'))
+    })
+  })
 
   registerWindowShortcuts(win)
 
@@ -3314,6 +3343,50 @@ function createEditorWindow(): void {
   }
 }
 
+function showEditorWindow(): void {
+  if (!editorWindow) {
+    createEditorWindow()
+    return
+  }
+  if (editorWindow.isMinimized()) editorWindow.restore()
+  editorWindow.show()
+  editorWindow.focus()
+}
+
+function createTray(): void {
+  const icon = nativeImage.createFromPath(join(__dirname, '../../resources/icon.ico'))
+  tray = new Tray(icon)
+  tray.setToolTip('Boarderoni')
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Show editor', click: () => showEditorWindow() },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        click: () => {
+          // Tray Quit is the only path that actually ends the process (see
+          // window-all-closed's own comment) — confirm since it stops the
+          // server and disconnects every deployed view, which is easy to
+          // trigger by accident from a tray right-click.
+          const result = dialog.showMessageBoxSync({
+            type: 'question',
+            buttons: ['Quit', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            title: 'Quit Boarderoni?',
+            message: 'Quit Boarderoni?',
+            detail: 'This stops the server — any connected deployed views will disconnect.'
+          })
+          if (result !== 0) return
+          isQuitting = true
+          app.quit()
+        }
+      }
+    ])
+  )
+  tray.on('double-click', () => showEditorWindow())
+}
+
 app.whenReady().then(() => {
   // Drops the default File/Edit/View/Window menu bar — see
   // registerWindowShortcuts above for the accelerators this would otherwise
@@ -3321,9 +3394,10 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null)
 
   createEditorWindow()
+  createTray()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createEditorWindow()
+    showEditorWindow()
   })
 
   // dcsViewports is a core plugin (see shared/plugins/dcsViewports.ts) with
@@ -3363,6 +3437,8 @@ app.whenReady().then(() => {
   screen.on('display-removed', scheduleDcsViewportsDisplayRefresh)
 })
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
+// The editor window hides to tray instead of actually closing (see its own
+// 'close' handler above), so this fires only in edge cases (e.g. the window
+// was destroyed some other way) — deliberately a no-op, since normal
+// quitting now goes through the tray's "Quit" item / before-quit instead.
+app.on('window-all-closed', () => {})
