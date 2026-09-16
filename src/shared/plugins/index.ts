@@ -4,7 +4,7 @@
 // PLUGIN_PRODUCERS registry), and, if it needs config UI beyond the generic
 // field-mapping list, a config panel in renderer/src/plugins/ registered in
 // PLUGIN_CONFIG_PANELS there. Nothing else in the app needs to change — see
-// CONTRIBUTING.md's "Adding a plugin" section.
+// docs/CONTRIBUTING.md's "Adding a plugin" section.
 import type { PluginTypeMeta } from './types'
 import { datetimePlugin } from './datetime'
 import { dcsbiosPlugin } from './dcsbios'

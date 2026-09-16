@@ -4,7 +4,9 @@ Design button/macro dashboards on desktop, drive them from a mobile WebView
 client over your local network. Built for simpit/HOTAS panels, stream-deck
 style macro boards, and DCS World cockpit exports.
 
-See `CONTRIBUTING.md` for the codebase layout and plugin-authoring walkthrough.
+See [docs/USER_MANUAL.md](docs/USER_MANUAL.md) for how to use the app, or
+[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for the codebase layout and
+plugin-authoring walkthrough.
 
 ## Disclaimer
 

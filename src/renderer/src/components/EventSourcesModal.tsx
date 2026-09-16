@@ -260,7 +260,7 @@ function DcsBiosFieldCategoryGroup({
 // DCS-BIOS-flavored (DcsBiosFieldCatalogEntry) rather than a fully generic
 // dynamicFields browser — DCS-BIOS is the only dynamicFields plugin today.
 // A future dynamicFields plugin currently means adding its own browser here
-// too; see CONTRIBUTING.md's "Adding a plugin" section for the line between
+// too; see docs/CONTRIBUTING.md's "Adding a plugin" section for the line between
 // what's generic vs. DCS-BIOS-specific in this file.
 function DcsBiosFieldBrowser({
   catalogState,
@@ -468,7 +468,7 @@ export function EventSourcesModal({ onClose }: { onClose: () => void }): React.J
   // switch here rather than a fully generic factory: only two kinds need
   // anything beyond `undefined`, and both need live app state (DCS-BIOS's
   // default update rate) that doesn't belong in shared/plugins' plain
-  // metadata. See CONTRIBUTING.md if a new plugin needs to join this list.
+  // metadata. See docs/CONTRIBUTING.md if a new plugin needs to join this list.
   function defaultConfigFor(kind: string): Record<string, unknown> | undefined {
     if (kind === 'dcsbios') return defaultDcsBiosConfig(dcsBiosSettings?.defaultUpdateHz)
     if (kind === 'screenCapture') return { intervalMs: DEFAULT_OCR_INTERVAL_MS }

@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-Guidance for Claude when working in this repo. See CONTRIBUTING.md for the
-plugin-authoring walkthrough.
+Guidance for Claude when working in this repo. See docs/CONTRIBUTING.md for
+the plugin-authoring walkthrough.
 
 ## Adding a widget type
 
