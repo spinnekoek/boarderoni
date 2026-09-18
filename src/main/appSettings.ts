@@ -20,9 +20,14 @@ function settingsFilePath(): string {
 
 // Opt-out, not opt-in — every known kind enabled by default, so nothing an
 // existing user has configured silently vanishes on upgrade to a version
-// that adds this gate.
+// that adds this gate. 'mcp' is the deliberate exception: it grants an
+// external process (an MCP client/AI agent) direct write access to every
+// deck's live state over a local HTTP server, which is categorically more
+// powerful than anything else this list gates (DCS-BIOS, REST polling,
+// etc. only ever move data INTO variables) — so it must be a deliberate,
+// informed opt-in from Settings, never silently on by default.
 function defaultSettings(): AppSettings {
-  return { enabledPlugins: PLUGIN_TYPES.map((t) => t.kind) }
+  return { enabledPlugins: PLUGIN_TYPES.filter((t) => t.kind !== 'mcp').map((t) => t.kind) }
 }
 
 // A file saved before the event-source → plugin rename has `enabledDataSources`
@@ -43,11 +48,16 @@ function defaultSettings(): AppSettings {
 // "user turned it off" in a plain inclusion list, so this always resolves
 // that ambiguity toward "enabled," matching this file's own opt-out
 // philosophy (see defaultSettings' comment) consistently, not just once.
+//
+// 'mcp' is excluded from that backfill for the same reason it's excluded
+// from defaultSettings() above — a kind an existing user has never seen
+// before must default OFF specifically because it's 'mcp', not because it's
+// new. Every other newly-added kind still backfills to enabled as before.
 function migrateLegacySettings(parsed: Partial<AppSettings> & { enabledDataSources?: string[] }): Partial<AppSettings> {
   const legacy = parsed.enabledPlugins ?? parsed.enabledDataSources
   if (!legacy) return parsed
   const renamed = legacy.map((kind) => (kind === 'ocrRegion' ? 'screenCapture' : kind))
-  const missing = PLUGIN_TYPES.map((t) => t.kind).filter((kind) => !renamed.includes(kind))
+  const missing = PLUGIN_TYPES.map((t) => t.kind).filter((kind) => kind !== 'mcp' && !renamed.includes(kind))
   return { enabledPlugins: [...renamed, ...missing] }
 }
 

@@ -2,6 +2,18 @@
 // build, the static renderer bundle that the Android WebView loads.
 export const SERVER_PORT = 17334
 
+// The MCP server (see main/mcp/) gets its OWN port, deliberately never
+// shared with SERVER_PORT above: that listener binds with no host arg
+// (all-interfaces, advertised over mDNS for the Android client), while the
+// MCP server needs to be loopback-only (127.0.0.1) — an AI agent driving
+// live dashboard edits is a much more powerful control surface than
+// anything else this app exposes, and Node's http.Server only supports one
+// bind per listen() call, so sharing SERVER_PORT would mean either exposing
+// MCP on the LAN or loopback-binding the whole app server and breaking the
+// phone client. See main/mcp/server.ts for the loopback bind + bearer-token
+// auth this port is gated behind.
+export const MCP_SERVER_PORT = 17335
+
 // mDNS/DNS-SD service type the desktop app advertises itself under (via
 // bonjour-service) so the Android app never needs a manually-typed IP. The
 // Android client resolves this via NsdManager to get the desktop's current

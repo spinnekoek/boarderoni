@@ -225,6 +225,11 @@ export const MorphCanvasWidget = memo(function MorphCanvasWidget({
   return (
     <div
       className={`canvas-widget canvas-widget--morph${selected ? ' canvas-widget--selected' : ''}${visible ? '' : ' canvas-widget--hidden'}`}
+      // Same screenshot.ts hook as CanvasWidget.tsx's own — see its comment.
+      // screenshot_widget itself currently rejects 'morph' widgets (no plain
+      // w/h box), but the hook costs nothing to keep consistent for when
+      // that support is added.
+      data-widget-id={widget.id}
       style={{ left: footprint.x, top: footprint.y, width: footprint.w, height: footprint.h }}
     >
       <MorphButtonWidgetContent

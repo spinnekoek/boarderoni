@@ -2,6 +2,7 @@ import { DcsBiosSettingsPanel } from './components/DcsBiosSettingsPanel'
 import { DcsViewportsSettingsPanel } from './components/DcsViewportsSettingsPanel'
 import { RestDataSourcesSettingsPanel } from './components/RestDataSourcesSettingsPanel'
 import { RestWebhookTargetsSettingsPanel } from './components/RestWebhookTargetsSettingsPanel'
+import { McpServerSettingsPanel } from './components/McpServerSettingsPanel'
 
 // Registry of per-kind APP-WIDE settings panels, keyed by PluginTypeMeta.kind
 // (see shared/plugins). Distinct from renderer/src/plugins' PLUGIN_CONFIG_PANELS
@@ -25,5 +26,6 @@ export const PLUGIN_SETTINGS_PANELS: Partial<Record<string, React.ComponentType>
   dcsbios: DcsBiosSettingsPanel,
   dcsViewports: DcsViewportsSettingsPanel,
   rest: RestDataSourcesSettingsPanel,
-  restWebhookTargets: RestWebhookTargetsSettingsPanel
+  restWebhookTargets: RestWebhookTargetsSettingsPanel,
+  mcp: McpServerSettingsPanel
 }

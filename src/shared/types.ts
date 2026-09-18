@@ -2359,6 +2359,14 @@ export type ClientToServer =
   | { type: 'rest-sources:update'; sources: RestDataSource[] }
   | { type: 'rest-sources:regenerate-token'; sourceId: string }
   | { type: 'rest-sources:delete'; sourceId: string }
+  // Settings modal only, edit-role only (enforced server-side) — same
+  // admin-action reasoning as rest-sources:get above. There's no
+  // 'mcp-server:update' — the only mutable field is the bearer token, and
+  // there's nothing else to round-trip (whether the server actually RUNS is
+  // the separate, existing 'mcp' entry in app-settings:update's
+  // enabledPlugins, not something this settings object owns).
+  | { type: 'mcp-server:get' }
+  | { type: 'mcp-server:regenerate-token' }
   // The outgoing counterpart's own message family, split out from
   // rest-sources:* alongside RestWebhookTarget (see its own comment) —
   // same edit-role-only, full-list-broadcast-back shape, just no token to
@@ -2536,6 +2544,14 @@ export type ServerToClient =
   // used for /api/apk-info) so the Settings panel can build
   // http://<lanAddress>:<port> without a second HTTP round trip.
   | { type: 'rest-sources:list'; sources: RestDataSourceStatus[]; lanAddress: string | null }
+  // Reply to mcp-server:get/regenerate-token — `listening`/`listenError`
+  // mirror rest-sources:list's own fields (the MCP HTTP listener only binds
+  // at all once the 'mcp' kind is enabled in app-settings, same gating
+  // syncRestIncomingServers uses for REST), `lanAddress` is unused here
+  // (deliberately loopback-only — see MCP_SERVER_PORT's own comment in
+  // shared/constants.ts) but `port` is included so the settings panel can
+  // show the full loopback URL without hardcoding the constant twice.
+  | { type: 'mcp-server:settings'; bearerToken: string; port: number; listening: boolean; listenError?: string }
   // Reply to rest-webhook-targets:get/create/update/delete — no listening
   // status to report (a target has no listener, see RestWebhookTarget's own
   // comment), so unlike rest-sources:list this is just the plain list.

@@ -8,6 +8,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --build --force",
+    "generate:mcp-schemas": "tsx scripts/generate-mcp-schemas.ts",
     "test": "vitest run",
     "dist": "electron-vite build && electron-builder --win",
     "dist:dir": "electron-vite build && electron-builder --win --dir"
@@ -26,6 +27,8 @@
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "ts-json-schema-generator": "^2.9.0",
+    "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
     "vitest": "^4.1.10"
@@ -55,6 +58,7 @@
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.5.0",
     "@lezer/highlight": "^1.2.3",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@nut-tree-fork/nut-js": "^4.2.6",
     "@tanstack/react-virtual": "^3.14.9",
     "bonjour-service": "^1.4.4",

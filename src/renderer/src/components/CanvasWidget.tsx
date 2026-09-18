@@ -200,6 +200,11 @@ export const CanvasWidget = memo(function CanvasWidget({
   return (
     <div
       className={`canvas-widget${selected ? ' canvas-widget--selected' : ''}${visible ? '' : ' canvas-widget--hidden'}`}
+      // Stable hook for main/mcp/screenshot.ts's screenshot_widget tool —
+      // measures this element's own getBoundingClientRect() directly rather
+      // than trying to replicate the canvas's pan/zoom transform math, so it
+      // stays correct regardless of camera state.
+      data-widget-id={widget.id}
       style={{
         left: widget.x,
         top: widget.y,

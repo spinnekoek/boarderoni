@@ -231,7 +231,16 @@ export function Canvas(): React.JSX.Element {
               ...(snapToGrid ? { backgroundSize: `${gridSize}px ${gridSize}px` } : { backgroundImage: 'none' })
             }}
           />
-          <div className="canvas-device-bounds" style={{ width: activeDevice.width, height: activeDevice.height }}>
+          <div
+            className="canvas-device-bounds"
+            // Stable hook for main/mcp/screenshot.ts's screenshot_dashboard
+            // tool — this is the actual designed area (matches the deployed
+            // view's own dimensions), not the whole pannable/zoomable
+            // canvas-viewport which can show empty space around it
+            // depending on the current camera position.
+            data-canvas-device-bounds
+            style={{ width: activeDevice.width, height: activeDevice.height }}
+          >
             <span className="canvas-device-bounds__label">
               {activeDeviceLabel} — {activeDevice.width}×{activeDevice.height}
               {activeConnected && !activeConnected.connected ? ' (disconnected)' : ''}

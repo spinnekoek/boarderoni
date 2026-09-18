@@ -21,7 +21,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { Bonjour, type Service } from 'bonjour-service'
 import { z } from 'zod'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
-import { SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN, DECK_CLOSE_CODE_DENIED, MDNS_SERVICE_TYPE, DCS_COMMAND_VALUE_SHORTHAND } from '../shared/constants'
+import { SERVER_PORT, MCP_SERVER_PORT, DECK_CLOSE_CODE_UNKNOWN, DECK_CLOSE_CODE_DENIED, MDNS_SERVICE_TYPE, DCS_COMMAND_VALUE_SHORTHAND } from '../shared/constants'
 import {
   DEFAULT_DASHBOARD,
   DECK_EXPORT_FORMAT_VERSION,
@@ -61,7 +61,9 @@ import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression, setExp
 import { extractAllPlaceholders } from '../shared/restPlaceholders'
 import { PLUGIN_PRODUCERS } from './plugins'
 import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuality, addMjpegViewer } from './screenCapture'
-import { getAppSettings, updateAppSettings } from './appSettings'
+import { getAppSettings, updateAppSettings, type AppSettings } from './appSettings'
+import { getMcpServerSettings, regenerateMcpServerToken } from './mcpServerSettings'
+import { syncMcpServer, getMcpListenStatus, type McpDeps } from './mcp/server'
 import { getCustomFonts, addCustomFont, deleteCustomFont, updateCustomFontLineHeight, customFontFile } from './customFonts'
 import { getCustomVariants, addCustomVariant, deleteCustomVariant } from './customVariants'
 import {
@@ -893,7 +895,15 @@ function serveApk(res: ServerResponse): void {
   })
 }
 
-interface DeckRoom {
+// Exported (type-only) so main/mcp/tools.ts can type its dependency-injected
+// functions against this shape — see the McpDeps object built near this
+// file's own startMcpServer()/syncMcpServer() call at the bottom, which
+// passes bound closures over getOrLoadRoom/applyDashboardUpdate/etc. rather
+// than mcp/tools.ts importing them directly (that would create an actual
+// runtime circular require: index.ts -> mcp/server.ts -> mcp/tools.ts ->
+// index.ts). A `import type` back-reference to this interface has no such
+// problem — it's erased entirely at compile time.
+export interface DeckRoom {
   id: string
   dashboard: Dashboard
   devices: Map<string, DeviceInfo>
@@ -2143,6 +2153,56 @@ function resyncAllRoomsPlugins(): void {
   for (const room of rooms.values()) syncPlugins(room)
 }
 
+// Replaces room.dashboard wholesale, saves (sync or debounced per `final`,
+// same split applyVariableUpdates uses), broadcasts the result, and
+// restarts any plugin whose {kind, config} changed — exactly what the
+// 'dashboard:update' WS case below did inline before this was extracted.
+// This is now the ONE path both a real WS dashboard:update AND every MCP
+// widget/event-source mutation tool go through (see main/mcp/tools.ts) —
+// widget and event-source CRUD both work by reading room.dashboard,
+// splicing/patching the target array (widgets, or plugins — an event
+// source), and calling this, same as a real client would round-trip a
+// whole edited Dashboard back today. `excludeSocket` mirrors
+// broadcastToRoom's own param — omitted (MCP calls) means every connected
+// client gets the update, including any editor window watching this deck.
+function applyDashboardUpdate(room: DeckRoom, dashboard: Dashboard, final: boolean, excludeSocket?: WebSocket): void {
+  room.dashboard = dashboard
+  if (final) {
+    cancelScheduledSave(room)
+    saveDeckDashboard(room)
+  } else {
+    scheduleDebouncedSave(room)
+  }
+  broadcastToRoom(room, dashboardSyncMessage(room.dashboard), excludeSocket)
+  syncPlugins(room)
+}
+
+// Merges `patch` into AppSettings and re-syncs every app-wide, kind-gated
+// listener against the result — exactly what the 'app-settings:update' WS
+// case below did inline before this was extracted, now also called by the
+// MCP set_enabled_plugins tool (see main/mcp/tools.ts) so toggling a kind
+// on/off from an MCP client takes effect immediately, same as from the
+// Settings UI. The dcsViewports false->true edge-refresh is deliberately
+// folded in here too (not left WS-only) so both callers get the same
+// real-world side effect from enabling that kind, not just the ones
+// re-synced by resyncAllRoomsPlugins/syncRestIncomingServers.
+async function applyAppSettingsPatch(patch: Partial<AppSettings>): Promise<AppSettings> {
+  const wasDcsViewportsEnabled = getAppSettings().enabledPlugins.includes('dcsViewports')
+  const settings = updateAppSettings(patch)
+  resyncAllRoomsPlugins()
+  syncRestIncomingServers(applyRestIncoming)
+  syncMcpServer(mcpDeps)
+  const isDcsViewportsEnabled = settings.enabledPlugins.includes('dcsViewports')
+  if (isDcsViewportsEnabled && !wasDcsViewportsEnabled) {
+    try {
+      await refreshDcsViewportsStatus()
+    } catch (err) {
+      console.error('[boarderoni] dcsViewports enable-time refresh failed', err)
+    }
+  }
+  return settings
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -2179,7 +2239,19 @@ function requireSubDeck(room: DeckRoom, subDeckId: string): void {
 // effect is a targeted (not room-broadcast) reply to the ONE socket that
 // triggered them — see each's own comment in shared/types.ts for why this
 // is client-local state rather than shared dashboard state.
-async function runActionStep(room: DeckRoom, action: WidgetAction, trigger: TriggerValue | undefined, final: boolean, ws: WebSocket): Promise<void> {
+// Minimal send-only interface satisfied by both a real WebSocket (the
+// per-socket target for subdeck:navigate/open-overlay/close-overlay and
+// action:error replies below) and a non-WS "reply sink" the MCP
+// trigger_action tool builds to collect those same replies with no real
+// client socket behind it (see main/mcp/tools.ts). A plain WebSocket
+// structurally satisfies this (its own .send accepts a wider argument type
+// than just string), so every existing call site below needs no changes
+// beyond this type.
+interface ActionReplyTarget {
+  send: (data: string) => void
+}
+
+async function runActionStep(room: DeckRoom, action: WidgetAction, trigger: TriggerValue | undefined, final: boolean, ws: ActionReplyTarget): Promise<void> {
   if (action.kind === 'update-state') {
     runUpdateState(room, action.code, trigger, final) // throws synchronously on failure
     return
@@ -2256,7 +2328,7 @@ async function runSteps(
   steps: SequenceStep[],
   trigger: TriggerValue | undefined,
   final: boolean,
-  ws: WebSocket,
+  ws: ActionReplyTarget,
   pathPrefix: StepPath
 ): Promise<void> {
   for (let i = 0; i < steps.length; i++) {
@@ -2292,7 +2364,7 @@ async function runSequence(
   steps: SequenceStep[],
   trigger: TriggerValue | undefined,
   final: boolean,
-  ws: WebSocket,
+  ws: ActionReplyTarget,
   widgetId: string,
   event: WidgetEventKind
 ): Promise<void> {
@@ -2311,7 +2383,7 @@ async function triggerAction(
   room: DeckRoom,
   widgetId: string,
   event: WidgetEventKind,
-  ws: WebSocket,
+  ws: ActionReplyTarget,
   value: number | undefined,
   final: boolean
 ): Promise<void> {
@@ -2446,7 +2518,7 @@ async function triggerAction(
 }
 
 function sendError(
-  ws: WebSocket,
+  ws: ActionReplyTarget,
   widgetId: string,
   message: string,
   detail?: { event: WidgetEventKind; path: StepPath; stepKind: SequenceStep['kind'] }
@@ -2538,20 +2610,12 @@ wss.on('connection', (ws: TrackedSocket, req) => {
     switch (message.type) {
       case 'dashboard:update':
         if (!activeRoom) break
-        activeRoom.dashboard = message.dashboard
         // Same immediate/debounced split as applyVariableUpdates — an
         // in-flight drag tick (final: false) must not do a blocking
         // full-dashboard writeFileSync on every frame; the drag's own final
         // tick (or any one-off edit) still saves synchronously so nothing's
         // lost if the app closes right after.
-        if (message.final ?? true) {
-          cancelScheduledSave(activeRoom)
-          saveDeckDashboard(activeRoom)
-        } else {
-          scheduleDebouncedSave(activeRoom)
-        }
-        broadcastToRoom(activeRoom, dashboardSyncMessage(activeRoom.dashboard), ws)
-        syncPlugins(activeRoom)
+        applyDashboardUpdate(activeRoom, message.dashboard, message.final ?? true, ws)
         break
       case 'dashboard:reload': {
         if (!activeRoom) break
@@ -2876,26 +2940,45 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         break
       }
       case 'app-settings:update': {
-        const wasDcsViewportsEnabled = getAppSettings().enabledPlugins.includes('dcsViewports')
-        const settings = updateAppSettings({ enabledPlugins: message.enabledPlugins })
+        // dcsViewports's false->true edge-refresh, resyncAllRoomsPlugins,
+        // and syncRestIncomingServers all now live inside
+        // applyAppSettingsPatch (see its own comment) — REST/dcsViewports
+        // are core plugins (see shared/plugins/rest.ts) with no
+        // per-dashboard instances of their own, so their master switches
+        // need that separate handling instead of just resyncAllRoomsPlugins.
+        const settings = await applyAppSettingsPatch({ enabledPlugins: message.enabledPlugins })
         ws.send(JSON.stringify({ type: 'app-settings:settings', ...settings } satisfies ServerToClient))
-        // Toggling a kind takes effect immediately, not just on the next
-        // unrelated dashboard:update — see resyncAllRoomsPlugins. REST is a
-        // core plugin (see shared/plugins/rest.ts) with no per-dashboard
-        // instances for resyncAllRoomsPlugins to iterate, so its own master
-        // switch needs this separate call instead.
-        resyncAllRoomsPlugins()
-        syncRestIncomingServers(applyRestIncoming)
-        // dcsViewports is also core, same reasoning — only react on the
-        // false->true edge: disabling deliberately leaves the virtual
-        // display and Boarderoni.lua in place (harmless, no elevation
-        // needed to leave them alone) rather than tearing anything down.
-        const isDcsViewportsEnabled = settings.enabledPlugins.includes('dcsViewports')
-        if (isDcsViewportsEnabled && !wasDcsViewportsEnabled) {
-          void refreshDcsViewportsStatus().catch((err: unknown) => {
-            console.error('[boarderoni] dcsViewports enable-time refresh failed', err)
-          })
-        }
+        break
+      }
+      case 'mcp-server:get': {
+        // Settings modal only, edit-role only (enforced server-side) — same
+        // admin-action reasoning as rest-sources:get.
+        if (ctx.role !== 'edit') break
+        const settings = getMcpServerSettings()
+        const status = getMcpListenStatus()
+        ws.send(
+          JSON.stringify({
+            type: 'mcp-server:settings',
+            bearerToken: settings.bearerToken,
+            port: MCP_SERVER_PORT,
+            ...status
+          } satisfies ServerToClient)
+        )
+        break
+      }
+      case 'mcp-server:regenerate-token': {
+        if (ctx.role !== 'edit') break
+        const settings = regenerateMcpServerToken()
+        syncMcpServer(mcpDeps)
+        const status = getMcpListenStatus()
+        ws.send(
+          JSON.stringify({
+            type: 'mcp-server:settings',
+            bearerToken: settings.bearerToken,
+            port: MCP_SERVER_PORT,
+            ...status
+          } satisfies ServerToClient)
+        )
         break
       }
       case 'rest-sources:get': {
@@ -3159,6 +3242,66 @@ httpServer.listen(SERVER_PORT, () => {
 // listeners as sources are added/edited/removed.
 syncRestIncomingServers(applyRestIncoming)
 
+// Wraps the real triggerAction (which reports errors/subdeck-navigation
+// replies through an ActionReplyTarget — normally a live WebSocket) into a
+// version that collects those replies into an array instead, since an MCP
+// tool call has no real client socket to target. See ActionReplyTarget's
+// own comment above runActionStep for why a plain object with a .send
+// method is enough to satisfy every call site in that chain unchanged.
+async function mcpTriggerAction(room: DeckRoom, widgetId: string, event: WidgetEventKind, value: number | undefined, final: boolean): Promise<ServerToClient[]> {
+  const replies: ServerToClient[] = []
+  const sink: ActionReplyTarget = {
+    send: (data) => {
+      try {
+        replies.push(JSON.parse(data) as ServerToClient)
+      } catch {
+        // Every real send site above only ever sends JSON.stringify'd
+        // ServerToClient payloads — an unparseable one would be a bug
+        // elsewhere, not something to crash an MCP tool call over.
+      }
+    }
+  }
+  await triggerAction(room, widgetId, event, sink, value, final)
+  return replies
+}
+
+// Dependency-injection surface for the MCP server (see main/mcp/tools.ts's
+// own comment on why it doesn't just import these from here directly).
+// applyDashboardUpdate's excludeSocket param is omitted here on purpose —
+// unlike a WS dashboard:update (which excludes the sender to avoid an
+// unnecessary echo), an MCP-driven change has no originating socket, so
+// every connected client (including any editor window open on this deck)
+// should see the update.
+// Which deck (if any) the desktop editor's own WS connection currently has
+// open — role: 'edit' is always exactly one live socket (the editor window
+// itself; see SocketContext's own comment), so this is the only reliable
+// signal main/mcp/screenshot.ts's tools have for "is this deck actually on
+// screen right now" without a dedicated IPC round trip. '' (lobby, no deck
+// chosen) is returned as undefined, same "no deck" meaning as everywhere
+// else this reads ctx.deckId.
+function getEditorDeckId(): string | undefined {
+  for (const ctx of socketContext.values()) {
+    if (ctx.role === 'edit') return ctx.deckId || undefined
+  }
+  return undefined
+}
+
+const mcpDeps: McpDeps = {
+  getOrLoadRoom,
+  listDeckSummaries,
+  applyVariableUpdates,
+  applyDashboardUpdate: (room, dashboard, final) => applyDashboardUpdate(room, dashboard, final),
+  applyAppSettingsPatch,
+  triggerAction: mcpTriggerAction,
+  getEditorWindow: () => editorWindow,
+  getEditorDeckId,
+  hideEditorWindow: () => {
+    if (editorWindow) hideEditorToTray(editorWindow)
+  },
+  showEditorWindow: () => showEditorWindow()
+}
+syncMcpServer(mcpDeps)
+
 // Backs MobileAppModal's clickable appUrl/APK links (see preload/index.ts) —
 // restricted to http(s) so a compromised/malicious renderer content can't
 // use this as a generic "run arbitrary shell integration" primitive (e.g.
@@ -3226,6 +3369,23 @@ try {
 
 let editorWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+
+// Hides the editor window without quitting — exactly what the 'close'
+// handler below does when the user clicks the window's own X button
+// (isQuitting stays false), factored out so the MCP hide_editor_window
+// tool (see mcpDeps below) can trigger the identical behavior on request,
+// not a slightly different one that's easy to let drift out of sync.
+function hideEditorToTray(win: BrowserWindow): void {
+  win.hide()
+  // Windows-only (Tray.displayBalloon is a no-op elsewhere) — the app has
+  // no other indicator that the window didn't quit, whether it was hidden
+  // by the user's own click or an MCP tool call.
+  tray?.displayBalloon({
+    title: 'Boarderoni is still running',
+    content: 'The server keeps running in the background. Use the tray icon to reopen the editor or quit.',
+    icon: nativeImage.createFromPath(join(__dirname, '../../resources/icon.ico'))
+  })
+}
 
 interface WindowState {
   x?: number
@@ -3316,14 +3476,7 @@ function createEditorWindow(): void {
     // (tray menu / before-quit) should actually end the process.
     if (isQuitting) return
     event.preventDefault()
-    win.hide()
-    // Windows-only (Tray.displayBalloon is a no-op elsewhere) — the app has
-    // no other indicator that closing the window didn't quit it.
-    tray?.displayBalloon({
-      title: 'Boarderoni is still running',
-      content: 'The server keeps running in the background. Use the tray icon to reopen the editor or quit.',
-      icon: nativeImage.createFromPath(join(__dirname, '../../resources/icon.ico'))
-    })
+    hideEditorToTray(win)
   })
 
   registerWindowShortcuts(win)

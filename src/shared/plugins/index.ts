@@ -14,6 +14,7 @@ import { randomPlugin } from './random'
 import { restPlugin } from './rest'
 import { restWebhookTargetsPlugin } from './restWebhookTargets'
 import { windowsAudioPlugin } from './windowsAudio'
+import { mcpPlugin } from './mcp'
 
 export type { PluginField, PluginTypeMeta } from './types'
 
@@ -25,7 +26,8 @@ export const PLUGIN_TYPES: PluginTypeMeta[] = [
   randomPlugin,
   restPlugin,
   restWebhookTargetsPlugin,
-  windowsAudioPlugin
+  windowsAudioPlugin,
+  mcpPlugin
 ]
 
 export function getPluginType(kind: string): PluginTypeMeta | undefined {

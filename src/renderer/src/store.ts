@@ -168,6 +168,12 @@ interface DashboardStore {
   // requested. PropertiesPanel's ActionFields reads it to offer a "Call
   // <name>" action per enabled target.
   restWebhookTargets: RestWebhookTarget[]
+  // The MCP server's own settings (see main/mcpServerSettings.ts) — null
+  // until first requested (McpServerSettingsPanel does so on mount, same
+  // convention as requestRestDataSources). Whether the server actually RUNS
+  // is the separate 'mcp' entry in enabledPlugins above; this is just the
+  // bearer token + live listen status.
+  mcpServerSettings: { bearerToken: string; port: number; listening: boolean; listenError?: string } | null
   // App-wide, user-uploaded fonts (see main/customFonts.ts) — empty until
   // first synced. Unlike restDataSources, arrives unasked as part of
   // sendInitialState (see its own comment in main/index.ts), so it's rarely
@@ -235,6 +241,8 @@ interface DashboardStore {
   updateRestDataSources: (sources: RestDataSource[]) => void
   regenerateRestDataSourceToken: (sourceId: string) => void
   deleteRestDataSource: (sourceId: string) => void
+  requestMcpServerSettings: () => void
+  regenerateMcpServerToken: () => void
   requestRestWebhookTargets: () => void
   createRestWebhookTarget: (name: string) => void
   updateRestWebhookTargets: (targets: RestWebhookTarget[]) => void
@@ -540,6 +548,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   restDataSources: [],
   restDataSourcesLanAddress: null,
   restWebhookTargets: [],
+  mcpServerSettings: null,
   customFonts: [],
   customVariants: [],
   screenCaptureDisplays: null,
@@ -662,6 +671,14 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   deleteRestDataSource: (sourceId) => {
     send({ type: 'rest-sources:delete', sourceId })
+  },
+
+  requestMcpServerSettings: () => {
+    send({ type: 'mcp-server:get' })
+  },
+
+  regenerateMcpServerToken: () => {
+    send({ type: 'mcp-server:regenerate-token' })
   },
 
   requestRestWebhookTargets: () => {
@@ -918,6 +935,10 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set({ restDataSources: message.sources, restDataSourcesLanAddress: message.lanAddress })
       } else if (message.type === 'rest-webhook-targets:list') {
         set({ restWebhookTargets: message.targets })
+      } else if (message.type === 'mcp-server:settings') {
+        set({
+          mcpServerSettings: { bearerToken: message.bearerToken, port: message.port, listening: message.listening, listenError: message.listenError }
+        })
       } else if (message.type === 'fonts:list') {
         set({ customFonts: message.fonts })
         // Both side effects outside the render tree, not component effects —
