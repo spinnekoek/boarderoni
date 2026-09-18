@@ -24,7 +24,10 @@ import type { AppSettings } from '../appSettings'
 import { getAppSettings } from '../appSettings'
 import { PLUGIN_TYPES } from '../../shared/plugins'
 import { findWidgetAnywhere, getSubDeckWidgets, setSubDeckWidgets } from '../../shared/subDecks'
-import { toVariableMap, tryEvaluateExpression } from '../../shared/expr'
+import { toVariableMap } from '../../shared/expr'
+// Sandboxed main-process-only evaluator, not shared/expr.ts's own plain
+// `new Function` version — see sandboxedExpr.ts's own top comment.
+import { tryEvaluateExpression } from '../sandboxedExpr'
 import { MCP_SCHEMAS } from '../../shared/generated/mcpSchemas'
 import { captureDashboardScreenshot, captureWidgetScreenshot } from './screenshot'
 

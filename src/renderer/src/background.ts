@@ -1,5 +1,6 @@
 import { SERVER_PORT } from '@shared/constants'
 import type { BackgroundAnchor, BackgroundFit } from '@shared/types'
+import { getDeviceId, getDeviceToken } from './id'
 
 const SIZE_AND_REPEAT: Record<BackgroundFit, { backgroundSize: string; backgroundRepeat: string }> = {
   cover: { backgroundSize: 'cover', backgroundRepeat: 'no-repeat' },
@@ -42,7 +43,16 @@ export function backgroundImageStyle(fit: BackgroundFit, anchor: BackgroundAncho
 // there would mean every dashboard update, including per-frame widget drags,
 // re-sends the whole image to every connected client. Scoped to a deck (the
 // server keeps one background image per deck) via the `deck` query param.
+// device/token: unconditionally appended regardless of edit vs view mode —
+// see main/index.ts's hasDeviceContentAccess for why that's fine (the
+// editor's own request is loopback-trusted and never needs these; only a
+// remote view device's request actually depends on them verifying).
+// getDeviceToken() returning null (never-approved editor, or a view device
+// that hasn't been approved yet) just means an empty token param, which
+// fails verification the same as any other invalid one — never a crash.
 export function backgroundImageUrl(deckId: string, version: number): string {
   const host = window.location.hostname || 'localhost'
-  return `http://${host}:${SERVER_PORT}/background-image?deck=${encodeURIComponent(deckId)}&v=${version}`
+  const device = encodeURIComponent(getDeviceId())
+  const token = encodeURIComponent(getDeviceToken() ?? '')
+  return `http://${host}:${SERVER_PORT}/background-image?deck=${encodeURIComponent(deckId)}&v=${version}&device=${device}&token=${token}`
 }

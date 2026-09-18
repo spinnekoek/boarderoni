@@ -1,4 +1,11 @@
 import { SERVER_PORT } from '@shared/constants'
+import { getDeviceId, getDeviceToken } from './id'
+
+// Appended to both URLs below regardless of edit vs view mode — see
+// background.ts's backgroundImageUrl for why that's fine either way.
+function deviceAuthParams(): string {
+  return `device=${encodeURIComponent(getDeviceId())}&token=${encodeURIComponent(getDeviceToken() ?? '')}`
+}
 
 // The frame/stream bytes live server-side (see main/screenCapture.ts) and
 // are fetched over plain HTTP, same "small pointer in dashboard JSON, real
@@ -13,12 +20,12 @@ function host(): string {
 // param also doubles as what actually changes `<img src>` so React/the
 // browser knows to re-request instead of no-op'ing on an unchanged src.
 export function screenCaptureFrameUrl(deckId: string, widgetId: string, cacheBust: number): string {
-  return `http://${host()}:${SERVER_PORT}/screen-capture/frame?deck=${encodeURIComponent(deckId)}&widget=${encodeURIComponent(widgetId)}&t=${cacheBust}`
+  return `http://${host()}:${SERVER_PORT}/screen-capture/frame?deck=${encodeURIComponent(deckId)}&widget=${encodeURIComponent(widgetId)}&t=${cacheBust}&${deviceAuthParams()}`
 }
 
 // One persistent multipart/x-mixed-replace connection — set as `<img src>`
 // once, never refreshed; the browser/WebView updates it in place as the
 // server pushes new frames.
 export function screenCaptureStreamUrl(deckId: string, widgetId: string): string {
-  return `http://${host()}:${SERVER_PORT}/screen-capture/stream?deck=${encodeURIComponent(deckId)}&widget=${encodeURIComponent(widgetId)}`
+  return `http://${host()}:${SERVER_PORT}/screen-capture/stream?deck=${encodeURIComponent(deckId)}&widget=${encodeURIComponent(widgetId)}&${deviceAuthParams()}`
 }

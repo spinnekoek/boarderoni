@@ -57,7 +57,15 @@ import {
 import { getEventSteps, flattenSequenceSteps } from '../shared/widgetEvents'
 import { FONT_MIME_BY_EXTENSION, fontExtension } from '../shared/fonts'
 import { findSubDeck, findWidgetAnywhere, allDeckWidgets } from '../shared/subDecks'
-import { toVariableMap, tryEvaluateExpression, evaluateMappingExpression, setExpressionConsoleSink, stringifyExpressionLogArgs } from '../shared/expr'
+import { toVariableMap, setExpressionConsoleSink, stringifyExpressionLogArgs } from '../shared/expr'
+// tryEvaluateExpression/evaluateMappingExpression come from the sandboxed
+// main-process-only version, NOT shared/expr.ts's own — see
+// sandboxedExpr.ts's own top comment for why this specific process needs
+// the hardened one. Every renderer-facing use of these two (ViewCanvas.tsx,
+// states.ts, switchPosition.ts, ...) still imports the plain shared version
+// directly — unaffected by this swap.
+import { tryEvaluateExpression, evaluateMappingExpression } from './sandboxedExpr'
+import { readBody } from './httpBody'
 import { extractAllPlaceholders } from '../shared/restPlaceholders'
 import { PLUGIN_PRODUCERS } from './plugins'
 import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuality, addMjpegViewer } from './screenCapture'
@@ -79,7 +87,7 @@ import {
 import { getRestDataSources, updateRestDataSources, createRestDataSource, regenerateRestDataSourceToken } from './restDataSources'
 import { syncRestIncomingServers, getRestListenStatus } from './restIncoming'
 import { getRestWebhookTargets, updateRestWebhookTargets, createRestWebhookTarget } from './restWebhookTargets'
-import { isDeviceApproved, approveDevice, revokeDevice, renameApprovedDevice, listApprovedDevices } from './deviceApproval'
+import { verifyDeviceToken, approveDevice, revokeDevice, renameApprovedDevice, listApprovedDevices } from './deviceApproval'
 import { displayDeviceName } from '../shared/deviceName'
 import {
   listInstalledAircraft,
@@ -940,12 +948,68 @@ interface SocketContext {
   // rejects the empty string, so no room is ever registered under it.
   deckId: string
   deviceId?: string
+  // The token this socket presented on its own 'hello' (view role only) —
+  // re-verified against the live approved-devices store on every
+  // isTrustedSocket check (not cached as a boolean), same "always check
+  // current state, never cache trust" posture isDeviceApproved's old
+  // per-message re-check already had. Means a device:revoke takes effect
+  // on this socket's very next message even without the explicit
+  // close-matching-sockets loop device:revoke's handler already does
+  // separately.
+  deviceToken?: string
+  // Captured once from the raw HTTP upgrade request in wss.on('connection')
+  // — req isn't available in the ws.on('message') closure otherwise. The
+  // ONLY thing role: 'edit' is gated on (see the 'hello' handler below):
+  // the desktop editor's own window always connects loopback (packaged
+  // build's win.loadFile is file://, dev's win.loadURL is Vite's own
+  // http://localhost:5173 — neither ever resolves to a LAN address), so
+  // "this connection originated on this machine" is a sufficient (and much
+  // simpler) proxy for "this is the desktop, not a claim any LAN device can
+  // make" — no credential needed for a fact the OS itself already
+  // guarantees.
+  remoteAddress?: string
   // Known once the socket's first 'hello' arrives — undefined briefly
   // between raw connect and that first message. Drives both which sockets
   // get a device:approval-requested broadcast and which get gated on
   // approval before receiving dashboard/deck-list content — see
   // isTrustedSocket.
   role?: 'edit' | 'view'
+}
+
+// 127.0.0.1/::1 direct, plus the IPv4-mapped-IPv6 form Node's net module
+// sometimes reports for a loopback connection (::ffff:127.0.0.1) depending
+// on how the socket was dual-stack-negotiated — all three have been
+// observed for a same-machine connection in practice, so all three count.
+// Deliberately NOT a broader "private range" check (10.x/192.168.x/etc.) —
+// those are still a different machine on the LAN, exactly what this exists
+// to exclude.
+function isLoopbackAddress(address: string | undefined): boolean {
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+}
+
+// Gates the four subresource routes an <img src>/@font-face url() actually
+// loads (background-image, fonts/:id, screen-capture/frame|stream) —
+// unlike /api/decks*, these ARE meant to be reachable by a real approved
+// view device (that's the whole point: this is the dashboard content
+// itself), so a loopback-only gate would be wrong here. Two valid ways in,
+// mirroring the WS protocol's own two trust paths: the desktop editor's own
+// window (loopback — same reasoning as role: 'edit', see isLoopbackAddress's
+// own callers) needs no token at all, since it's not "a device" in the
+// approval sense; a genuinely remote view client supplies `device`/`token`
+// query params (an Authorization header isn't an option — none of these
+// four are fetch()ed, they're all browser-loaded subresources with no way
+// to attach one, see background.ts/customFontFaces.ts/screenCapture.ts's
+// own URL builders, which append both unconditionally regardless of mode —
+// the editor's own request just has empty/absent values that never matter
+// because loopback already grants it access).
+function hasDeviceContentAccess(req: IncomingMessage, url: URL): boolean {
+  if (isLoopbackAddress(req.socket.remoteAddress)) return true
+  return verifyDeviceToken(url.searchParams.get('device') ?? undefined, url.searchParams.get('token') ?? undefined)
+}
+
+function sendForbidden(res: ServerResponse): void {
+  res.writeHead(403)
+  res.end('Forbidden')
 }
 // Which room (and, once 'hello' arrives, which device) a given socket
 // belongs to — resolved from here on close/message, never from a global map,
@@ -1075,15 +1139,6 @@ function stripMachineSpecificFields(dashboard: Dashboard): Dashboard {
     widgets: dashboard.widgets.map(stripWidget),
     subDecks: (dashboard.subDecks ?? []).map((sd) => ({ ...sd, widgets: sd.widgets.map(stripWidget) }))
   }
-}
-
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    req.on('data', (chunk) => (data += chunk))
-    req.on('end', () => resolve(data))
-    req.on('error', reject)
-  })
 }
 
 // The picker fetches this from the renderer, which in dev mode is served by
@@ -1318,21 +1373,25 @@ const httpServer = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost')
 
   if (url.pathname === '/background-image') {
+    if (!hasDeviceContentAccess(req, url)) return sendForbidden(res)
     serveBackgroundImage(res, url.searchParams.get('deck') ?? '')
     return
   }
 
   if (url.pathname.startsWith('/fonts/')) {
+    if (!hasDeviceContentAccess(req, url)) return sendForbidden(res)
     serveCustomFont(res, url.pathname.slice('/fonts/'.length))
     return
   }
 
   if (url.pathname === '/screen-capture/frame') {
+    if (!hasDeviceContentAccess(req, url)) return sendForbidden(res)
     serveScreenCaptureFrame(res, url.searchParams.get('deck') ?? '', url.searchParams.get('widget') ?? '')
     return
   }
 
   if (url.pathname === '/screen-capture/stream') {
+    if (!hasDeviceContentAccess(req, url)) return sendForbidden(res)
     serveScreenCaptureStream(res, url.searchParams.get('deck') ?? '', url.searchParams.get('widget') ?? '')
     return
   }
@@ -1375,6 +1434,23 @@ const httpServer = createServer((req, res) => {
     if (req.method === 'OPTIONS') {
       res.writeHead(204, CORS_HEADERS)
       res.end()
+      return
+    }
+    // Every real caller (DeckPicker.tsx's own fetches — list/create/
+    // rename/delete/export/import — and RestDataSourcesSettingsPanel.tsx's
+    // deck-picker dropdown) is editor-only UI, which only ever runs inside
+    // the desktop's own loopback-loaded window (see remoteAddress's comment
+    // on SocketContext for why that's already trusted the same way for the
+    // WS role: 'edit' hello) — a deployed 'view' device gets its deck list
+    // over the WS protocol instead (decks:list), gated by device approval
+    // like everything else it sees. So unlike that WS path, this route
+    // needs no separate device-token scheme of its own: nothing legitimate
+    // ever calls it from off-box, and several of its actions (export/import
+    // in particular) pop native Save/Open dialogs on the desktop's own
+    // screen — exactly the kind of thing a random LAN host, or any web page
+    // a user has open, shouldn't be able to trigger unauthenticated.
+    if (!isLoopbackAddress(req.socket.remoteAddress)) {
+      sendJson(res, 403, { error: 'Forbidden' })
       return
     }
     handleDecksApi(req, res, url).catch((err) => {
@@ -1448,7 +1524,7 @@ function sendInitialState(ws: WebSocket, room: DeckRoom): void {
 // dashboard content: being 'edit', or an already-approved 'view' device. Any
 // trusted device can vouch for a new one, not just the desktop.
 function isTrustedSocket(ctx: SocketContext): boolean {
-  return ctx.role === 'edit' || (ctx.role === 'view' && ctx.deviceId !== undefined && isDeviceApproved(ctx.deviceId))
+  return ctx.role === 'edit' || (ctx.role === 'view' && verifyDeviceToken(ctx.deviceId, ctx.deviceToken))
 }
 
 function requestDeviceApproval(device: DeviceInfo): void {
@@ -1542,12 +1618,29 @@ function queueSend(ws: WebSocket, type: string, payload: string): void {
   pumpSocketSendQueue(ws, queue)
 }
 
+// room.sockets holds every socket that connected with this deck's id in its
+// ?deck= param — including one that's never sent 'hello' at all, or sent
+// one that hasn't (or couldn't) verify (see isTrustedSocket). Gating on that
+// here, not just at the one-time sendInitialState call, closes a real gap:
+// without it, an unapproved socket that merely knows (or brute-forces) a
+// valid deck id was still on the receiving end of every ordinary broadcast
+// — dashboard:sync, variables:sync/delta, devices:sync, dcsbios:status/
+// stats — for as long as it stayed connected, none of which ever checked
+// isTrustedSocket the way message handling and sendInitialState already
+// did. Confirmed via an external reachability probe (2026-09-18, see
+// docs/TODO.md's own note) — a socket whose hello:edit was correctly
+// refused kept receiving live variables:sync/dcsbios:stats/time:heartbeat
+// broadcasts anyway. Every call site broadcasts exactly the content
+// approval exists to gate (grep broadcastToRoom's own callers), so there's
+// no legitimate case that needs the old "everyone in room.sockets"
+// behavior.
 function broadcastToRoom(room: DeckRoom, message: ServerToClient, exclude?: WebSocket): void {
   const payload = JSON.stringify(message)
   for (const client of room.sockets) {
-    if (client.readyState === WebSocket.OPEN && client !== exclude) {
-      queueSend(client, message.type, payload)
-    }
+    if (client.readyState !== WebSocket.OPEN || client === exclude) continue
+    const ctx = socketContext.get(client)
+    if (!ctx || !isTrustedSocket(ctx)) continue
+    queueSend(client, message.type, payload)
   }
 }
 
@@ -2538,7 +2631,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
     return
   }
 
-  socketContext.set(ws, { deckId: room?.id ?? '' })
+  socketContext.set(ws, { deckId: room?.id ?? '', remoteAddress: req.socket.remoteAddress })
   room?.sockets.add(ws)
 
   ws.isAlive = true
@@ -2644,7 +2737,18 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         break
       case 'hello':
         if (message.role === 'edit') {
-          // The editor's own window — always trusted, no approval gate.
+          // The editor's own window — always trusted, no approval gate, but
+          // ONLY from loopback (see remoteAddress's own comment on
+          // SocketContext for why that's a sufficient proxy for "this is
+          // the desktop"). A LAN device — or a browser tab a user opened,
+          // which can reach this same WS port with no same-origin
+          // restriction — claiming role: 'edit' gets silently ignored
+          // exactly like any other message a not-yet-trusted socket sends
+          // (see the message-type gate above this switch); it's already
+          // indistinguishable, from the client's own point of view, from a
+          // slow/pending approval, so no separate rejection message exists
+          // to leak "you tried to claim edit" to whoever's probing.
+          if (!isLoopbackAddress(ctx.remoteAddress)) break
           // Guarded so a resize-triggered re-hello (if edit mode ever sends
           // one) doesn't re-send the initial state or double-register.
           if (ctx.role !== 'edit') {
@@ -2655,6 +2759,19 @@ wss.on('connection', (ws: TrackedSocket, req) => {
           const isFirstHello = ctx.deviceId === undefined
           ctx.role = 'view'
           ctx.deviceId = message.deviceId
+          // `?? ctx.deviceToken`, not a plain overwrite: a resize-triggered
+          // re-hello can race a just-issued device:token (see the
+          // device:approve handler, which sets ctx.deviceToken directly on
+          // an already-open socket the instant it approves) — if the
+          // client's re-hello goes out before it's finished persisting that
+          // token client-side, it carries no token yet, and a plain
+          // overwrite would clobber the live value the socket was just
+          // granted back to undefined. Falling back to whatever's already
+          // on ctx only matters for that narrow race; a message.deviceToken
+          // that IS present (the normal case, including every hello after
+          // this one) still updates it as usual — e.g. a device presenting
+          // a genuinely different token after some other flow reissued one.
+          ctx.deviceToken = message.deviceToken ?? ctx.deviceToken
 
           let device: DeviceInfo = {
             id: message.deviceId,
@@ -2682,7 +2799,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
           // already-pending device would otherwise re-prompt every
           // trusted device every time the phone rotates.
           if (isFirstHello) {
-            if (isDeviceApproved(message.deviceId)) {
+            if (verifyDeviceToken(message.deviceId, message.deviceToken)) {
               if (activeRoom) {
                 sendInitialState(ws, activeRoom)
               } else {
@@ -2702,13 +2819,23 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         // Reaching this case at all already proves isTrustedSocket(ctx) —
         // the message gate above only lets 'hello' through otherwise — so
         // no separate role check is needed here.
+        let token: string
         {
           const info = pendingDeviceInfo.get(message.deviceId)
-          approveDevice(message.deviceId, info ? displayDeviceName(info) : message.deviceId)
+          token = approveDevice(message.deviceId, info ? displayDeviceName(info) : message.deviceId)
           pendingDeviceInfo.delete(message.deviceId)
         }
         for (const [sock, sctx] of socketContext) {
           if (sctx.deviceId !== message.deviceId || sock.readyState !== WebSocket.OPEN) continue
+          // Set directly on the live socket's own context, not just sent
+          // over the wire — isTrustedSocket re-verifies ctx.deviceToken on
+          // every subsequent message on THIS connection, so without this
+          // the socket that just got approved would still fail every check
+          // until it reconnects (picking the persisted token back up via a
+          // fresh hello). Sent to the client too (device:token below) so
+          // localStorage carries it forward past this session.
+          sctx.deviceToken = token
+          sock.send(JSON.stringify({ type: 'device:token', deviceId: message.deviceId, token } satisfies ServerToClient))
           const targetRoom = sctx.deckId ? rooms.get(sctx.deckId) : undefined
           if (targetRoom) {
             sendInitialState(sock, targetRoom)
@@ -3454,12 +3581,55 @@ function createEditorWindow(): void {
     height: state.height,
     icon: join(__dirname, '../../resources/icon.ico'),
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js')
+      preload: join(__dirname, '../preload/index.js'),
+      // Already Electron's own defaults as of the version this app pins
+      // (electron ^43) — set explicitly anyway so this window's security
+      // posture is legible here rather than resting on "whatever today's
+      // default happens to be," and survives an Electron upgrade that
+      // might change one. nodeIntegration:false + contextIsolation:true is
+      // what makes it safe for this window's renderer to run its own
+      // un-sandboxed `new Function`-based expression evaluator (shared/
+      // expr.ts) at all — there's no Node global for it to reach regardless
+      // of eval mechanism, unlike the main process (see sandboxedExpr.ts's
+      // own comment for why THAT one needed an actual fix, not just this).
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true
     }
   })
   editorWindow = win
   win.on('closed', () => {
     if (editorWindow === win) editorWindow = null
+  })
+
+  // This app has no legitimate use for a popup/new window — the one real
+  // external-link path (MobileAppModal's browser link) already goes
+  // through the openExternal IPC handler below, which opens in the
+  // SYSTEM browser, not a new BrowserWindow, and is itself restricted to
+  // https?://. Denying window.open()/target="_blank" outright removes an
+  // otherwise-open surface for a future dependency bug or any injected
+  // content to pop an arbitrary window sharing this app's own
+  // webPreferences.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+
+  // Restricts IN-WINDOW navigation — the same class of risk
+  // setWindowOpenHandler above closes for "open a new window," for
+  // "navigate this existing one" instead. file: is always allowed since
+  // this window only ever loads its own bundled files that way (a
+  // packaged build's rendererDist) — nothing untrusted is ever given a
+  // chance to construct a navigable file:// URL in the first place, so a
+  // same-protocol check is enough without needing an exact path match.
+  // devServerUrl's own origin is allowed too, specifically so Vite's own
+  // occasional full-reload-instead-of-HMR-patch fallback in dev still
+  // works — that's a same-origin `will-navigate` event too, not something
+  // this should start breaking. Anything else (a remote http(s) origin
+  // this window was never pointed at) gets blocked.
+  const devServerOrigin = devServerUrl ? new URL(devServerUrl).origin : null
+  win.webContents.on('will-navigate', (event, url) => {
+    const target = new URL(url)
+    if (target.protocol === 'file:') return
+    if (devServerOrigin && target.origin === devServerOrigin) return
+    event.preventDefault()
   })
 
   let saveTimeout: NodeJS.Timeout | null = null

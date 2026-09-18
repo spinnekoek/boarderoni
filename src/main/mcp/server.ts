@@ -34,6 +34,8 @@ import { MCP_SERVER_PORT } from '../../shared/constants'
 import { getAppSettings } from '../appSettings'
 import { getMcpServerSettings } from '../mcpServerSettings'
 import { createMcpTools, type McpDeps } from './tools'
+import { readBody } from '../httpBody'
+import { timingSafeStringEqual } from '../timingSafeAuth'
 
 export type { McpDeps } from './tools'
 
@@ -72,19 +74,13 @@ function stop(): void {
   running = null
 }
 
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    req.on('data', (chunk) => (data += chunk))
-    req.on('end', () => {
-      try {
-        resolve(data ? JSON.parse(data) : undefined)
-      } catch (err) {
-        reject(err instanceof Error ? err : new Error(String(err)))
-      }
-    })
-    req.on('error', reject)
-  })
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const data = await readBody(req)
+  try {
+    return data ? JSON.parse(data) : undefined
+  } catch (err) {
+    throw err instanceof Error ? err : new Error(String(err))
+  }
 }
 
 function sendJsonRpcError(res: ServerResponse, status: number, message: string): void {
@@ -131,7 +127,7 @@ export function syncMcpServer(deps: McpDeps): void {
 
   const httpServer = createServer((req, res) => {
     const token = getMcpServerSettings().bearerToken
-    if (req.headers.authorization !== `Bearer ${token}`) {
+    if (!timingSafeStringEqual(req.headers.authorization ?? '', `Bearer ${token}`)) {
       res.writeHead(401, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: 'Invalid or missing bearer token' }))
       return

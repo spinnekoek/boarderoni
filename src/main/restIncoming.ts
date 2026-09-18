@@ -18,6 +18,8 @@ import { flattenJson } from '../shared/flattenJson'
 import type { RestDataSource } from '../shared/types'
 import { getRestDataSources } from './restDataSources'
 import { getAppSettings } from './appSettings'
+import { readBody } from './httpBody'
+import { timingSafeStringEqual } from './timingSafeAuth'
 
 interface RunningServer {
   server: Server
@@ -49,15 +51,6 @@ function signatureOf(source: RestDataSource): string {
   return JSON.stringify({ enabled: source.enabled, port: source.port, bearerToken: source.bearerToken })
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    req.on('data', (chunk) => (data += chunk))
-    req.on('end', () => resolve(data))
-    req.on('error', reject)
-  })
-}
-
 async function handleRequest(
   sourceId: string,
   emit: (sourceId: string, flattened: Record<string, unknown>) => void,
@@ -78,7 +71,7 @@ async function handleRequest(
     res.end(JSON.stringify({ error: 'Only POST is accepted' }))
     return
   }
-  if (req.headers.authorization !== `Bearer ${source.bearerToken}`) {
+  if (!timingSafeStringEqual(req.headers.authorization ?? '', `Bearer ${source.bearerToken}`)) {
     res.writeHead(401, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ error: 'Invalid or missing bearer token' }))
     return

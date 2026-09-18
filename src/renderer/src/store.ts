@@ -34,7 +34,7 @@ import {
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSettings, DcsBiosStatus, DcsBiosWorkerStats } from '@shared/dcsBiosTypes'
 import type { DcsViewportsSettings, DcsViewportsStatus } from '@shared/dcsViewportsTypes'
 import { registerCustomFonts, type CustomFont } from '@shared/fonts'
-import { getDeviceId, setLastDeckId, clearLastDeckId, nextId } from './id'
+import { getDeviceId, getDeviceToken, setDeviceToken, setLastDeckId, clearLastDeckId, nextId } from './id'
 import { syncCustomFontFaces } from './customFontFaces'
 import { useConfirmStore } from './confirmStore'
 import { pushRemoteDebugLog } from './debugConsoleStore'
@@ -454,7 +454,8 @@ function sendHello(mode: Mode): void {
       role: mode,
       viewport: { width: window.innerWidth, height: window.innerHeight },
       userAgent: navigator.userAgent,
-      deviceId: getDeviceId()
+      deviceId: getDeviceId(),
+      deviceToken: getDeviceToken() ?? undefined
     })
   } else {
     send({ type: 'hello', role: mode })
@@ -822,6 +823,19 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
           clockOffsetMs = message.serverTime - message.clientSentAt - rtt / 2
           hasClockOffset = true
         }
+      } else if (message.type === 'device:token') {
+        // Persisted so the NEXT hello (a reconnect, or this app relaunching)
+        // already carries it — this session's own live socket doesn't need
+        // it locally at all, since the server already marked this exact
+        // connection trusted server-side the instant it sent this (see
+        // main/index.ts's device:approve handler). Clearing devicePending
+        // here too: dashboard:sync/decks:list normally does that (see
+        // sendInitialState's own callers), but this message can arrive
+        // fractionally before either on a slow connection, and there's no
+        // reason to leave the waiting screen up a moment longer than
+        // necessary once approval has visibly happened.
+        setDeviceToken(message.token)
+        set({ devicePending: false })
       } else if (message.type === 'device:pending') {
         set({ devicePending: true })
       } else if (message.type === 'device:denied') {
@@ -1008,7 +1022,8 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
           role: 'view',
           viewport: { width: window.innerWidth, height: window.innerHeight },
           userAgent: navigator.userAgent,
-          deviceId: getDeviceId()
+          deviceId: getDeviceId(),
+          deviceToken: getDeviceToken() ?? undefined
         } satisfies ClientToServer)
       )
     })

@@ -2296,6 +2296,18 @@ export type ClientToServer =
       viewport?: { width: number; height: number }
       userAgent?: string
       deviceId?: string
+      // The bearer credential minted by a prior device:approve (see
+      // device:token below) and persisted client-side (id.ts's
+      // getDeviceToken) — required, alongside deviceId, for the server to
+      // treat a 'view' hello as an already-approved device rather than a
+      // brand-new one needing device:pending. Absent on a device's very
+      // first-ever hello (nothing to send yet) or an old approval that
+      // predates this field existing, both of which fall through to the
+      // normal approval flow the same as a never-approved device would.
+      // Never meaningful for role: 'edit' — the desktop's own window earns
+      // trust from being loopback-only (see main/index.ts's isTrustedSocket/
+      // hello handling), not a token.
+      deviceToken?: string
     }
   // final follows the same convention as action:trigger's own final below:
   // false for an in-flight rAF-throttled drag tick (useWidgetDrag's
@@ -2502,6 +2514,16 @@ export type ServerToClient =
   // or a device:denied arrives and the connection closes (see main/index.ts).
   | { type: 'device:pending' }
   | { type: 'device:denied' }
+  // Sent once, immediately after a device:approve grants this deviceId
+  // access — to every socket currently connected under that id (a device
+  // can have more than one open tab/session), same fan-out
+  // device:approve's own handler already does for sendInitialState. The
+  // client persists this (id.ts's setDeviceToken) and sends it back on
+  // every future hello so a reconnect/relaunch skips device:pending
+  // entirely, same continuity deviceId itself already provided before this
+  // existed — the difference is this is an unguessable credential instead
+  // of a self-reported id. Never sent for role: 'edit'.
+  | { type: 'device:token'; deviceId: string; token: string }
   // Sent to every currently-trusted client (edit, or an already-approved
   // view device — any of them can approve/deny, not just the desktop) when
   // a not-yet-approved device's first hello arrives.

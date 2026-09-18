@@ -24,6 +24,16 @@ export function setExpressionConsoleSink(sink: ExpressionConsoleSink | null): vo
   consoleSink = sink
 }
 
+// Read-only accessor for main/sandboxedExpr.ts's own evaluator — its
+// console object needs to forward to whatever sink main/index.ts's own
+// setExpressionConsoleSink call already registered (see withLogRoom there),
+// without duplicating that registration/room-routing logic. consoleSink
+// itself stays module-private; this is the one sanctioned way to read it
+// from outside this file.
+export function getExpressionConsoleSink(): ExpressionConsoleSink | null {
+  return consoleSink
+}
+
 // Shadows the real global `console` inside evaluated expression code (see
 // the extra 'console' parameter below) — an expression's console.log never
 // reaches this process's own devtools/stdout, only wherever the current sink

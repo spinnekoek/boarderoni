@@ -17,6 +17,25 @@ export function getDeviceId(): string {
   return id
 }
 
+const DEVICE_TOKEN_KEY = 'boarderoni-device-token'
+
+// The server-issued credential a device:token message carries (see
+// store.ts's message handling) — sent back on every hello alongside
+// deviceId so the server can tell "an approved device reconnecting" apart
+// from "any client that happened to read/guess an id off a devices:sync
+// broadcast" (deviceId alone was never a secret; this is). Absent until the
+// device's first-ever approval — getDeviceId() minting a fresh id and this
+// returning null are the same "brand new device" signal main/index.ts's
+// hello handler already treats identically to an existing id whose token
+// no longer verifies (revoked, or approved before this existed).
+export function getDeviceToken(): string | null {
+  return localStorage.getItem(DEVICE_TOKEN_KEY)
+}
+
+export function setDeviceToken(token: string): void {
+  localStorage.setItem(DEVICE_TOKEN_KEY, token)
+}
+
 const LAST_DECK_ID_KEY = 'boarderoni-last-deck-id'
 
 // Which deck this browser/WebView had open last — read once at launch (see
