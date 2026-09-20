@@ -10,6 +10,7 @@ import { PluginsModal } from './PluginsModal'
 import { EventSourcesModal } from './EventSourcesModal'
 import { GlobalActionsModal } from './GlobalActionsModal'
 import { FontsModal } from './FontsModal'
+import { SoundsModal } from './SoundsModal'
 import { DevicesModal } from './DevicesModal'
 import { MobileAppModal } from './MobileAppModal'
 import { ScreenSwitcher } from './ScreenSwitcher'
@@ -19,6 +20,7 @@ export function Toolbar(): React.JSX.Element {
   const [eventSourcesOpen, setEventSourcesOpen] = useState(false)
   const [globalActionsOpen, setGlobalActionsOpen] = useState(false)
   const [fontsOpen, setFontsOpen] = useState(false)
+  const [soundsOpen, setSoundsOpen] = useState(false)
   const [devicesOpen, setDevicesOpen] = useState(false)
   const [mobileAppOpen, setMobileAppOpen] = useState(false)
   // Store-backed, not local state — see settingsStore.ts's openPluginsModal
@@ -131,6 +133,9 @@ export function Toolbar(): React.JSX.Element {
       <button type="button" className="toolbar__button" onClick={() => setFontsOpen(true)}>
         Fonts
       </button>
+      <button type="button" className="toolbar__button" onClick={() => setSoundsOpen(true)}>
+        Sounds
+      </button>
       <button type="button" className="toolbar__button" onClick={() => setDevicesOpen(true)}>
         Devices
       </button>
@@ -142,6 +147,7 @@ export function Toolbar(): React.JSX.Element {
       {eventSourcesOpen && <EventSourcesModal onClose={() => setEventSourcesOpen(false)} />}
       {globalActionsOpen && <GlobalActionsModal onClose={() => setGlobalActionsOpen(false)} />}
       {fontsOpen && <FontsModal onClose={() => setFontsOpen(false)} />}
+      {soundsOpen && <SoundsModal onClose={() => setSoundsOpen(false)} />}
       {devicesOpen && <DevicesModal onClose={() => setDevicesOpen(false)} />}
       {variablesOpen && <VariablesModal onClose={() => setVariablesOpen(false)} />}
     </div>

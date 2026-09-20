@@ -201,6 +201,17 @@ body {
 	color: #6b7280;
 }
 
+/* Trailing unit/value label on an inline properties field — the "%" beside
+   a volume slider, the "ms" beside a start offset. Same muted treatment as
+   .toolbar__unit above; min-width keeps a slider from resizing as its
+   readout goes 5% -> 100%. */
+.properties__unit {
+	color: #6b7280;
+	font-size: 12px;
+	min-width: 38px;
+	text-align: right;
+}
+
 .toolbar__button {
 	background: #2a2e37;
 	color: #e8e8ea;
@@ -4134,6 +4145,30 @@ button.deck-morph-cell:focus-visible {
 	font-size: 13px;
 	color: #e8e8ea;
 	word-break: break-word;
+}
+
+/* Sound rows need their controls in fixed columns rather than the base
+   row's space-between flex — with flex, a short name and a long one push
+   their Preview/Delete buttons to different x positions, so the list reads
+   as ragged. Grid gives the name the slack and pins everything after it. */
+.sounds-modal__row {
+	display: grid;
+	grid-template-columns: 1fr auto auto auto;
+	justify-content: unset;
+}
+
+.sounds-modal__start-at {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: #9aa0ab;
+}
+
+/* Wide enough for a four-digit offset without the column resizing as the
+   number grows, which would shift the buttons beside it. */
+.sounds-modal__start-at input {
+	width: 72px;
 }
 
 /* Custom fonts' own per-font line-height override — see its input's own

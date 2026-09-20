@@ -237,6 +237,9 @@ export const MCP_SCHEMAS = {
           },
           {
             "$ref": "#/definitions/SetWindowsAudioAction"
+          },
+          {
+            "$ref": "#/definitions/PlaySoundAction"
           }
         ]
       },
@@ -522,6 +525,40 @@ export const MCP_SCHEMAS = {
         "required": [
           "kind",
           "deviceName"
+        ],
+        "additionalProperties": false
+      },
+      "PlaySoundAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "play-sound"
+          },
+          "soundId": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "server",
+              "client",
+              "both"
+            ]
+          },
+          "serverVolume": {
+            "type": "number"
+          },
+          "clientVolume": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "soundId",
+          "target",
+          "serverVolume",
+          "clientVolume"
         ],
         "additionalProperties": false
       },
@@ -3469,6 +3506,9 @@ export const MCP_SCHEMAS = {
           },
           {
             "$ref": "#/definitions/SetWindowsAudioAction"
+          },
+          {
+            "$ref": "#/definitions/PlaySoundAction"
           }
         ]
       },
@@ -3754,6 +3794,40 @@ export const MCP_SCHEMAS = {
         "required": [
           "kind",
           "deviceName"
+        ],
+        "additionalProperties": false
+      },
+      "PlaySoundAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "play-sound"
+          },
+          "soundId": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "server",
+              "client",
+              "both"
+            ]
+          },
+          "serverVolume": {
+            "type": "number"
+          },
+          "clientVolume": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "soundId",
+          "target",
+          "serverVolume",
+          "clientVolume"
         ],
         "additionalProperties": false
       },

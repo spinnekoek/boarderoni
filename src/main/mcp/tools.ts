@@ -34,6 +34,12 @@ import { captureDashboardScreenshot, captureWidgetScreenshot } from './screensho
 export interface McpDeps {
   getOrLoadRoom: (deckId: string) => DeckRoom | null
   listDeckSummaries: () => DeckSummary[]
+  // Deck lifecycle. Deliberately create/rename only — deleting a deck is
+  // irreversible and goes through a confirmation dialog everywhere a human
+  // can trigger it, which an MCP client has no equivalent of, so it isn't
+  // exposed here.
+  createDeck: (name: string) => DeckSummary
+  renameDeck: (deckId: string, name: string) => DeckSummary | null
   applyVariableUpdates: (room: DeckRoom, updates: Record<string, unknown>, options: { immediate: boolean }) => void
   applyDashboardUpdate: (room: DeckRoom, dashboard: Dashboard, final: boolean) => void
   applyAppSettingsPatch: (patch: Partial<AppSettings>) => Promise<AppSettings>
@@ -142,6 +148,27 @@ function buildTools(): ToolDef[] {
     {
       tool: { name: 'list_decks', description: 'List every deck (dashboard) this app knows about.', inputSchema: objectSchema({}, []) },
       handler: (deps) => textResult(deps.listDeckSummaries())
+    },
+    {
+      tool: {
+        name: 'create_deck',
+        description: 'Create a new, empty deck and return its id and name. The id is generated here — use it for every other tool call against this deck.',
+        inputSchema: objectSchema({ name: { type: 'string', description: 'Display name for the new deck.' } }, ['name'])
+      },
+      handler: (deps, args) => textResult(deps.createDeck(requireString(args, 'name')))
+    },
+    {
+      tool: {
+        name: 'rename_deck',
+        description: "Change an existing deck's display name. Does not affect its id or any of its content.",
+        inputSchema: objectSchema({ deckId: DECK_ID_PROP, name: { type: 'string' } }, ['deckId', 'name'])
+      },
+      handler: (deps, args) => {
+        const deckId = requireString(args, 'deckId')
+        const renamed = deps.renameDeck(deckId, requireString(args, 'name'))
+        if (!renamed) throw new McpToolError(`Unknown deck: ${deckId}`)
+        return textResult(renamed)
+      }
     },
     {
       tool: {

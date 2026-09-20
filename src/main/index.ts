@@ -39,6 +39,7 @@ import {
   type DropdownWidget,
   type ToggleSwitchWidget,
   type GlobalAction,
+  type PlaySoundAction,
   type Plugin,
   type ConditionStep,
   type KeypressAction,
@@ -75,6 +76,8 @@ import { getAppSettings, updateAppSettings, type AppSettings } from './appSettin
 import { getMcpServerSettings, regenerateMcpServerToken } from './mcpServerSettings'
 import { syncMcpServer, getMcpListenStatus, type McpDeps } from './mcp/server'
 import { getCustomFonts, addCustomFont, deleteCustomFont, updateCustomFontLineHeight, customFontFile } from './customFonts'
+import { getCustomSounds, addCustomSound, addCustomSoundWithId, deleteCustomSound, updateCustomSoundStartAt, customSoundFile } from './customSounds'
+import { SOUND_MIME_BY_EXTENSION, soundExtension, soundVolumeToGain } from '../shared/sounds'
 import { getCustomVariants, addCustomVariant, deleteCustomVariant } from './customVariants'
 import {
   listDevices as listWindowsAudioDevices,
@@ -787,6 +790,39 @@ function serveCustomFont(res: ServerResponse, id: string): void {
   })
 }
 
+// GET /sounds/:id — same shape and same reasoning as serveCustomFont above
+// (id-pattern check before touching disk, immutable long-cache because a
+// given id's bytes never change after upload). Needs the CORS header for the
+// same reason fonts do: an <audio>/fetch load from the renderer is a genuine
+// cross-origin request whenever the page isn't on SERVER_PORT, and these are
+// public, unauthenticated audio bytes with nothing credentialed about them.
+function serveCustomSound(res: ServerResponse, id: string): void {
+  if (!DECK_ID_PATTERN.test(id)) {
+    res.writeHead(404)
+    res.end('Not found')
+    return
+  }
+  const sound = getCustomSounds().find((s) => s.id === id)
+  if (!sound) {
+    res.writeHead(404)
+    res.end('Not found')
+    return
+  }
+  readFile(customSoundFile(id), (err, data) => {
+    if (err) {
+      res.writeHead(404)
+      res.end('Not found')
+      return
+    }
+    res.writeHead(200, {
+      'Content-Type': SOUND_MIME_BY_EXTENSION[soundExtension(sound.filename)] ?? 'application/octet-stream',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Access-Control-Allow-Origin': '*'
+    })
+    res.end(data)
+  })
+}
+
 // Patches one widget by id, wherever it lives (main deck or a sub-deck) —
 // write-side counterpart to findWidgetAnywhere for handlers (like
 // screen-capture:pick-region below) that need to update a widget without
@@ -1267,6 +1303,71 @@ function sendJson(res: ServerResponse, status: number, body?: unknown): void {
   res.end(JSON.stringify(body))
 }
 
+// Every sound id any of this deck's actions references, across widget event
+// sequences (including nested ConditionStep branches, which is why this
+// recurses rather than scanning a flat list), sub-deck widgets, and global
+// actions. Drives what a deck export bundles — see DeckExportFile.sounds.
+function collectReferencedSoundIds(dashboard: Dashboard): Set<string> {
+  const ids = new Set<string>()
+
+  function walkSteps(steps: SequenceStep[]): void {
+    for (const step of steps) {
+      if (step.kind === 'action') {
+        if (step.action.kind === 'play-sound' && step.action.soundId) ids.add(step.action.soundId)
+      } else if (step.kind === 'condition') {
+        walkSteps(step.whenTrue)
+        walkSteps(step.whenFalse)
+      }
+    }
+  }
+
+  // Every widget kind stores its sequences under `events`, keyed by event
+  // name, plus switch/dropdown positions which carry their own. Walked
+  // structurally rather than per-widget-type so a new eventful widget type
+  // is covered here without a change — a missed one would silently export a
+  // deck whose sound is absent on the importing machine.
+  function walkWidgetLike(value: unknown): void {
+    if (Array.isArray(value)) {
+      if (value.every((v) => v && typeof v === 'object' && 'kind' in (v as object))) {
+        walkSteps(value as SequenceStep[])
+      }
+      for (const entry of value) walkWidgetLike(entry)
+      return
+    }
+    if (!value || typeof value !== 'object') return
+    for (const entry of Object.values(value as Record<string, unknown>)) walkWidgetLike(entry)
+  }
+
+  walkWidgetLike(dashboard.widgets)
+  for (const subDeck of dashboard.subDecks ?? []) walkWidgetLike(subDeck.widgets)
+  for (const rule of dashboard.globalActions ?? []) walkSteps(rule.steps)
+  return ids
+}
+
+// Reads each referenced sound's bytes back off disk for the export envelope.
+// A sound whose file has gone missing (manifest/disk drift) is skipped
+// rather than failing the whole export — the deck still imports, that one
+// action just plays nothing, which is the same outcome as referencing a
+// since-deleted sound.
+function collectDeckSounds(dashboard: Dashboard): DeckExportFile['sounds'] {
+  const bundled: NonNullable<DeckExportFile['sounds']> = []
+  const library = getCustomSounds()
+  for (const id of collectReferencedSoundIds(dashboard)) {
+    const sound = library.find((s) => s.id === id)
+    if (!sound) continue
+    const file = customSoundFile(id)
+    if (!existsSync(file)) continue
+    bundled.push({
+      id: sound.id,
+      label: sound.label,
+      filename: sound.filename,
+      dataBase64: readFileSync(file).toString('base64'),
+      ...(sound.startAtMs ? { startAtMs: sound.startAtMs } : {})
+    })
+  }
+  return bundled.length > 0 ? bundled : undefined
+}
+
 // Loose on purpose — only checks the envelope shape (the magic marker,
 // formatVersion, and that `dashboard` at least looks like a Dashboard),
 // not every widget's own shape. Widget-level shape evolution is already
@@ -1288,8 +1389,50 @@ const deckExportFileSchema = z.object({
       widgets: z.array(z.unknown())
     })
     .passthrough(),
-  backgroundImage: z.object({ mime: z.string(), dataBase64: z.string() }).optional()
+  backgroundImage: z.object({ mime: z.string(), dataBase64: z.string() }).optional(),
+  // Must be declared, not left to passthrough: z.object() strips undeclared
+  // keys, and only `dashboard` above is .passthrough()'d — without this the
+  // bundled audio would be silently dropped at import and every Play Sound
+  // action in the deck would resolve to nothing.
+  sounds: z
+    .array(z.object({ id: z.string(), label: z.string(), filename: z.string(), dataBase64: z.string(), startAtMs: z.number().optional() }))
+    .optional()
 })
+
+// Creating and renaming a deck are shared by the REST routes the deck picker
+// uses and the MCP create_deck/rename_deck tools — extracted so there's one
+// definition of what each actually does (including the deck-list broadcast)
+// rather than two that can drift.
+function createDeck(name: string): DeckSummary {
+  const id = randomUUID()
+  const dashboard: Dashboard = { ...structuredClone(DEFAULT_DASHBOARD), id, name }
+  mkdirSync(deckDir(id), { recursive: true })
+  writeFileSync(deckDashboardFile(id), JSON.stringify(dashboard, null, 2), 'utf-8')
+  broadcastDeckList()
+  return { id, name }
+}
+
+// null when the deck doesn't exist. Handles the loaded-room and on-disk-only
+// cases separately for the same reason the REST route always has: a loaded
+// room's in-memory dashboard is the source of truth while it's live, so
+// writing the file underneath it would be overwritten by the next save.
+function renameDeck(deckId: string, name: string): DeckSummary | null {
+  if (!deckExists(deckId)) return null
+  const room = rooms.get(deckId)
+  if (room) {
+    room.dashboard = { ...room.dashboard, name }
+    saveDeckDashboard(room)
+    broadcastToRoom(room, dashboardSyncMessage(room.dashboard))
+  } else {
+    const dashboard = loadDeckDashboard(deckId)
+    if (dashboard) {
+      dashboard.name = name
+      writeFileSync(deckDashboardFile(deckId), JSON.stringify(dashboard, null, 2), 'utf-8')
+    }
+  }
+  broadcastDeckList()
+  return { id: deckId, name }
+}
 
 async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
   const idMatch = /^\/api\/decks\/([^/]+)$/.exec(url.pathname)
@@ -1309,11 +1452,7 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
       sendJson(res, 400, { error: 'Invalid JSON body' })
       return
     }
-    const id = randomUUID()
-    const dashboard: Dashboard = { ...structuredClone(DEFAULT_DASHBOARD), id, name }
-    mkdirSync(deckDir(id), { recursive: true })
-    writeFileSync(deckDashboardFile(id), JSON.stringify(dashboard, null, 2), 'utf-8')
-    sendJson(res, 201, { id, name } satisfies DeckSummary)
+    sendJson(res, 201, createDeck(name))
     return
   }
 
@@ -1339,7 +1478,8 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
       exportedAt: Date.now(),
       appVersion: app.getVersion(),
       dashboard,
-      backgroundImage
+      backgroundImage,
+      sounds: collectDeckSounds(dashboard)
     }
     const result = await dialog.showSaveDialog({
       defaultPath: `${dashboard.name}.boarderoni`,
@@ -1398,7 +1538,19 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
       delete dashboard.backgroundImageMime
       delete dashboard.backgroundImageVersion
     }
+    // Ids are preserved (see addCustomSoundWithId) so the imported deck's
+    // actions, which reference sounds by id, still resolve — and so
+    // re-importing, or importing two decks sharing a sound, doesn't pile up
+    // duplicate copies. Registering these makes them visible in the app-wide
+    // library too, same as if they'd been uploaded here.
+    let importedSounds = 0
+    for (const sound of exportFile.sounds ?? []) {
+      const dataUrl = `data:${SOUND_MIME_BY_EXTENSION[soundExtension(sound.filename)] ?? 'application/octet-stream'};base64,${sound.dataBase64}`
+      if (addCustomSoundWithId(sound.id, dataUrl, sound.label, sound.filename, sound.startAtMs)) importedSounds++
+    }
+    if (importedSounds > 0) broadcastCustomSounds()
     writeFileSync(deckDashboardFile(id), JSON.stringify(dashboard, null, 2), 'utf-8')
+    broadcastDeckList()
     const warnings = collectImportWarnings(dashboard)
     sendJson(res, 201, { deck: { id, name: dashboard.name } satisfies DeckSummary, warnings })
     return
@@ -1422,19 +1574,7 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
       sendJson(res, 400, { error: 'Invalid JSON body' })
       return
     }
-    const room = rooms.get(deckId)
-    if (room) {
-      room.dashboard = { ...room.dashboard, name }
-      saveDeckDashboard(room)
-      broadcastToRoom(room, dashboardSyncMessage(room.dashboard))
-    } else {
-      const dashboard = loadDeckDashboard(deckId)
-      if (dashboard) {
-        dashboard.name = name
-        writeFileSync(deckDashboardFile(deckId), JSON.stringify(dashboard, null, 2), 'utf-8')
-      }
-    }
-    sendJson(res, 200, { id: deckId, name } satisfies DeckSummary)
+    sendJson(res, 200, renameDeck(deckId, name))
     return
   }
 
@@ -1466,6 +1606,7 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
       rooms.delete(deckId)
     }
     rmSync(deckDir(deckId), { recursive: true, force: true })
+    broadcastDeckList()
     sendJson(res, 204)
     return
   }
@@ -1479,6 +1620,14 @@ const httpServer = createServer((req, res) => {
   if (url.pathname === '/background-image') {
     if (!hasDeviceContentAccess(req, url)) return sendForbidden(res)
     serveBackgroundImage(res, url.searchParams.get('deck') ?? '')
+    return
+  }
+
+  if (url.pathname.startsWith('/sounds/')) {
+    // Same device-approval gate as /fonts/ below — an unapproved device has
+    // no more business pulling a deck's audio than its typefaces.
+    if (!hasDeviceContentAccess(req, url)) return sendForbidden(res)
+    serveCustomSound(res, url.pathname.slice('/sounds/'.length))
     return
   }
 
@@ -1625,6 +1774,10 @@ function sendInitialState(ws: WebSocket, room: DeckRoom): void {
   // dashboard:sync instead of a brief flash of fallback font until a later
   // fonts:get.
   ws.send(JSON.stringify({ type: 'fonts:list', fonts: getCustomFonts() } satisfies ServerToClient))
+  // Same reasoning again for sounds: a client that receives a sound:play
+  // before its first sounds:list would have no filename to build the URL
+  // from, so the very first sound of a session would be silently skipped.
+  ws.send(JSON.stringify({ type: 'sounds:list', sounds: getCustomSounds() } satisfies ServerToClient))
   // Editor-only (see custom-variants:get's own comment in shared/types.ts) —
   // a deployed view client has no palette to spawn a variant from, so skip
   // sending state it'll never use, unlike fonts:list just above.
@@ -1654,6 +1807,27 @@ function sendInitialState(ws: WebSocket, room: DeckRoom): void {
 // trusted device can vouch for a new one, not just the desktop.
 function isTrustedSocket(ctx: SocketContext): boolean {
   return ctx.role === 'edit' || (ctx.role === 'view' && verifyDeviceToken(ctx.deviceId, ctx.deviceToken))
+}
+
+// Pushes the current deck list to every client sitting on the picker, so a
+// deck created/renamed/deleted/imported anywhere — the editor's own button,
+// a deck import, or an MCP tool — shows up without the client having to
+// reconnect. Before this, decks:list was only ever sent once per lobby
+// connection (see the hello handler), so a tablet left on the picker went
+// stale the moment anything changed.
+//
+// Lobby connections only (deckId ''): a client already inside a deck isn't
+// looking at a picker, and gets its own deck's name changes through
+// dashboard:sync instead. Trust-gated for the same reason the hello handler
+// gates the initial send — the deck list is content, not public.
+function broadcastDeckList(): void {
+  const payload = JSON.stringify({ type: 'decks:list', decks: listDeckSummaries() } satisfies ServerToClient)
+  for (const [sock, sctx] of socketContext) {
+    if (sock.readyState !== WebSocket.OPEN) continue
+    if (sctx.deckId !== '') continue
+    if (!isTrustedSocket(sctx)) continue
+    sock.send(payload)
+  }
 }
 
 function requestDeviceApproval(device: DeviceInfo): void {
@@ -2275,6 +2449,35 @@ function broadcastCustomFonts(): void {
   }
 }
 
+// Same not-role-gated reasoning as broadcastCustomFonts above: a 'view'
+// client is one of the things that actually plays a sound, so it needs the
+// library too, not just the editor that manages it.
+function broadcastCustomSounds(): void {
+  const payload = JSON.stringify({ type: 'sounds:list', sounds: getCustomSounds() } satisfies ServerToClient)
+  for (const [sock] of socketContext) {
+    if (sock.readyState === WebSocket.OPEN) sock.send(payload)
+  }
+}
+
+// A PlaySoundAction's 'server' target — "the machine running Boarderoni",
+// which in practice means the desktop editor window's own renderer, the only
+// place in this process tree with an audio output.
+//
+// Addressed by role across EVERY socket rather than via broadcastToEditClients
+// (which is per-room): the editor window might be sitting on a different deck
+// than the one whose action just fired (or on the deck picker), and "play a
+// sound on the PC" shouldn't depend on which deck happens to be open there.
+//
+// Sent raw rather than through queueSend because that coalesces by message
+// type — two sounds fired in quick succession would collapse into one, and a
+// dropped sound effect is exactly the bug this would produce.
+function sendSoundToDesktop(message: ServerToClient): void {
+  const payload = JSON.stringify(message)
+  for (const [sock, ctx] of socketContext) {
+    if (ctx.role === 'edit' && sock.readyState === WebSocket.OPEN) sock.send(payload)
+  }
+}
+
 function pluginSignature(source: Plugin): string {
   return JSON.stringify({ kind: source.kind, config: source.config ?? null })
 }
@@ -2477,6 +2680,42 @@ interface ActionReplyTarget {
   send: (data: string) => void
 }
 
+// Fans a PlaySoundAction out to whichever side(s) should actually produce
+// the audio. Synchronous and never throws: a sound is a garnish on a
+// sequence, so a missing/deleted soundId must not abort the steps after it
+// the way a failed DCS command legitimately does.
+//
+// `ws` is the action's own reply target — the socket that triggered it for a
+// widget press, or (for a global action, which has no triggering device) a
+// sink that broadcasts to every client in the room. That falls out correctly
+// either way: 'client' means "whoever caused this", and for a deck-wide rule
+// that's reasonably everyone looking at the deck.
+function runPlaySoundAction(action: PlaySoundAction, ws: ActionReplyTarget): void {
+  if (!action.soundId) return
+  // Read from the library, not the action — the offset belongs to the file
+  // (see CustomSound.startAtMs), so changing it once re-trims every action
+  // already pointing at that sound.
+  const startAtMs = getCustomSounds().find((s) => s.id === action.soundId)?.startAtMs ?? 0
+  if (action.target === 'server' || action.target === 'both') {
+    sendSoundToDesktop({
+      type: 'sound:play',
+      soundId: action.soundId,
+      volume: soundVolumeToGain(action.serverVolume),
+      startAtMs
+    })
+  }
+  if (action.target === 'client' || action.target === 'both') {
+    ws.send(
+      JSON.stringify({
+        type: 'sound:play',
+        soundId: action.soundId,
+        volume: soundVolumeToGain(action.clientVolume),
+        startAtMs
+      } satisfies ServerToClient)
+    )
+  }
+}
+
 async function runActionStep(room: DeckRoom, action: WidgetAction, trigger: TriggerValue | undefined, final: boolean, ws: ActionReplyTarget): Promise<void> {
   if (action.kind === 'update-state') {
     runUpdateState(room, action.code, trigger, final) // throws synchronously on failure
@@ -2492,6 +2731,10 @@ async function runActionStep(room: DeckRoom, action: WidgetAction, trigger: Trig
   }
   if (action.kind === 'set-windows-audio') {
     await runSetWindowsAudioAction(room, action, trigger)
+    return
+  }
+  if (action.kind === 'play-sound') {
+    runPlaySoundAction(action, ws)
     return
   }
   if (action.kind === 'navigate-subdeck') {
@@ -3446,6 +3689,29 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         broadcastRestWebhookTargets()
         break
       }
+      case 'sounds:get': {
+        // Not role-gated, same as fonts:get — see broadcastCustomSounds.
+        ws.send(JSON.stringify({ type: 'sounds:list', sounds: getCustomSounds() } satisfies ServerToClient))
+        break
+      }
+      case 'sounds:upload': {
+        if (ctx.role !== 'edit') break
+        addCustomSound(message.dataUrl, message.label, message.filename)
+        broadcastCustomSounds()
+        break
+      }
+      case 'sounds:delete': {
+        if (ctx.role !== 'edit') break
+        deleteCustomSound(message.soundId)
+        broadcastCustomSounds()
+        break
+      }
+      case 'sounds:update': {
+        if (ctx.role !== 'edit') break
+        updateCustomSoundStartAt(message.soundId, message.startAtMs)
+        broadcastCustomSounds()
+        break
+      }
       case 'fonts:get': {
         // Unlike rest-sources:get, not role-gated — see broadcastCustomFonts's
         // own comment for why 'view' needs this list too.
@@ -3672,6 +3938,8 @@ function getEditorDeckId(): string | undefined {
 const mcpDeps: McpDeps = {
   getOrLoadRoom,
   listDeckSummaries,
+  createDeck,
+  renameDeck,
   applyVariableUpdates,
   applyDashboardUpdate: (room, dashboard, final) => applyDashboardUpdate(room, dashboard, final),
   applyAppSettingsPatch,
@@ -3850,7 +4118,16 @@ function createEditorWindow(): void {
       // own comment for why THAT one needed an actual fix, not just this).
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
+      sandbox: true,
+      // A PlaySoundAction targeting 'server' plays through THIS window's
+      // renderer (see sendSoundToDesktop), and it routinely fires with
+      // nobody having touched the window — a global action reacting to a
+      // variable, or a press on a tablet across the room. Chromium's
+      // default policy refuses playback until the document has had a user
+      // gesture, which would silently drop exactly those cases. Safe here
+      // in a way it wouldn't be on the open web: this window only ever
+      // loads this app's own renderer.
+      autoplayPolicy: 'no-user-gesture-required'
     }
   })
   editorWindow = win

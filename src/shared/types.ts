@@ -111,6 +111,28 @@ export interface CloseOverlayAction {
   kind: 'close-overlay'
 }
 
+// Plays one sound from the app-wide library (see shared/sounds.ts) — on the
+// machine running Boarderoni, on the device that triggered the action, or
+// both. There's no main-process audio API, so "server" playback is really
+// the editor window's own renderer doing it (see playSoundOnServer in
+// main/index.ts); the editor window is hidden-not-destroyed when minimized
+// to tray, so this still works with no window on screen.
+export interface PlaySoundAction {
+  kind: 'play-sound'
+  // A CustomSound.id. An id whose sound has since been deleted plays
+  // nothing rather than erroring — same silent-no-op posture as a missing
+  // font, since a sound failing to play shouldn't abort the rest of a
+  // sequence mid-flight.
+  soundId: string
+  target: 'server' | 'client' | 'both'
+  // 0-100 each, independent: the PC's speakers and a tablet in the cockpit
+  // are rarely at a comparable level, so one shared number would mean
+  // getting one of them wrong. Converted to HTMLAudioElement gain by
+  // soundVolumeToGain (shared/sounds.ts).
+  serverVolume: number
+  clientVolume: number
+}
+
 // The default for a freshly-added sequence step — does nothing when run
 // (see runActionStep in main/index.ts). Lets a step exist as a placeholder
 // (e.g. mid-sequence, or while deciding what it should do) without silently
@@ -188,6 +210,7 @@ export type WidgetAction =
   | CloseOverlayAction
   | CallRestAction
   | SetWindowsAudioAction
+  | PlaySoundAction
 
 // A pause between two steps in an event's sequence (see SequenceStep) —
 // not a field on the following action step, so it can be added/removed/
@@ -2064,6 +2087,13 @@ export interface DeckExportFile {
   // main/index.ts, which this mirrors instead of forcing every export to
   // carry an (often large) empty placeholder.
   backgroundImage?: { mime: string; dataBase64: string }
+  // Every sound any of this deck's actions references, bundled so the deck
+  // actually works on the machine it's imported onto — unlike custom fonts,
+  // which are left behind and have to already exist there. Absent (rather
+  // than []) when the deck plays no sounds at all, matching backgroundImage
+  // above. Ids are preserved on import so a sound already present under the
+  // same id isn't duplicated; see importDeckSounds in main/index.ts.
+  sounds?: { id: string; label: string; filename: string; dataBase64: string; startAtMs?: number }[]
 }
 
 // One field of a plugin's output routed into a Variable. `field` is a key
@@ -2442,6 +2472,17 @@ export type ClientToServer =
   // CustomFont.lineHeight's own comment in shared/fonts.ts for why this is
   // per-font rather than a per-label field.
   | { type: 'fonts:update'; fontId: string; lineHeight: number | null }
+  // Exactly the fonts:* shape above, for the sound library (see
+  // shared/sounds.ts) — app-wide, uploads/deletes edit-role only, and the
+  // resulting sounds:list goes to 'view' clients too, since a view client is
+  // one of the things that actually plays a sound.
+  | { type: 'sounds:get' }
+  | { type: 'sounds:upload'; dataUrl: string; label: string; filename: string }
+  | { type: 'sounds:delete'; soundId: string }
+  // Sets a sound's own start offset (see CustomSound.startAtMs) — the audio
+  // equivalent of fonts:update's per-font lineHeight, and per-library rather
+  // than per-action for the same reason: it describes the file.
+  | { type: 'sounds:update'; soundId: string; startAtMs: number }
   // App-wide, not per-deck (see CustomVariant's own comment) — same
   // edit-role-only, full-list-broadcast-back shape as fonts:*/rest-sources:*
   // above. Unlike fonts:list, custom-variants:list is editor-only (never
@@ -2627,6 +2668,16 @@ export type ServerToClient =
   // content — same "full current list either way" reasoning as
   // rest-sources:list.
   | { type: 'fonts:list'; fonts: CustomFont[] }
+  // Same shape and lifecycle as fonts:list, for the sound library.
+  | { type: 'sounds:list'; sounds: CustomSound[] }
+  // Tells a client to actually play a sound — the only way audio ever
+  // happens, since neither the main process nor a PlaySoundAction itself can
+  // produce any. Sent to the editor window for `target: 'server'`, to the
+  // triggering device for 'client', and to both for 'both' (see
+  // runPlaySoundAction in main/index.ts). `volume` is already resolved to
+  // whichever of serverVolume/clientVolume applies to THIS recipient, so the
+  // player doesn't need to know which kind of client it is.
+  | { type: 'sound:play'; soundId: string; volume: number; startAtMs: number }
   // Reply to custom-variants:get, and pushed to every 'edit'-role client
   // (see broadcastCustomVariants in main/index.ts) after a
   // custom-variants:save/delete, plus once more as part of sendInitialState

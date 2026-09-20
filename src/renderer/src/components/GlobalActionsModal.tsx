@@ -3,7 +3,7 @@ import { useDashboardStore } from '../store'
 import { useConfirmStore } from '../confirmStore'
 import { nextId } from '../id'
 import { useEscapeToClose } from '../useEscapeToClose'
-import { CodeEditor } from './CodeEditor'
+import { ExpressionField } from './ExpressionField'
 import { EventSequenceEditor } from './PropertiesPanel'
 import type { GlobalAction } from '@shared/types'
 
@@ -142,14 +142,13 @@ function RuleEditor({
         </div>
       )}
 
-      <label className="properties__field">
-        <span>Condition</span>
-        <CodeEditor
-          value={rule.condition}
-          onChange={(condition) => onChange({ condition })}
-          placeholder="return variables.gear_handle === 1 && variables.airspeed > 250;"
-        />
-      </label>
+      <ExpressionField
+        label="Condition"
+        value={rule.condition}
+        onChange={(condition) => onChange({ condition })}
+        placeholder="return variables.gear_handle === 1 && variables.airspeed > 250;"
+        minimal={false}
+      />
       <p className="properties__hint">
         JS function body — return a truthy/falsy value. <code>variables</code> holds every variable&rsquo;s current value.
       </p>

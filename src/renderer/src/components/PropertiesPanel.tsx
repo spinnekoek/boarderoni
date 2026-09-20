@@ -21,6 +21,8 @@ import { DETENT_SIZE } from './widgets/DialShapeGraphic'
 import { isMiddlePosition as isMiddleTogglePosition, toggleNameForIndex } from './widgets/ToggleSwitchWidget'
 import { ARC_DEFAULT_TRACK_COLOR, ARC_DEFAULT_INDICATOR_COLOR, ARC_DEFAULT_TICK_COLOR } from './widgets/GaugeWidget'
 import { CodeEditor } from './CodeEditor'
+import { ExpressionField } from './ExpressionField'
+import { playSound } from '../soundPlayer'
 import { ExpressionEditorModal } from './ExpressionEditorModal'
 import type {
   ActionStep,
@@ -57,6 +59,7 @@ import type {
   ScreenCaptureWidget,
   SendDcsCommandAction,
   SetWindowsAudioAction,
+  PlaySoundAction,
   SequenceStep,
   SquareBorderStyle,
   StatefulWidget,
@@ -430,48 +433,6 @@ function VisibilityField({
           onClose={() => setExpanded(false)}
         />
       )}
-    </>
-  )
-}
-
-// One labelled expression field: a minimal CodeEditor plus the same
-// expand-to-modal affordance colorExpr/visibleExpr already have (see
-// VisibleField just above, whose inline copy of this shape it mirrors).
-//
-// Extracted rather than repeated because the fourteen widget-specific
-// expression fields this replaced — rotateAngleExpr on five widget types,
-// both gauges' valueExpr, both tick sets' labelTextExpr, the encoder/adjuster
-// rest values, guardOpenExpr — all needed byte-identical wrappers, and
-// several of them render inside a .map() where a single `expanded` flag held
-// by the parent couldn't say WHICH row was expanded.
-function ExpressionField({
-  label,
-  value,
-  onChange,
-  placeholder
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  placeholder?: string
-}): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false)
-  return (
-    <>
-      {/* A div, not a <label> — see VisibleField's own comment: CodeEditor
-          nests its own focusable input, and a wrapping <label> would
-          synthesize a second click on the field's first labelable
-          descendant every time you clicked into the editor. */}
-      <div className="properties__field">
-        <span>{label}</span>
-        <div className="color-picker-button__expr-editor-wrap">
-          <CodeEditor value={value} onChange={onChange} placeholder={placeholder} minimal />
-          <button type="button" className="color-picker-button__expand" title="Expand" onClick={() => setExpanded(true)}>
-            ⤢
-          </button>
-        </div>
-      </div>
-      {expanded && <ExpressionEditorModal value={value} onChange={onChange} placeholder={placeholder} onClose={() => setExpanded(false)} />}
     </>
   )
 }
@@ -1243,6 +1204,8 @@ function ActionFields({
               onChange({ kind: 'open-overlay', subDeckId: subDecks[0]?.id ?? '', edge: 'right', size: 320, sizeUnit: 'px' })
             else if (kind === 'close-overlay') onChange({ kind: 'close-overlay' })
             else if (kind === 'set-windows-audio') onChange({ kind: 'set-windows-audio', deviceName: '' })
+            else if (kind === 'play-sound')
+              onChange({ kind: 'play-sound', soundId: '', target: 'server', serverVolume: 100, clientVolume: 100 })
             else if (kind.startsWith('call-rest:')) onChange({ kind: 'call-rest', targetId: kind.slice('call-rest:'.length), values: [] })
           }}
         >
@@ -1251,6 +1214,7 @@ function ActionFields({
           <option value="update-state">Update state</option>
           {(dcsBiosActionEnabled || action.kind === 'send-dcs-command') && <option value="send-dcs-command">Send DCS command</option>}
           {(windowsAudioActionEnabled || action.kind === 'set-windows-audio') && <option value="set-windows-audio">Set Windows Audio</option>}
+          <option value="play-sound">Play sound</option>
           <option value="navigate-subdeck">Navigate to screen</option>
           <option value="open-overlay">Open overlay</option>
           <option value="close-overlay">Close overlay</option>
@@ -1304,18 +1268,15 @@ function ActionFields({
         </>
       ) : action.kind === 'update-state' ? (
         <>
-          <label className="properties__field">
-            <span>Code</span>
-            <CodeEditor
-              value={action.code}
-              onChange={(code) => onChange({ kind: 'update-state', code })}
-              placeholder={
-                variableHint
-                  ? `return { my_variable: ${variableHint} };`
-                  : 'return { my_variable: (variables.my_variable ?? 0) + 1 };'
-              }
-            />
-          </label>
+          <ExpressionField
+            label="Code"
+            value={action.code}
+            onChange={(code) => onChange({ kind: 'update-state', code })}
+            placeholder={
+              variableHint ? `return { my_variable: ${variableHint} };` : 'return { my_variable: (variables.my_variable ?? 0) + 1 };'
+            }
+            minimal={false}
+          />
           <p className="properties__hint">
             JS function body — <code>variables</code> holds every variable&rsquo;s current value. Return an object of{' '}
             <code>{'{ name: newValue }'}</code> pairs to update them (unknown names get created).
@@ -1337,6 +1298,8 @@ function ActionFields({
         <SendDcsCommandActionEditor action={action} onPatch={(fields) => onChange({ ...action, ...fields })} variableHint={variableHint} />
       ) : action.kind === 'set-windows-audio' ? (
         <SetWindowsAudioActionEditor action={action} onPatch={(fields) => onChange({ ...action, ...fields })} variableHint={variableHint} />
+      ) : action.kind === 'play-sound' ? (
+        <PlaySoundActionEditor action={action} onPatch={(fields) => onChange({ ...action, ...fields })} />
       ) : (
         // Narrowed by every kind check above, but TS doesn't retain that
         // narrowing inside the onChange closure below (a callback could in
@@ -1395,14 +1358,13 @@ function SequenceStepFields({
   if (step.kind === 'condition') {
     return (
       <>
-        <label className="properties__field">
-          <span>Condition</span>
-          <CodeEditor
-            value={step.condition}
-            onChange={(condition) => onChange({ ...step, condition })}
-            placeholder={variableHint ? `return ${variableHint} > 0;` : 'return variables.GEAR_HANDLE === 1;'}
-          />
-        </label>
+        <ExpressionField
+          label="Condition"
+          value={step.condition}
+          onChange={(condition) => onChange({ ...step, condition })}
+          placeholder={variableHint ? `return ${variableHint} > 0;` : 'return variables.GEAR_HANDLE === 1;'}
+          minimal={false}
+        />
         <p className="properties__hint">
           JS function body — return a truthy/falsy value. <code>variables</code> holds every variable&rsquo;s current value.
         </p>
@@ -2236,6 +2198,108 @@ function SendDcsCommandActionEditor({
 // select. No "Test" button here (unlike SendDcsCommandActionEditor) — DCS
 // commands are cheap and inert to test blind; a live volume/mute change is
 // neither, so it isn't offered as a one-click try-it.
+// Play Sound's own fields. The sound list comes from the app-wide library
+// (Sounds, in the toolbar) rather than a per-action file picker, so one
+// upload is reusable and deck export has something concrete to bundle (see
+// DeckExportFile.sounds).
+function PlaySoundActionEditor({
+  action,
+  onPatch
+}: {
+  action: PlaySoundAction
+  onPatch: (fields: Partial<PlaySoundAction>) => void
+}): React.JSX.Element {
+  const customSounds = useDashboardStore((s) => s.customSounds)
+  const requestCustomSounds = useDashboardStore((s) => s.requestCustomSounds)
+  const connected = useDashboardStore((s) => s.connected)
+  // Same connected-guarded "fetch once" shape as the REST targets/enabled
+  // plugins lookups above — the library normally arrives unasked with
+  // sendInitialState, this just covers a panel opened before that landed.
+  useEffect(() => {
+    if (connected && customSounds.length === 0) requestCustomSounds()
+  }, [connected, customSounds.length, requestCustomSounds])
+
+  const selected = customSounds.find((s) => s.id === action.soundId)
+  const showServer = action.target === 'server' || action.target === 'both'
+  const showClient = action.target === 'client' || action.target === 'both'
+
+  return (
+    <>
+      <label className="properties__field properties__field--inline">
+        <span>Sound</span>
+        <select value={action.soundId} onChange={(e) => onPatch({ soundId: e.target.value })}>
+          <option value="">Pick a sound…</option>
+          {customSounds.map((sound) => (
+            <option key={sound.id} value={sound.id}>
+              {sound.label}
+            </option>
+          ))}
+          {/* A sound deleted out from under an existing action still gets a
+              labelled slot rather than silently reading as "Pick a sound…",
+              same reasoning the call-rest target picker uses. */}
+          {action.soundId && !selected && <option value={action.soundId}>(deleted sound)</option>}
+        </select>
+      </label>
+      {customSounds.length === 0 && <p className="properties__hint">No sounds uploaded yet — add one under &quot;Sounds&quot; in the toolbar.</p>}
+
+      <div className="properties__field properties__field--inline">
+        <span>Preview</span>
+        <button
+          type="button"
+          className="properties__file-button"
+          disabled={!selected}
+          title={selected ? 'Play it here, with this sound’s own start offset applied' : 'Pick a sound first'}
+          onClick={() => selected && playSound(selected, 1, selected.startAtMs ?? 0)}
+        >
+          ▶ Play
+        </button>
+      </div>
+
+      <label className="properties__field properties__field--inline">
+        <span>Play on</span>
+        <select value={action.target} onChange={(e) => onPatch({ target: e.target.value as PlaySoundAction['target'] })}>
+          <option value="server">This PC</option>
+          <option value="client">The device that triggered it</option>
+          <option value="both">Both</option>
+        </select>
+      </label>
+
+      {showServer && (
+        <label className="properties__field properties__field--inline">
+          <span>PC volume</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={action.serverVolume}
+            onChange={(e) => onPatch({ serverVolume: Number(e.target.value) })}
+          />
+          <span className="properties__unit">{action.serverVolume}%</span>
+        </label>
+      )}
+
+      {showClient && (
+        <label className="properties__field properties__field--inline">
+          <span>Device volume</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={action.clientVolume}
+            onChange={(e) => onPatch({ clientVolume: Number(e.target.value) })}
+          />
+          <span className="properties__unit">{action.clientVolume}%</span>
+        </label>
+      )}
+
+      <p className="properties__hint">
+        A sound&rsquo;s start offset (for skipping silence at the front of a sample) is set once per sound under &quot;Sounds&quot; in
+        the toolbar, not here — it describes the file, so every action using it shares the same trimmed start.
+      </p>
+    </>
+  )
+}
+
 function SetWindowsAudioActionEditor({
   action,
   onPatch,
@@ -2290,19 +2354,12 @@ function SetWindowsAudioActionEditor({
         </div>
       </label>
       {isExpr && (
-        <div className="properties__field">
-          <span>Expression</span>
-          <div className="color-picker-button__expr-panel">
-            <div className="color-picker-button__expr-editor-wrap">
-              <CodeEditor
-                value={action.volumeExpr ?? ''}
-                onChange={(code) => onPatch({ volumeExpr: code })}
-                placeholder={variableHint ? `return ${variableHint};` : 'return variables.my_variable;'}
-                minimal
-              />
-            </div>
-          </div>
-        </div>
+        <ExpressionField
+          label="Expression"
+          value={action.volumeExpr ?? ''}
+          onChange={(code) => onPatch({ volumeExpr: code })}
+          placeholder={variableHint ? `return ${variableHint};` : 'return variables.my_variable;'}
+        />
       )}
 
       <label className="properties__field">

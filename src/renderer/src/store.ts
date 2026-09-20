@@ -34,6 +34,8 @@ import {
 import type { DcsBiosCommandCatalogEntry, DcsBiosFieldCatalogEntry, DcsBiosSettings, DcsBiosStatus, DcsBiosWorkerStats } from '@shared/dcsBiosTypes'
 import type { DcsViewportsSettings, DcsViewportsStatus } from '@shared/dcsViewportsTypes'
 import { registerCustomFonts, type CustomFont } from '@shared/fonts'
+import type { CustomSound } from '@shared/sounds'
+import { playSound } from './soundPlayer'
 import { getDeviceId, getDeviceToken, setDeviceToken, setLastDeckId, clearLastDeckId, nextId } from './id'
 import { syncCustomFontFaces } from './customFontFaces'
 import { useConfirmStore } from './confirmStore'
@@ -181,6 +183,11 @@ interface DashboardStore {
   // FontsModal to have something to call on mount, matching every other
   // panel's own convention.
   customFonts: CustomFont[]
+  // App-wide, user-uploaded sounds (see main/customSounds.ts) — same
+  // arrives-unasked-via-sendInitialState lifecycle as customFonts above, and
+  // needed by every client for the same reason: a sound:play carries only a
+  // soundId, so without the library there's no filename to resolve it with.
+  customSounds: CustomSound[]
   // App-wide, user-saved widget-variant presets (see CustomVariant's own
   // comment in shared/types.ts) — empty until first synced. Editor-only
   // (never sent to a 'view' client, unlike customFonts above — see
@@ -248,6 +255,10 @@ interface DashboardStore {
   updateRestWebhookTargets: (targets: RestWebhookTarget[]) => void
   deleteRestWebhookTarget: (targetId: string) => void
   requestCustomFonts: () => void
+  requestCustomSounds: () => void
+  uploadCustomSound: (dataUrl: string, label: string, filename: string) => void
+  deleteCustomSound: (soundId: string) => void
+  updateCustomSoundStartAt: (soundId: string, startAtMs: number) => void
   // dataUrl comes from a plain <input type="file"> + FileReader.readAsDataURL
   // (see FontsModal.tsx), same client-reads-the-file-itself shape as
   // uploadBackgroundImage below — necessary here for the same reason: an
@@ -554,6 +565,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
   restWebhookTargets: [],
   mcpServerSettings: null,
   customFonts: [],
+  customSounds: [],
   customVariants: [],
   screenCaptureDisplays: null,
   windowsAudioDevices: null,
@@ -703,6 +715,22 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
 
   requestCustomFonts: () => {
     send({ type: 'fonts:get' })
+  },
+
+  requestCustomSounds: () => {
+    send({ type: 'sounds:get' })
+  },
+
+  uploadCustomSound: (dataUrl, label, filename) => {
+    send({ type: 'sounds:upload', dataUrl, label, filename })
+  },
+
+  deleteCustomSound: (soundId) => {
+    send({ type: 'sounds:delete', soundId })
+  },
+
+  updateCustomSoundStartAt: (soundId, startAtMs) => {
+    send({ type: 'sounds:update', soundId, startAtMs })
   },
 
   uploadCustomFont: (dataUrl, label, filename) => {
@@ -967,6 +995,15 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // open to react to).
         syncCustomFontFaces(message.fonts)
         registerCustomFonts(message.fonts)
+      } else if (message.type === 'sounds:list') {
+        set({ customSounds: message.sounds })
+      } else if (message.type === 'sound:play') {
+        // Resolved against the library rather than the message carrying a
+        // filename, so a sound renamed after an action was authored still
+        // plays. An unknown id (deleted since, or a sounds:list that hasn't
+        // landed yet) is a silent no-op — same posture as the server side.
+        const sound = get().customSounds.find((s) => s.id === message.soundId)
+        if (sound) playSound(sound, message.volume, message.startAtMs)
       } else if (message.type === 'custom-variants:list') {
         set({ customVariants: message.variants })
       } else if (message.type === 'dashboard:external-change') {
@@ -1050,6 +1087,18 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         set({ devicePending: true })
       } else if (message.type === 'device:denied') {
         set({ devicePending: false, deviceDenied: true })
+      } else if (message.type === 'device:token') {
+        // Load-bearing here, not just on the deck socket (see connect()'s
+        // own copy): a device approved while sitting on the PICKER gets its
+        // token over THIS connection. Without persisting it here, approval
+        // appeared to work — the deck list arrives either way — but nothing
+        // was ever written to localStorage, so the next hello (the deck
+        // socket opened the moment a deck is tapped) carried no token and
+        // the server correctly asked for approval a second time. That's the
+        // approve-twice-on-first-connect bug: one prompt for the lobby, one
+        // for the deck, with only the second one actually sticking.
+        setDeviceToken(message.token)
+        set({ devicePending: false })
       } else if (message.type === 'device:approval-requested') {
         set((s) => ({
           pendingApprovals: [...s.pendingApprovals.filter((d) => d.id !== message.device.id), message.device]

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useDashboardStore } from '../store'
+import { useConfirmStore } from '../confirmStore'
 import { useEscapeToClose } from '../useEscapeToClose'
 
 // Approved devices — split out of the old monolithic SettingsModal into its
@@ -9,7 +10,21 @@ export function DevicesModal({ onClose }: { onClose: () => void }): React.JSX.El
   const approvedDevices = useDashboardStore((s) => s.approvedDevices)
   const requestApprovedDevices = useDashboardStore((s) => s.requestApprovedDevices)
   const revokeDeviceApproval = useDashboardStore((s) => s.revokeDeviceApproval)
+  const confirm = useConfirmStore((s) => s.confirm)
   useEscapeToClose(onClose)
+
+  // Confirmed like every other destructive action in the app: this drops the
+  // device's current session as well as its stored approval, so the person
+  // holding that tablet is kicked back to the approval wait screen and needs
+  // someone at the desktop to let them back in. Easy to hit by accident in a
+  // list of similar-looking rows.
+  async function confirmRevoke(deviceId: string, name: string): Promise<void> {
+    const ok = await confirm(
+      `Revoke access for "${name}"? It will be disconnected immediately and will need approving again to reconnect.`,
+      { confirmLabel: 'Revoke' }
+    )
+    if (ok) revokeDeviceApproval(deviceId)
+  }
 
   useEffect(() => {
     requestApprovedDevices()
@@ -39,7 +54,7 @@ export function DevicesModal({ onClose }: { onClose: () => void }): React.JSX.El
                 {approvedDevices.map((device) => (
                   <li key={device.id} className="settings-modal__device-row">
                     <span className="settings-modal__device-name">{device.name}</span>
-                    <button type="button" className="device-approval-card__deny" onClick={() => revokeDeviceApproval(device.id)}>
+                    <button type="button" className="device-approval-card__deny" onClick={() => void confirmRevoke(device.id, device.name)}>
                       Revoke
                     </button>
                   </li>
