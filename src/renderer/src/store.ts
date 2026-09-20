@@ -287,7 +287,10 @@ interface DashboardStore {
   restoreDashboard: (dashboard: Dashboard) => void
   updateDashboardMeta: (
     fields: Partial<
-      Pick<Dashboard, 'name' | 'backgroundColor' | 'backgroundColorExpr' | 'backgroundFit' | 'backgroundAnchor' | 'variables' | 'plugins'>
+      Pick<
+        Dashboard,
+        'name' | 'backgroundColor' | 'backgroundColorExpr' | 'backgroundFit' | 'backgroundAnchor' | 'variables' | 'plugins' | 'globalActions'
+      >
     >
   ) => void
   uploadBackgroundImage: (dataUrl: string) => void

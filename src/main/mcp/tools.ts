@@ -18,7 +18,7 @@
 import { randomUUID } from 'node:crypto'
 import type { BrowserWindow } from 'electron'
 import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { Dashboard, DeckSummary, Plugin, ServerToClient, Widget, WidgetEventKind } from '../../shared/types'
+import type { Dashboard, DeckSummary, GlobalAction, Plugin, ServerToClient, Widget, WidgetEventKind } from '../../shared/types'
 import type { DeckRoom } from '../index'
 import type { AppSettings } from '../appSettings'
 import { getAppSettings } from '../appSettings'
@@ -136,6 +136,7 @@ function requireEditorWindowOnDeck(deps: McpDeps, deckId: string): BrowserWindow
 function buildTools(): ToolDef[] {
   const widgetRef = refProperty(MCP_SCHEMAS.Widget)
   const pluginRef = refProperty(MCP_SCHEMAS.Plugin)
+  const globalActionRef = refProperty(MCP_SCHEMAS.GlobalAction)
 
   return [
     {
@@ -277,6 +278,73 @@ function buildTools(): ToolDef[] {
         const subDeckId = widgetSubDeckId(room.dashboard, widgetId)
         const widgets = getSubDeckWidgets(room.dashboard, subDeckId).filter((w) => w.id !== widgetId)
         deps.applyDashboardUpdate(room, setSubDeckWidgets(room.dashboard, subDeckId, widgets), true)
+        return textResult({ ok: true })
+      }
+    },
+    {
+      tool: {
+        name: 'list_global_actions',
+        description:
+          "List a deck's global actions — deck-wide if/then rules that run in the app itself (not on a connected device) whenever one of their watched variables changes.",
+        inputSchema: objectSchema({ deckId: DECK_ID_PROP }, ['deckId'])
+      },
+      handler: (deps, args) => textResult(requireRoom(deps, args.deckId).dashboard.globalActions ?? [])
+    },
+    {
+      tool: {
+        name: 'create_global_action',
+        description:
+          "Add a global action to a deck. `watch` lists the variable names that re-check the rule (like a useEffect dependency array — a variable the condition reads but that isn't listed here will NOT re-check it). `trigger: 'change'` fires only when the condition flips false->true; 'always' fires on every watched change while it's true. globalAction.id is generated if omitted.",
+        inputSchema: objectSchema({ deckId: DECK_ID_PROP, globalAction: globalActionRef.schema }, ['deckId', 'globalAction'], globalActionRef.definitions)
+      },
+      handler: (deps, args) => {
+        const room = requireRoom(deps, args.deckId)
+        const raw = args.globalAction
+        if (!raw || typeof raw !== 'object') throw new McpToolError('globalAction is required')
+        const globalAction = { id: randomUUID(), ...(raw as object) } as GlobalAction
+        const globalActions = [...(room.dashboard.globalActions ?? []), globalAction]
+        deps.applyDashboardUpdate(room, { ...room.dashboard, globalActions }, true)
+        return textResult(globalAction)
+      }
+    },
+    {
+      tool: {
+        name: 'update_global_action',
+        description: 'Patch fields on an existing global action by id (name, enabled, watch, condition, trigger, steps).',
+        inputSchema: objectSchema(
+          {
+            deckId: DECK_ID_PROP,
+            globalActionId: { type: 'string' },
+            patch: { type: 'object', description: 'Partial global action fields to merge in.', additionalProperties: true }
+          },
+          ['deckId', 'globalActionId', 'patch']
+        )
+      },
+      handler: (deps, args) => {
+        const room = requireRoom(deps, args.deckId)
+        const globalActionId = requireString(args, 'globalActionId')
+        const patch = args.patch
+        if (!patch || typeof patch !== 'object') throw new McpToolError('patch must be an object')
+        const existing = (room.dashboard.globalActions ?? []).find((r) => r.id === globalActionId)
+        if (!existing) throw new McpToolError(`Unknown global action: ${globalActionId}`)
+        const updated = { ...existing, ...(patch as Record<string, unknown>), id: existing.id } as GlobalAction
+        const globalActions = (room.dashboard.globalActions ?? []).map((r) => (r.id === globalActionId ? updated : r))
+        deps.applyDashboardUpdate(room, { ...room.dashboard, globalActions }, true)
+        return textResult(updated)
+      }
+    },
+    {
+      tool: {
+        name: 'delete_global_action',
+        description: 'Delete a global action from a deck by id.',
+        inputSchema: objectSchema({ deckId: DECK_ID_PROP, globalActionId: { type: 'string' } }, ['deckId', 'globalActionId'])
+      },
+      handler: (deps, args) => {
+        const room = requireRoom(deps, args.deckId)
+        const globalActionId = requireString(args, 'globalActionId')
+        const existing = room.dashboard.globalActions ?? []
+        if (!existing.some((r) => r.id === globalActionId)) throw new McpToolError(`Unknown global action: ${globalActionId}`)
+        deps.applyDashboardUpdate(room, { ...room.dashboard, globalActions: existing.filter((r) => r.id !== globalActionId) }, true)
         return textResult({ ok: true })
       }
     },

@@ -434,6 +434,48 @@ function VisibilityField({
   )
 }
 
+// One labelled expression field: a minimal CodeEditor plus the same
+// expand-to-modal affordance colorExpr/visibleExpr already have (see
+// VisibleField just above, whose inline copy of this shape it mirrors).
+//
+// Extracted rather than repeated because the fourteen widget-specific
+// expression fields this replaced — rotateAngleExpr on five widget types,
+// both gauges' valueExpr, both tick sets' labelTextExpr, the encoder/adjuster
+// rest values, guardOpenExpr — all needed byte-identical wrappers, and
+// several of them render inside a .map() where a single `expanded` flag held
+// by the parent couldn't say WHICH row was expanded.
+function ExpressionField({
+  label,
+  value,
+  onChange,
+  placeholder
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <>
+      {/* A div, not a <label> — see VisibleField's own comment: CodeEditor
+          nests its own focusable input, and a wrapping <label> would
+          synthesize a second click on the field's first labelable
+          descendant every time you clicked into the editor. */}
+      <div className="properties__field">
+        <span>{label}</span>
+        <div className="color-picker-button__expr-editor-wrap">
+          <CodeEditor value={value} onChange={onChange} placeholder={placeholder} minimal />
+          <button type="button" className="color-picker-button__expand" title="Expand" onClick={() => setExpanded(true)}>
+            ⤢
+          </button>
+        </div>
+      </div>
+      {expanded && <ExpressionEditorModal value={value} onChange={onChange} placeholder={placeholder} onClose={() => setExpanded(false)} />}
+    </>
+  )
+}
+
 function LabelFields({
   label,
   backgroundColor,
@@ -1404,7 +1446,11 @@ function SequenceStepFields({
 // widget-states tabs' dragStateIndex/handleReorderState below, scoped per
 // instance rather than shared, since Press/Release/Move each reorder
 // independently.
-function EventSequenceEditor({
+// Exported for GlobalActionsModal.tsx, which reuses this wholesale for a
+// deck-wide rule's own action list — everything it needs beyond these props
+// (sub-decks, REST targets, enabled plugins) is read from the store by
+// ActionFields itself, so nothing widget-specific has to be faked.
+export function EventSequenceEditor({
   title,
   steps,
   onChange,
@@ -3226,16 +3272,12 @@ export function PropertiesPanel(): React.JSX.Element {
             </div>
           </label>
           {line.rotateAngleExpr !== undefined && (
-            <label className="properties__field">
-              <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={2}
-                placeholder="return variables.my_variable;"
-                value={line.rotateAngleExpr ?? ''}
-                onChange={(e) => patchLine({ rotateAngleExpr: e.target.value })}
-              />
-            </label>
+            <ExpressionField
+              label="Expression"
+              value={line.rotateAngleExpr ?? ''}
+              onChange={(code) => patchLine({ rotateAngleExpr: code })}
+              placeholder="return variables.my_variable;"
+            />
           )}
           <p className="properties__hint">
             The resize handle only ever changes length (W) — angle it away from horizontal with rotation instead of resizing H.
@@ -3366,16 +3408,12 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
           </div>
 
-          <label className="properties__field">
-            <span>Value</span>
-            <textarea
-              className="properties__code"
-              rows={3}
-              placeholder="return variables.my_variable ?? 0;"
-              value={gauge.valueExpr}
-              onChange={(e) => patchGauge({ valueExpr: e.target.value })}
-            />
-          </label>
+          <ExpressionField
+            label="Value"
+            value={gauge.valueExpr}
+            onChange={(code) => patchGauge({ valueExpr: code })}
+            placeholder="return variables.my_variable ?? 0;"
+          />
           <p className="properties__hint">
             JS function body — <code>variables</code> holds every variable&rsquo;s current value. Must return a number; anything else
             falls back to Min.
@@ -3605,16 +3643,12 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
           </div>
 
-          <label className="properties__field">
-            <span>Value</span>
-            <textarea
-              className="properties__code"
-              rows={3}
-              placeholder="return variables.my_variable ?? 0;"
-              value={gauge.valueExpr}
-              onChange={(e) => patchGauge({ valueExpr: e.target.value })}
-            />
-          </label>
+          <ExpressionField
+            label="Value"
+            value={gauge.valueExpr}
+            onChange={(code) => patchGauge({ valueExpr: code })}
+            placeholder="return variables.my_variable ?? 0;"
+          />
           <p className="properties__hint">
             JS function body — <code>variables</code> holds every variable&rsquo;s current value. Must return a number; anything else
             falls back to Min.
@@ -3815,16 +3849,12 @@ export function PropertiesPanel(): React.JSX.Element {
                           onChange={(e) => patchTickSet(tickSet.id, { labelDistance: Number(e.target.value) })}
                         />
                       </label>
-                      <label className="properties__field">
-                        <span>Label expression (optional)</span>
-                        <textarea
-                          className="properties__code"
-                          rows={2}
-                          placeholder="return variables.$value.toFixed(1) + ' kt';"
-                          value={tickSet.labelTextExpr ?? ''}
-                          onChange={(e) => patchTickSet(tickSet.id, { labelTextExpr: e.target.value || undefined })}
-                        />
-                      </label>
+                      <ExpressionField
+                        label="Label expression (optional)"
+                        value={tickSet.labelTextExpr ?? ''}
+                        onChange={(code) => patchTickSet(tickSet.id, { labelTextExpr: code || undefined })}
+                        placeholder="return variables.$value.toFixed(1) + ' kt';"
+                      />
                       <p className="properties__hint">
                         Overrides Label decimals — this tick's own already-computed value is available as variables.$value (its index in
                         the set as variables.$index), alongside every real Variable.
@@ -4345,16 +4375,12 @@ export function PropertiesPanel(): React.JSX.Element {
             </div>
           </label>
           {adjuster.rotateAngleExpr !== undefined && (
-            <label className="properties__field">
-              <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={2}
-                placeholder="return variables.my_variable;"
-                value={adjuster.rotateAngleExpr ?? ''}
-                onChange={(e) => patchAdjuster({ rotateAngleExpr: e.target.value })}
-              />
-            </label>
+            <ExpressionField
+              label="Expression"
+              value={adjuster.rotateAngleExpr ?? ''}
+              onChange={(code) => patchAdjuster({ rotateAngleExpr: code })}
+              placeholder="return variables.my_variable;"
+            />
           )}
           <p className="properties__hint">
             Spins the whole widget in place — the slider AND every one of its own labels together, unlike RockerSwitchWidget/
@@ -4861,16 +4887,12 @@ export function PropertiesPanel(): React.JSX.Element {
                         onChange={(e) => patchTickSet(tickSet.id, { labelDistance: Number(e.target.value) })}
                       />
                     </label>
-                    <label className="properties__field">
-                      <span>Label expression (optional)</span>
-                      <textarea
-                        className="properties__code"
-                        rows={2}
-                        placeholder="return variables.$value.toFixed(1) + ' kt';"
-                        value={tickSet.labelTextExpr ?? ''}
-                        onChange={(e) => patchTickSet(tickSet.id, { labelTextExpr: e.target.value || undefined })}
-                      />
-                    </label>
+                    <ExpressionField
+                      label="Label expression (optional)"
+                      value={tickSet.labelTextExpr ?? ''}
+                      onChange={(code) => patchTickSet(tickSet.id, { labelTextExpr: code || undefined })}
+                      placeholder="return variables.$value.toFixed(1) + ' kt';"
+                    />
                     <p className="properties__hint">
                       Overrides Label decimals — this tick's own already-computed value is available as variables.$value (its index in
                       the set as variables.$index), alongside every real Variable.
@@ -4919,16 +4941,12 @@ export function PropertiesPanel(): React.JSX.Element {
             </div>
           </label>
           {adjuster.rotateAngleExpr !== undefined && (
-            <label className="properties__field">
-              <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={2}
-                placeholder="return variables.my_variable;"
-                value={adjuster.rotateAngleExpr ?? ''}
-                onChange={(e) => patchAdjuster({ rotateAngleExpr: e.target.value })}
-              />
-            </label>
+            <ExpressionField
+              label="Expression"
+              value={adjuster.rotateAngleExpr ?? ''}
+              onChange={(code) => patchAdjuster({ rotateAngleExpr: code })}
+              placeholder="return variables.my_variable;"
+            />
           )}
           <p className="properties__hint">
             Spins the whole widget in place — the knob AND every one of its own labels together, unlike RockerSwitchWidget/
@@ -5113,16 +5131,12 @@ export function PropertiesPanel(): React.JSX.Element {
             widget has no fixed range: DCS owns the real position, this just reports "turned one detent" (fixed_step INC/DEC).
           </p>
 
-          <label className="properties__field">
-            <span>Rest value (optional)</span>
-            <textarea
-              className="properties__code"
-              rows={2}
-              placeholder="return variables.my_variable;"
-              value={encoder.valueExpr ?? ''}
-              onChange={(e) => patchEncoder({ valueExpr: e.target.value || undefined })}
-            />
-          </label>
+          <ExpressionField
+            label="Rest value (optional)"
+            value={encoder.valueExpr ?? ''}
+            onChange={(code) => patchEncoder({ valueExpr: code || undefined })}
+            placeholder="return variables.my_variable;"
+          />
           <p className="properties__hint">
             Where the grip points (in degrees, 0 = up) while not being dragged — e.g. reflect a variable back into the visual. Pair
             with a Turn CW/CCW action below that nudges that same variable by the step size. Falls back to 0 if unset.
@@ -5516,16 +5530,12 @@ export function PropertiesPanel(): React.JSX.Element {
             </div>
           </label>
           {sw.rotateAngleExpr !== undefined && (
-            <label className="properties__field">
-              <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={2}
-                placeholder="return variables.my_variable;"
-                value={sw.rotateAngleExpr ?? ''}
-                onChange={(e) => patchSwitch({ rotateAngleExpr: e.target.value })}
-              />
-            </label>
+            <ExpressionField
+              label="Expression"
+              value={sw.rotateAngleExpr ?? ''}
+              onChange={(code) => patchSwitch({ rotateAngleExpr: code })}
+              placeholder="return variables.my_variable;"
+            />
           )}
           <p className="properties__hint">
             Spins the shape/segments and each position&rsquo;s own labels together. The widget&rsquo;s own Labels below (a legend/title)
@@ -6176,16 +6186,12 @@ export function PropertiesPanel(): React.JSX.Element {
                 </div>
               </label>
               {isGuardOpenExpr && (
-                <label className="properties__field">
-                  <span>Expression</span>
-                  <textarea
-                    className="properties__code"
-                    rows={2}
-                    placeholder={GUARD_OPEN_EXPR_PLACEHOLDER}
-                    value={sw.guardOpenExpr ?? ''}
-                    onChange={(e) => patchSwitch({ guardOpenExpr: e.target.value })}
-                  />
-                </label>
+                <ExpressionField
+                  label="Expression"
+                  value={sw.guardOpenExpr ?? ''}
+                  onChange={(code) => patchSwitch({ guardOpenExpr: code })}
+                  placeholder={GUARD_OPEN_EXPR_PLACEHOLDER}
+                />
               )}
             </>
           )}
@@ -6279,16 +6285,12 @@ export function PropertiesPanel(): React.JSX.Element {
             </div>
           </label>
           {sw.rotateAngleExpr !== undefined && (
-            <label className="properties__field">
-              <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={2}
-                placeholder="return variables.my_variable;"
-                value={sw.rotateAngleExpr ?? ''}
-                onChange={(e) => patchSwitch({ rotateAngleExpr: e.target.value })}
-              />
-            </label>
+            <ExpressionField
+              label="Expression"
+              value={sw.rotateAngleExpr ?? ''}
+              onChange={(code) => patchSwitch({ rotateAngleExpr: code })}
+              placeholder="return variables.my_variable;"
+            />
           )}
           <p className="properties__hint">
             Spins the whole switch — bezel/lever/guard, each position&rsquo;s own labels, AND the widget&rsquo;s own Labels below —
@@ -6600,16 +6602,12 @@ export function PropertiesPanel(): React.JSX.Element {
             </div>
           </label>
           {sw.rotateAngleExpr !== undefined && (
-            <label className="properties__field">
-              <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={2}
-                placeholder="return variables.my_variable;"
-                value={sw.rotateAngleExpr ?? ''}
-                onChange={(e) => patchSwitch({ rotateAngleExpr: e.target.value })}
-              />
-            </label>
+            <ExpressionField
+              label="Expression"
+              value={sw.rotateAngleExpr ?? ''}
+              onChange={(code) => patchSwitch({ rotateAngleExpr: code })}
+              placeholder="return variables.my_variable;"
+            />
           )}
           <p className="properties__hint">
             Spins the whole dial — face/needle, every detent and its own label, AND the widget&rsquo;s own Labels below — together.
@@ -7897,20 +7895,18 @@ export function PropertiesPanel(): React.JSX.Element {
                 (0–100) — see the Move action below.
               </p>
               {widget.sliderEnabled && (
-                <label className="properties__field">
-                  <span>Rest value (optional)</span>
-                  <textarea
-                    className="properties__code"
-                    rows={2}
-                    placeholder="return variables.my_variable;"
+                <>
+                  <ExpressionField
+                    label="Rest value (optional)"
                     value={widget.valueExpr ?? ''}
-                    onChange={(e) => patch({ valueExpr: e.target.value || undefined })}
+                    onChange={(code) => patch({ valueExpr: code || undefined })}
+                    placeholder="return variables.my_variable;"
                   />
                   <p className="properties__hint">
                     Where the handle sits while not being dragged, 0–100 — e.g. reflect a variable back into the visual.
                     Falls back to 0 if unset.
                   </p>
-                </label>
+                </>
               )}
             </>
           )}
@@ -7949,16 +7945,12 @@ export function PropertiesPanel(): React.JSX.Element {
             </div>
           </label>
           {widget.rotateAngleExpr !== undefined && (
-            <label className="properties__field">
-              <span>Expression</span>
-              <textarea
-                className="properties__code"
-                rows={2}
-                placeholder="return variables.my_variable;"
-                value={widget.rotateAngleExpr ?? ''}
-                onChange={(e) => patch({ rotateAngleExpr: e.target.value })}
-              />
-            </label>
+            <ExpressionField
+              label="Expression"
+              value={widget.rotateAngleExpr ?? ''}
+              onChange={(code) => patch({ rotateAngleExpr: code })}
+              placeholder="return variables.my_variable;"
+            />
           )}
           <p className="properties__hint">
             Spins the whole button, including its labels, in place. Falls back to the fixed angle if the expression is unset or

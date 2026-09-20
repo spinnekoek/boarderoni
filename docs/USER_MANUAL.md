@@ -24,7 +24,8 @@ are captured from the app.
 11. [Settings](#11-settings)
 12. [REST webhook targets (optional/advanced)](#12-rest-webhook-targets-optionaladvanced)
 13. [DCS-BIOS setup (optional/advanced)](#13-dcs-bios-setup-optionaladvanced)
-14. [Troubleshooting / FAQ](#14-troubleshooting--faq)
+14. [Global actions](#14-global-actions)
+15. [Troubleshooting / FAQ](#15-troubleshooting--faq)
 
 ---
 
@@ -308,7 +309,50 @@ it:
    one (flip a switch, push a button, etc.) — both pick from the same
    per-aircraft catalog, searchable by name.
 
-## 14. Troubleshooting / FAQ
+## 14. Global actions
+
+Every action covered so far hangs off a widget — someone presses a button,
+turns a knob, flips a switch. **Global actions** are the deck-wide version:
+if/then rules that aren't attached to any widget and fire on their own when
+your data changes.
+
+Open them from **Global Actions** in the toolbar. Each rule has four parts:
+
+- **Runs when these change** — the variables the rule watches. The rule only
+  re-checks when one of these changes, which is what keeps a deck fed by a
+  fast source (DCS-BIOS can update hundreds of fields a second) from
+  re-running every rule on every update. If you've used React, this is the
+  same idea as a `useEffect` dependency array.
+- **Condition** — a JS function body returning true or false, with the usual
+  `variables.NAME` access.
+- **Fire** — *when the condition becomes true* runs the actions once on the
+  false → true transition, then re-arms when it goes back to false. *Every
+  time a watched variable changes* runs them on every change for as long as
+  the condition holds.
+- **Actions** — the same action/delay/condition sequence editor used for
+  widget events, so anything a button can do, a rule can do.
+
+For example, a low-fuel warning: watch `fuel`, condition
+`return variables.fuel < 1000;`, and an Update State action setting
+`{ fuel_warning: true }` that a label's color expression reads.
+
+Two things worth knowing:
+
+- Rules run **in the app itself**, not on a connected device — so they fire
+  whether or not anyone has the deck open on a tablet, and they fire once
+  rather than once per connected device.
+- A rule can set a variable another rule watches, and that second rule runs
+  immediately in the same pass. Rules are evaluated **top to bottom in the
+  order listed**, so use the ↑/↓ buttons if one needs to run before another.
+  If two rules end up undoing each other forever, Boarderoni stops after ten
+  rounds and logs a message to the debug **Console** naming the variables
+  still in play, rather than hanging.
+
+If the condition reads a variable that isn't in the watch list, the modal
+flags it with an **Add it** button — the rule would otherwise look correct
+and silently never fire, which is a miserable thing to debug.
+
+## 15. Troubleshooting / FAQ
 
 - **A device won't connect** — check it's on the same local network as the
   desktop, and that it's been approved (see [Devices & approval](#10-devices--approval)).

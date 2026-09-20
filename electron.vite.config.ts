@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import type { Plugin } from 'vite'
+import { SERVER_PORT } from './src/shared/constants'
 
 // Computed once per process (dev server start, or once per `electron-vite
 // build`) — every response during that run gets the same value (no
@@ -64,6 +65,16 @@ export default defineConfig({
     root: 'src/renderer',
     server: {
       host: true,
+      // Nothing loads the renderer from this port directly any more — the
+      // app's own server on SERVER_PORT proxies to it (see
+      // proxyRequestToDevServer in main/index.ts), so that dev and a
+      // packaged build both serve page and API from one origin. Vite's
+      // injected HMR client would otherwise dial this port straight, going
+      // around the proxy and putting 5173 back in play, so it's pointed at
+      // the proxy instead; main/index.ts forwards the upgrade back here.
+      hmr: {
+        clientPort: SERVER_PORT
+      },
       // Kiosk-mode WebViews (Fully Kiosk Browser in particular) have been
       // seen caching aggressively enough to survive a full app restart when
       // no cache directive is present — force every request in dev mode to

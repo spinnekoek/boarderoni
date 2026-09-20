@@ -8,6 +8,7 @@ import { displayDeviceName } from '@shared/deviceName'
 import { VariablesModal } from './VariablesModal'
 import { PluginsModal } from './PluginsModal'
 import { EventSourcesModal } from './EventSourcesModal'
+import { GlobalActionsModal } from './GlobalActionsModal'
 import { FontsModal } from './FontsModal'
 import { DevicesModal } from './DevicesModal'
 import { MobileAppModal } from './MobileAppModal'
@@ -16,6 +17,7 @@ import { ScreenSwitcher } from './ScreenSwitcher'
 export function Toolbar(): React.JSX.Element {
   const [variablesOpen, setVariablesOpen] = useState(false)
   const [eventSourcesOpen, setEventSourcesOpen] = useState(false)
+  const [globalActionsOpen, setGlobalActionsOpen] = useState(false)
   const [fontsOpen, setFontsOpen] = useState(false)
   const [devicesOpen, setDevicesOpen] = useState(false)
   const [mobileAppOpen, setMobileAppOpen] = useState(false)
@@ -123,6 +125,9 @@ export function Toolbar(): React.JSX.Element {
       <button type="button" className="toolbar__button" onClick={() => setEventSourcesOpen(true)}>
         Event Sources
       </button>
+      <button type="button" className="toolbar__button" onClick={() => setGlobalActionsOpen(true)}>
+        Global Actions
+      </button>
       <button type="button" className="toolbar__button" onClick={() => setFontsOpen(true)}>
         Fonts
       </button>
@@ -135,6 +140,7 @@ export function Toolbar(): React.JSX.Element {
       {mobileAppOpen && <MobileAppModal onClose={() => setMobileAppOpen(false)} />}
       {pluginsOpen && <PluginsModal onClose={closePluginsModal} />}
       {eventSourcesOpen && <EventSourcesModal onClose={() => setEventSourcesOpen(false)} />}
+      {globalActionsOpen && <GlobalActionsModal onClose={() => setGlobalActionsOpen(false)} />}
       {fontsOpen && <FontsModal onClose={() => setFontsOpen(false)} />}
       {devicesOpen && <DevicesModal onClose={() => setDevicesOpen(false)} />}
       {variablesOpen && <VariablesModal onClose={() => setVariablesOpen(false)} />}

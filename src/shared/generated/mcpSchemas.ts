@@ -3335,5 +3335,463 @@ export const MCP_SCHEMAS = {
         "additionalProperties": false
       }
     }
+  },
+  "GlobalAction": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$ref": "#/definitions/GlobalAction",
+    "definitions": {
+      "GlobalAction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "watch": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "condition": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "change",
+              "always"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/SequenceStep"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "watch",
+          "condition",
+          "trigger",
+          "steps"
+        ],
+        "additionalProperties": false
+      },
+      "SequenceStep": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/DelayStep"
+          },
+          {
+            "$ref": "#/definitions/ActionStep"
+          },
+          {
+            "$ref": "#/definitions/ConditionStep"
+          }
+        ]
+      },
+      "DelayStep": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "delay"
+          },
+          "id": {
+            "type": "string"
+          },
+          "delayMs": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "delayMs"
+        ],
+        "additionalProperties": false
+      },
+      "ActionStep": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "action"
+          },
+          "id": {
+            "type": "string"
+          },
+          "action": {
+            "$ref": "#/definitions/WidgetAction"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "WidgetAction": {
+        "anyOf": [
+          {
+            "$ref": "#/definitions/NoneAction"
+          },
+          {
+            "$ref": "#/definitions/KeypressAction"
+          },
+          {
+            "$ref": "#/definitions/UpdateStateAction"
+          },
+          {
+            "$ref": "#/definitions/SendDcsCommandAction"
+          },
+          {
+            "$ref": "#/definitions/NavigateSubDeckAction"
+          },
+          {
+            "$ref": "#/definitions/OpenOverlayAction"
+          },
+          {
+            "$ref": "#/definitions/CloseOverlayAction"
+          },
+          {
+            "$ref": "#/definitions/CallRestAction"
+          },
+          {
+            "$ref": "#/definitions/SetWindowsAudioAction"
+          }
+        ]
+      },
+      "NoneAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "none"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "KeypressAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "keypress"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "press",
+              "down",
+              "up"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "keys"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateStateAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "update-state"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "SendDcsCommandAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "send-dcs-command"
+          },
+          "aircraft": {
+            "type": "string"
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "interface": {
+            "$ref": "#/definitions/DcsBiosInputInterface"
+          },
+          "argument": {
+            "type": "string"
+          },
+          "argumentExpr": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "aircraft",
+          "identifier",
+          "interface",
+          "argument"
+        ],
+        "additionalProperties": false
+      },
+      "DcsBiosInputInterface": {
+        "type": "string",
+        "enum": [
+          "set_state",
+          "fixed_step",
+          "action",
+          "variable_step"
+        ]
+      },
+      "NavigateSubDeckAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "navigate-subdeck"
+          },
+          "target": {
+            "$ref": "#/definitions/SubDeckTarget"
+          }
+        },
+        "required": [
+          "kind",
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "SubDeckTarget": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "main-deck"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "sub-deck"
+              },
+              "subDeckId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "subDeckId"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "OpenOverlayAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "open-overlay"
+          },
+          "subDeckId": {
+            "type": "string"
+          },
+          "edge": {
+            "$ref": "#/definitions/OverlayEdge"
+          },
+          "size": {
+            "type": "number"
+          },
+          "sizeUnit": {
+            "$ref": "#/definitions/OverlaySizeUnit"
+          }
+        },
+        "required": [
+          "kind",
+          "subDeckId",
+          "edge",
+          "size",
+          "sizeUnit"
+        ],
+        "additionalProperties": false
+      },
+      "OverlayEdge": {
+        "type": "string",
+        "enum": [
+          "top",
+          "bottom",
+          "left",
+          "right"
+        ]
+      },
+      "OverlaySizeUnit": {
+        "type": "string",
+        "enum": [
+          "px",
+          "percent"
+        ]
+      },
+      "CloseOverlayAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "close-overlay"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "CallRestAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "call-rest"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/CallRestPlaceholderValue"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "targetId",
+          "values"
+        ],
+        "additionalProperties": false
+      },
+      "CallRestPlaceholderValue": {
+        "type": "object",
+        "properties": {
+          "placeholder": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "expr": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "placeholder",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "SetWindowsAudioAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "set-windows-audio"
+          },
+          "deviceName": {
+            "type": "string"
+          },
+          "appName": {
+            "type": "string"
+          },
+          "volume": {
+            "type": "string"
+          },
+          "volumeExpr": {
+            "type": "string"
+          },
+          "muteAction": {
+            "type": "string",
+            "enum": [
+              "mute",
+              "unmute",
+              "toggle"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "deviceName"
+        ],
+        "additionalProperties": false
+      },
+      "ConditionStep": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "condition"
+          },
+          "id": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string"
+          },
+          "whenTrue": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/SequenceStep"
+            }
+          },
+          "whenFalse": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/SequenceStep"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "condition",
+          "whenTrue",
+          "whenFalse"
+        ],
+        "additionalProperties": false
+      }
+    }
   }
 } as const

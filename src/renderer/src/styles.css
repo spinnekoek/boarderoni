@@ -2229,23 +2229,6 @@ button.deck-morph-cell:focus-visible {
 	cursor: not-allowed;
 }
 
-.properties__code {
-	width: 100%;
-	box-sizing: border-box;
-	background: #14161b;
-	border: 1px solid #3a3f4a;
-	border-radius: 4px;
-	color: #e8e8ea;
-	padding: 8px;
-	font-size: 12px;
-	font-family: "JetBrains Mono", monospace;
-	/* Same reasoning as CodeEditor.tsx's CodeMirror theme — no ligature-merged
-     character pairs in code/expression text. */
-	font-variant-ligatures: none;
-	line-height: 1.5;
-	resize: vertical;
-}
-
 .text-align-grid {
 	display: grid;
 	grid-template-columns: repeat(3, 30px);
@@ -4540,6 +4523,15 @@ button.deck-morph-cell:focus-visible {
 	z-index: 100;
 }
 
+/* width/height are the STARTING size only — `resize: both` below lets the
+   user drag the bottom-right corner, which a long expression regularly
+   needs. Deliberately the browser's own resize grip rather than a hand-built
+   drag handle like .properties__scroll's: that one exists because a docked
+   panel resizes against a fixed edge, whereas this is a centered overlay
+   where native corner-dragging does the job with no JS at all. `overflow`
+   must be non-visible for `resize` to apply. The min-* values stop it being
+   dragged down to an unusable sliver. The last dragged size is persisted —
+   see getExprModalSize in id.ts. */
 .expr-modal {
 	display: flex;
 	flex-direction: column;
@@ -4551,6 +4543,10 @@ button.deck-morph-cell:focus-visible {
 	max-width: calc(100vw - 40px);
 	height: 480px;
 	max-height: calc(100vh - 80px);
+	min-width: 360px;
+	min-height: 240px;
+	resize: both;
+	overflow: hidden;
 	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
 
@@ -4715,4 +4711,180 @@ button.deck-morph-cell:focus-visible {
 
 .mobile-app-modal__copy:hover {
 	background: #343a46;
+}
+
+/* Reuses .variables-modal-overlay for the backdrop (see GlobalActionsModal.tsx)
+   but not .variables-modal itself — this one is a two-pane list/detail
+   layout and needs considerably more width than the single-column modals. */
+.global-actions-modal {
+	display: flex;
+	flex-direction: column;
+	background: #1c1f26;
+	border: 1px solid #2a2e37;
+	border-radius: 8px;
+	padding: 20px;
+	width: 1040px;
+	max-width: calc(100vw - 40px);
+	max-height: calc(100vh - 104px);
+	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+.global-actions-modal__body {
+	display: flex;
+	gap: 16px;
+	flex: 1;
+	min-height: 0;
+}
+
+.global-actions-modal__list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	width: 280px;
+	flex-shrink: 0;
+	overflow-y: auto;
+	padding-right: 12px;
+	border-right: 1px solid #2a2e37;
+}
+
+/* The selected rule's own fields, including the reused EventSequenceEditor
+   (see PropertiesPanel.tsx) — scrolls independently of the rule list beside
+   it, since a rule with a long action sequence is far taller than the list
+   ever gets. */
+.global-actions-modal__detail {
+	flex: 1;
+	min-width: 0;
+	overflow-y: auto;
+}
+
+.global-actions-modal__editor {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.global-actions-modal__row {
+	display: grid;
+	grid-template-columns: 1fr 22px 22px 22px;
+	gap: 4px;
+	align-items: center;
+}
+
+.global-actions-modal__row-name {
+	text-align: left;
+	padding: 6px 8px;
+	border-radius: 6px;
+	background: #22262e;
+	color: #e8e8ea;
+	border: 1px solid #2a2e37;
+	cursor: pointer;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.global-actions-modal__row--active .global-actions-modal__row-name {
+	border-color: #5b8def;
+}
+
+/* Dims a rule switched off via its own Enabled checkbox — it's still listed
+   and still exported, just skipped during evaluation. */
+.global-actions-modal__row--disabled .global-actions-modal__row-name {
+	opacity: 0.5;
+}
+
+.global-actions-modal__watch {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	align-items: center;
+	min-height: 28px;
+}
+
+.global-actions-modal__chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px;
+	border-radius: 12px;
+	background: #2a2e37;
+	border: 1px solid #3a3f4a;
+	font-size: 12px;
+}
+
+.global-actions-modal__chip button {
+	background: none;
+	border: none;
+	color: #9aa0ab;
+	cursor: pointer;
+	padding: 0;
+	line-height: 1;
+}
+
+.global-actions-modal__chip button:hover {
+	color: #e8e8ea;
+}
+
+.global-actions-modal__watch-add {
+	display: flex;
+	gap: 6px;
+	margin-top: 6px;
+}
+
+.global-actions-modal__watch-add input {
+	flex: 1;
+	min-width: 0;
+}
+
+/* Belt-and-braces with the input's own autoComplete="off" (see
+   GlobalActionsModal.tsx): Chromium paints an autofilled field with its own
+   pale background at a level a plain `background` declaration can't reach,
+   so the only reliable override is flooding the box with an inset shadow.
+   -webkit-text-fill-color, not `color`, for the same reason. */
+.global-actions-modal__watch-add input:-webkit-autofill,
+.global-actions-modal__watch-add input:-webkit-autofill:hover,
+.global-actions-modal__watch-add input:-webkit-autofill:focus {
+	-webkit-box-shadow: 0 0 0 1000px #14161b inset;
+	-webkit-text-fill-color: #e8e8ea;
+	caret-color: #e8e8ea;
+}
+
+/* The missing-dependency hint — see referencedVariables in
+   GlobalActionsModal.tsx. Amber rather than red: the rule still works
+   exactly as written, it just won't re-check as often as the author
+   probably intended. */
+.global-actions-modal__warning {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 10px;
+	border-radius: 6px;
+	background: rgba(214, 158, 46, 0.12);
+	border: 1px solid rgba(214, 158, 46, 0.4);
+	font-size: 12px;
+	color: #e8d3a8;
+}
+
+.global-actions-modal__warning button {
+	flex-shrink: 0;
+}
+
+/* Not .variables-modal__actions — that's a space-between row built for an
+   Add button and Close sharing one line, but Add lives in the rule list
+   column here, which left Close stacked directly under it with nothing
+   separating the two. This is a plain right-aligned footer, ruled off from
+   the two panes above it. */
+.global-actions-modal__footer {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 16px;
+	padding-top: 14px;
+	border-top: 1px solid #2a2e37;
+}
+
+/* Keeps "+ Add global action" off the footer rule when the list is short —
+   the column is scrollable, so without this the button sits flush against
+   the border below it. */
+.global-actions-modal__list > .properties__file-button {
+	margin-top: 4px;
 }

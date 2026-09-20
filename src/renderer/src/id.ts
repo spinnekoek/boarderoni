@@ -166,6 +166,31 @@ export function setIgnoredVariableIds(ids: string[]): void {
   localStorage.setItem(IGNORED_VARIABLE_IDS_KEY, JSON.stringify(ids))
 }
 
+const EXPR_MODAL_SIZE_KEY = 'boarderoni-expr-modal-size'
+
+// The "Edit expression" modal's last dragged size (ExpressionEditorModal.tsx
+// — the modal is resizable via CSS `resize: both`, see .expr-modal in
+// styles.css). Same unmounted-on-close problem as the Variables filter
+// above: without this, a size dragged out for a long expression resets to
+// the 640x480 default on the very next open. Null means never resized —
+// the stylesheet's own default applies, rather than this hardcoding a
+// duplicate copy of it.
+export function getExprModalSize(): { width: number; height: number } | null {
+  const raw = localStorage.getItem(EXPR_MODAL_SIZE_KEY)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as { width?: unknown; height?: unknown }
+    if (typeof parsed.width !== 'number' || typeof parsed.height !== 'number') return null
+    return { width: parsed.width, height: parsed.height }
+  } catch {
+    return null
+  }
+}
+
+export function setExprModalSize(size: { width: number; height: number }): void {
+  localStorage.setItem(EXPR_MODAL_SIZE_KEY, JSON.stringify(size))
+}
+
 const LAST_DCS_AIRCRAFT_KEY = 'boarderoni-last-dcs-aircraft'
 
 // Which DCS-BIOS aircraft was last picked in ANY SendDcsCommandActionEditor,

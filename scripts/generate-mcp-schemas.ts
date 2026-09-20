@@ -1,5 +1,5 @@
 // Generates JSON Schema for the MCP server's tool input shapes directly from
-// shared/types.ts's own exported Widget/WidgetAction/Variable/Plugin types —
+// shared/types.ts's own exported Widget/Variable/Plugin/GlobalAction types —
 // the single source of truth the docs/TODO.md item for this feature asked
 // for, so a new widget type or field is picked up here automatically next
 // run instead of drifting against a hand-maintained second description of
@@ -14,7 +14,7 @@ import { createGenerator } from 'ts-json-schema-generator'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const TYPES = ['Widget', 'Variable', 'Plugin'] as const
+const TYPES = ['Widget', 'Variable', 'Plugin', 'GlobalAction'] as const
 
 const outPath = join(__dirname, '../src/shared/generated/mcpSchemas.ts')
 

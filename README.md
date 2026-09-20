@@ -44,6 +44,8 @@ development:
 - **Expressions everywhere** — nearly every visual property (color, text,
   position, value, active state, ...) can be a small JS expression reading
   live variables instead of a fixed value.
+- **Global actions** — deck-wide if/then rules that fire on their own when a
+  watched variable changes, with no widget and no connected device involved.
 - **Custom fonts**, multiple screens per deck (sub-decks) with in-editor
   navigation, and a live variables system synced in real time to every
   connected device.

@@ -245,6 +245,44 @@ export type SequenceStep = DelayStep | ActionStep | ConditionStep
 // of its branches.
 export type StepPath = { index: number; branch?: 'whenTrue' | 'whenFalse' }[]
 
+// A deck-wide "if this, then that" rule, not attached to any widget — see
+// runGlobalActions in main/index.ts. Closely modelled on a React useEffect:
+// `watch` is the dependency array, `condition` + `steps` are the body, and
+// `trigger: 'change'` is the "only re-run when a dep actually changed" part.
+//
+// Deliberately NOT expressed as a widget's own SequenceStep[] starting with
+// a ConditionStep, even though that would be representable today: edge
+// triggering needs one well-defined boolean per rule to compare against the
+// previous evaluation, and a condition nested somewhere mid-sequence has no
+// such single answer. Nested ConditionSteps still work inside `steps` for
+// finer branching underneath this top-level one.
+export interface GlobalAction {
+  id: string
+  name: string
+  // Off keeps the rule in the list (and in the deck export) but skips it
+  // entirely during evaluation — the "comment this out while I debug"
+  // affordance, rather than having to delete and rewrite it.
+  enabled: boolean
+  // Variable NAMES (not ids — same by-name convention PluginMapping.
+  // variableName uses, and what expressions themselves reference). A rule
+  // only re-evaluates when one of these changes, so a deck fed by DCS-BIOS
+  // at hundreds of updates a second doesn't re-run every rule's condition on
+  // every field. Empty means "never fires on its own" rather than "fires on
+  // everything" — an unscoped rule would reintroduce exactly the cost this
+  // exists to avoid.
+  watch: string[]
+  // JS function body returning truthy/falsy, evaluated exactly like a
+  // ConditionStep's own (see evaluateGlobalCondition in main/index.ts).
+  condition: string
+  // 'change' fires only when the condition flips falsy → truthy, and re-arms
+  // when it goes back falsy. 'always' fires on every evaluation the watch
+  // list triggers, condition permitting — which, for a condition that stays
+  // true, means once per incoming variable change, NOT once per cascade
+  // round (see runGlobalActions).
+  trigger: 'change' | 'always'
+  steps: SequenceStep[]
+}
+
 // Which interaction moments a widget can attach a sequence to. Only
 // AdjusterWidget uses 'move' (continuous, while dragging); 'increment'/
 // 'decrement' are EncoderWidget's own (one per completed step of rotation)
@@ -2217,6 +2255,11 @@ export interface Dashboard {
   // normalized to [] once at load time (see loadDeckDashboard in
   // main/index.ts).
   plugins?: Plugin[]
+  // Deck-wide if/then rules — see GlobalAction. Same optional-for-old-
+  // dashboards treatment as `variables`/`plugins`, normalized to [] at load
+  // time. Evaluated in array order (the modal's list order), which is what
+  // decides which of two rules touching the same variable runs first.
+  globalActions?: GlobalAction[]
   widgets: Widget[]
   // Same optional-for-old-dashboards treatment as `variables`/`plugins`
   // above — normalized to [] once at load time (see loadDeckDashboard in

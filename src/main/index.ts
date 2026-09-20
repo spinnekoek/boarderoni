@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, screen, shell, Tray } from 'electron'
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
+import type { Duplex } from 'node:stream'
 import {
   readFile,
   readFileSync,
@@ -37,6 +38,7 @@ import {
   type DialSwitchWidget,
   type DropdownWidget,
   type ToggleSwitchWidget,
+  type GlobalAction,
   type Plugin,
   type ConditionStep,
   type KeypressAction,
@@ -531,6 +533,9 @@ function normalizeDashboard(loaded: Dashboard & { backgroundImage?: string; even
   // each sub-deck's own widgets need the same migrateWidget treatment the
   // main deck's widgets just got above.
   loaded.subDecks = (loaded.subDecks ?? []).map((sd) => ({ ...sd, widgets: sd.widgets.map(migrateWidget) }))
+  // Same normalization again for deck-wide rules, saved before GlobalAction
+  // existed — see runGlobalActionPass.
+  loaded.globalActions = loaded.globalActions ?? []
   return loaded
 }
 
@@ -646,6 +651,71 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): void {
     })
     res.end(data)
   })
+}
+
+// Dev-only reverse proxy onto Vite. `devServerUrl` is only ever set by
+// `electron-vite dev`, so in a packaged build neither of these is reachable
+// and serveStatic above answers the same requests from the built bundle
+// instead — the whole point being that both modes serve the renderer and
+// the API from one origin, so nothing downstream has to branch on which
+// mode is running.
+function proxyRequestToDevServer(req: IncomingMessage, res: ServerResponse): void {
+  const target = new URL(req.url ?? '/', devServerUrl)
+  const proxyReq = httpRequest(
+    {
+      hostname: target.hostname,
+      port: target.port,
+      path: target.pathname + target.search,
+      method: req.method,
+      // Rewritten so Vite's own host checks see a request addressed to
+      // itself rather than to SERVER_PORT.
+      headers: { ...req.headers, host: target.host }
+    },
+    (proxyRes) => {
+      res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers)
+      proxyRes.pipe(res)
+    }
+  )
+  proxyReq.on('error', (err) => {
+    // Normal during startup: the app's own server is listening before Vite
+    // has finished booting, so the first request or two can land early.
+    console.error('[boarderoni] dev proxy request failed', err)
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'text/plain' })
+      res.end('Vite dev server unreachable')
+    }
+  })
+  req.pipe(proxyReq)
+}
+
+// The HMR socket's half of the same proxy. Vite's injected client is
+// configured to dial SERVER_PORT (see `hmr.clientPort` in
+// electron.vite.config.ts) rather than Vite's own port, so this hands the
+// upgrade back to where it was actually going.
+function proxyUpgradeToDevServer(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  const target = new URL(req.url ?? '/', devServerUrl)
+  const proxyReq = httpRequest({
+    hostname: target.hostname,
+    port: target.port,
+    path: target.pathname + target.search,
+    method: req.method,
+    headers: { ...req.headers, host: target.host }
+  })
+  proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
+    const headerLines = Object.entries(proxyRes.headers)
+      .map(([key, value]) => (Array.isArray(value) ? value.map((v) => `${key}: ${v}\r\n`).join('') : `${key}: ${value}\r\n`))
+      .join('')
+    socket.write(`HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage}\r\n${headerLines}\r\n`)
+    if (proxyHead.length) proxySocket.unshift(proxyHead)
+    proxySocket.on('error', () => socket.destroy())
+    proxySocket.pipe(socket).pipe(proxySocket)
+  })
+  proxyReq.on('error', () => socket.destroy())
+  socket.on('error', () => proxyReq.destroy())
+  // Bytes the server already read past the request headers — put them back
+  // so the pipe set up above picks them up rather than dropping them.
+  if (head.length) socket.unshift(head)
+  proxyReq.end()
 }
 
 function serveBackgroundImage(res: ServerResponse, deckId: string): void {
@@ -935,6 +1005,35 @@ export interface DeckRoom {
   // in the deck-delete handler; otherwise lives as long as the room does
   // (rooms are never evicted, see the comment on `rooms` below).
   fileWatcher: FSWatcher | null
+  // Each GlobalAction's own condition result as of its last evaluation,
+  // keyed by rule id — what a `trigger: 'change'` rule compares against to
+  // spot a falsy → truthy edge. Absent means "never evaluated yet", which
+  // counts as falsy, so a rule whose condition is already true when the deck
+  // loads fires on its first qualifying variable change rather than staying
+  // silent forever.
+  globalActionConditions: Map<string, boolean>
+  // Variable names changed since the last global-action round, and whether
+  // any of them came from outside the rule engine itself (a plugin tick, a
+  // widget press, an MCP set_variables) rather than from another rule's own
+  // steps — see runGlobalActionPass, where the flag is what keeps a
+  // `trigger: 'always'` rule firing once per real incoming change instead of
+  // once per cascade round.
+  pendingGlobalVars: Set<string>
+  pendingGlobalExternal: boolean
+  // Whether a pass is mid-flight. A pass awaits (delay steps, REST calls),
+  // so more variable changes can land while it runs — those join
+  // pendingGlobalVars and are picked up by the running pass's next round
+  // instead of starting a second, concurrent pass over the same rules.
+  globalActionPassRunning: boolean
+  // Set while a rule's own steps are executing, so applyVariableUpdates can
+  // tell a rule-caused change apart from an external one without every
+  // caller having to say which it is. Held across the steps' awaits (delay
+  // steps, REST calls), so a genuinely external change landing in that
+  // window is counted as rule-caused — the only effect is that an 'always'
+  // rule can skip that one round and fire on the next change instead, which
+  // isn't worth threading an origin argument through every
+  // applyVariableUpdates call site to avoid.
+  inGlobalActionRun: boolean
 }
 // Keyed by deck id, lazily populated on first connection/reference (see
 // getOrLoadRoom) and never evicted — same always-resident philosophy the old
@@ -1050,7 +1149,12 @@ function getOrLoadRoom(deckId: string): DeckRoom | null {
     pluginStops: new Map(),
     dashboardSaveTimeout: null,
     lastWrittenJson,
-    fileWatcher: null
+    fileWatcher: null,
+    globalActionConditions: new Map(),
+    pendingGlobalVars: new Set(),
+    pendingGlobalExternal: false,
+    globalActionPassRunning: false,
+    inGlobalActionRun: false
   }
   rooms.set(deckId, room)
   syncPlugins(room)
@@ -1460,15 +1564,40 @@ const httpServer = createServer((req, res) => {
     return
   }
 
+  // In dev the renderer is Vite's to serve, not ours — forward anything
+  // that wasn't one of the app's own routes above to it, so the page and
+  // the API share an origin exactly as they do in a packaged build (where
+  // serveStatic below answers the same requests from the built bundle).
+  // Before this, dev answered these with a "go run npm start instead"
+  // placeholder and the renderer was loaded from Vite's port directly,
+  // which is what forced the webPort/dev mDNS split and the cross-origin
+  // CORS pass on /api/decks.
   if (devServerUrl) {
-    res.writeHead(200, { 'Content-Type': 'text/plain' })
-    res.end('boarderoni dev server: WS only in dev mode, run "npm run build && npm start" to serve the dashboard UI')
+    proxyRequestToDevServer(req, res)
     return
   }
   serveStatic(req, res)
 })
 
-const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
+// noServer, not `{ server: httpServer, path: '/ws' }` — with a `path` set,
+// ws installs its own 'upgrade' listener that aborts any upgrade for a
+// different path with a 400, which would kill Vite's HMR socket before the
+// proxy below ever saw it. Routing upgrades by hand instead lets /ws keep
+// going to this server while everything else goes to Vite.
+const wss = new WebSocketServer({ noServer: true })
+
+httpServer.on('upgrade', (req, socket, head) => {
+  const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
+  if (pathname === '/ws') {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+    return
+  }
+  if (devServerUrl) {
+    proxyUpgradeToDevServer(req, socket, head)
+    return
+  }
+  socket.destroy()
+})
 
 // A client that vanishes without a clean TCP close (network drop, app killed
 // in the background, WebView torn down) never fires the 'close' event on its
@@ -1802,6 +1931,10 @@ function applyVariableUpdates(room: DeckRoom, updates: Record<string, unknown>, 
   } else {
     scheduleDebouncedSave(room)
   }
+  queueGlobalActions(
+    room,
+    changed.map((v) => v.name)
+  )
 }
 
 // What an action step's expressions (update-state code, send-dcs-command's
@@ -2469,6 +2602,129 @@ async function runSequence(
     // reflects that invariant.
     const stepErr = err as SequenceStepError
     sendError(ws, widgetId, stepErr.message, { event, path: stepErr.path, stepKind: stepErr.stepKind })
+  }
+}
+
+// How many times a single pass will re-run the rules over changes the rules
+// themselves caused before giving up. A rule setting a variable another rule
+// watches is the whole point of cascading, and genuinely settles in one or
+// two rounds; anything still going after this is a loop (A sets X, B sets X
+// back), which `trigger: 'change'` mostly prevents on its own but can't rule
+// out when the values really do keep flipping. Hitting the cap logs to the
+// deck's debug console rather than failing silently or hanging the process.
+const GLOBAL_ACTION_MAX_ROUNDS = 10
+
+// Records variable names for the next global-action round and starts a pass
+// if one isn't already running — called by applyVariableUpdates for every
+// change, whatever its origin.
+function queueGlobalActions(room: DeckRoom, names: string[]): void {
+  if (names.length === 0) return
+  // Nothing to do at all on a deck with no rules — avoids paying a Set
+  // insert per changed variable on every DCS-BIOS tick for the common case.
+  if ((room.dashboard.globalActions ?? []).length === 0) return
+  for (const name of names) room.pendingGlobalVars.add(name)
+  if (!room.inGlobalActionRun) room.pendingGlobalExternal = true
+  if (room.globalActionPassRunning) return
+  void runGlobalActionPass(room)
+}
+
+// A rule's steps have no widget and no originating socket, but
+// navigate-subdeck/open-overlay/close-overlay still reply through one — send
+// those to every client in the room instead, since a deck-wide rule isn't
+// acting on behalf of any single device. Re-parsed rather than threaded
+// through as an object because ActionReplyTarget is deliberately a
+// send(string) sink (see its own comment); these actions are rare enough
+// that one extra parse doesn't matter.
+function globalActionReplyTarget(room: DeckRoom): ActionReplyTarget {
+  return {
+    send: (data: string) => {
+      try {
+        broadcastToRoom(room, JSON.parse(data) as ServerToClient)
+      } catch {
+        // A malformed payload here would mean runActionStep itself built bad
+        // JSON — nothing useful to do with it, and it must not abort the
+        // rest of the rule's steps.
+      }
+    }
+  }
+}
+
+// Same evaluation mechanism as evaluateConditionStep, minus the trigger —
+// a global rule has no $value/$index in scope, since nothing interactive
+// fired it.
+function evaluateGlobalCondition(room: DeckRoom, rule: GlobalAction): boolean {
+  const variableMap = toVariableMap(room.dashboard.variables ?? [])
+  const result = withLogRoom(room, () => tryEvaluateExpression(rule.condition, variableMap))
+  if (!result.ok) throw new Error(result.error)
+  return Boolean(result.value)
+}
+
+function logGlobalAction(room: DeckRoom, message: string): void {
+  broadcastToEditClients(room, { type: 'action:log', message: `[Global action] ${message}` })
+}
+
+// Runs every rule whose watch list intersects the changed variables, then
+// repeats over whatever those rules themselves changed, until nothing is
+// left pending or GLOBAL_ACTION_MAX_ROUNDS is hit.
+//
+// Rules run sequentially, in dashboard.globalActions order, and each one is
+// awaited before the next starts — so a rule that sets a variable a later
+// rule watches is seen by that rule within the same round, and two rules
+// firing at once can't interleave their steps.
+async function runGlobalActionPass(room: DeckRoom): Promise<void> {
+  room.globalActionPassRunning = true
+  try {
+    for (let round = 0; round < GLOBAL_ACTION_MAX_ROUNDS; round++) {
+      if (room.pendingGlobalVars.size === 0) return
+      const changedNames = room.pendingGlobalVars
+      const external = room.pendingGlobalExternal
+      room.pendingGlobalVars = new Set()
+      room.pendingGlobalExternal = false
+
+      for (const rule of room.dashboard.globalActions ?? []) {
+        if (!rule.enabled) continue
+        if (!rule.watch.some((name) => changedNames.has(name))) continue
+
+        let condition: boolean
+        try {
+          condition = evaluateGlobalCondition(room, rule)
+        } catch (err) {
+          logGlobalAction(room, `"${rule.name}" condition failed: ${(err as Error).message}`)
+          continue
+        }
+
+        const wasTrue = room.globalActionConditions.get(rule.id) ?? false
+        room.globalActionConditions.set(rule.id, condition)
+        if (!condition) continue
+        // An 'always' rule fires once per real incoming change, not once per
+        // cascade round — otherwise a condition that simply stays true would
+        // re-fire on every round it caused, which is exactly the runaway the
+        // round cap exists to catch. 'change' rules are edge-guarded by
+        // wasTrue and so are safe to re-run on a cascade round.
+        if (rule.trigger === 'change' ? wasTrue : !external) continue
+
+        room.inGlobalActionRun = true
+        try {
+          await runSteps(room, rule.steps, undefined, true, globalActionReplyTarget(room), [])
+        } catch (err) {
+          logGlobalAction(room, `"${rule.name}" failed: ${(err as SequenceStepError).message}`)
+        } finally {
+          room.inGlobalActionRun = false
+        }
+      }
+    }
+
+    if (room.pendingGlobalVars.size > 0) {
+      logGlobalAction(
+        room,
+        `stopped after ${GLOBAL_ACTION_MAX_ROUNDS} rounds — rules are still changing variables (${[...room.pendingGlobalVars].join(', ')}). ` +
+          'Check for two rules that keep undoing each other.'
+      )
+      room.pendingGlobalVars = new Set()
+      room.pendingGlobalExternal = false
+    }
+  } finally {
+    room.globalActionPassRunning = false
   }
 }
 
@@ -3624,7 +3880,10 @@ function createEditorWindow(): void {
   // works — that's a same-origin `will-navigate` event too, not something
   // this should start breaking. Anything else (a remote http(s) origin
   // this window was never pointed at) gets blocked.
-  const devServerOrigin = devServerUrl ? new URL(devServerUrl).origin : null
+  // The app's own origin now, not Vite's — the dev window loads through the
+  // proxy (see createEditorWindow below), so a full-reload fallback comes
+  // back to SERVER_PORT rather than to Vite's port.
+  const devServerOrigin = devServerUrl ? `http://localhost:${SERVER_PORT}` : null
   win.webContents.on('will-navigate', (event, url) => {
     const target = new URL(url)
     if (target.protocol === 'file:') return
@@ -3660,7 +3919,10 @@ function createEditorWindow(): void {
   })
 
   if (devServerUrl) {
-    win.loadURL(`${devServerUrl}?mode=edit&version=${encodeURIComponent(app.getVersion())}`)
+    // Our own server, not Vite's, even in dev — it proxies through to Vite
+    // (see proxyRequestToDevServer), so the editor window sits on the same
+    // origin as the API exactly as a deployed view client does.
+    win.loadURL(`http://localhost:${SERVER_PORT}/?mode=edit&version=${encodeURIComponent(app.getVersion())}`)
   } else {
     win.loadFile(join(rendererDist, 'index.html'), { query: { mode: 'edit', version: app.getVersion() } })
   }
