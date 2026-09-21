@@ -354,12 +354,43 @@ and silently never fire, which is a miserable thing to debug.
 
 ## 15. Troubleshooting / FAQ
 
+- **I see a lot of DCS World references — is this only for DCS?** — No.
+  Boarderoni is a general-purpose dashboard/control-panel tool: widgets,
+  variables, event sources, REST/webhook actions, and everything else work
+  the same regardless of what's driving them. DCS-BIOS and DCS Viewports are
+  just one plugin (and one export flow) among several — see
+  [Plugins & event sources](#9-plugins--event-sources) for the full list.
+  The docs lean on DCS examples mainly because that's what the examples were
+  built and tested against, not because of any hard dependency.
+- **Will updating Boarderoni break my saved decks?** — The dashboard file
+  format can still change between versions, since the app is pre-1.0. A
+  migration path is kept for existing saves, but always back up a deck you
+  care about before updating, just in case.
+- **Does Boarderoni send any data outside my network, or need an account?**
+  — No. Everything runs locally over your own network — no cloud service,
+  no account, no external server involved. The desktop app and any
+  connected devices (phone, tablet, second PC) talk to each other directly
+  over your LAN.
+- **What's the difference between the "editor" and the "deployed view"?** —
+  The editor is where you design a deck — drag/drop/resize widgets, edit
+  properties, and so on. The deployed view is the live, full-screen,
+  pressable rendering of that same deck, as opposed to the design surface.
+  The desktop app itself can show either; any other connected device only
+  ever sees the deployed view.
+- **Why did starting a second Boarderoni window/instance fail?** — Only one
+  instance can run at a time — a second one shows "Boarderoni is already
+  running" and exits, since both would otherwise try to bind the same
+  server port and collide over the same local data directory. Close the
+  first instance before starting another.
 - **A device won't connect** — check it's on the same local network as the
   desktop, and that it's been approved (see [Devices & approval](#10-devices--approval)).
 - **An action silently does nothing** — check the debug console at the
   bottom of the editor; most action failures (a disabled plugin, a deleted
   REST target, a bad expression) show up there as a toast and a logged
-  error.
+  error. Placing a widget whose action depends on a currently-disabled
+  plugin gives no warning at placement time yet — it just throws
+  `"<Plugin> is disabled in Settings"` the first time it fires, so check
+  Settings if an action you just added does nothing.
 - **A plugin's fields aren't available** — confirm that plugin kind is
   enabled in Settings.
 - **I changed something and it's not showing up on a connected device** —

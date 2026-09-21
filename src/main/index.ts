@@ -118,6 +118,17 @@ import {
   resolveComponentRegion as resolveDcsViewportComponentRegion
 } from './dcsViewports'
 
+// A rejected promise anywhere that isn't already inside its own try/catch
+// (a plugin producer's async tick, a WS message handler's own async work,
+// ...) otherwise surfaces only as a raw UnhandledPromiseRejectionWarning in
+// the terminal — easy to miss, and invisible anywhere in-app. This is only a
+// safety net for visibility, not recovery: the promise's own rejection is
+// already unhandled by the time this fires, so there's nothing left to do
+// but log it clearly.
+process.on('unhandledRejection', (reason) => {
+  console.error('[boarderoni] Unhandled promise rejection:', reason)
+})
+
 // Pre-multi-label shape: a single flat `label` string plus its own styling
 // fields (including a widget-level `padding`), before they moved into
 // ButtonWidget.labels[] (and padding moved from the widget onto each label).
@@ -3880,6 +3891,21 @@ setInterval(() => {
 // server, not any public-facing one.
 httpServer.requestTimeout = 0
 httpServer.headersTimeout = 0
+
+// A second instance's own bonjour-service advertisement and Chromium's GPU
+// disk cache would otherwise both collide with the first instance's (over
+// the same mDNS service name / userData directory respectively) and the app
+// would just silently exit without saying why. Catching the port conflict
+// up front gives a clear reason instead of limping into those errors.
+httpServer.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[boarderoni] Boarderoni is already running (port ${SERVER_PORT} is already in use).`)
+    dialog.showErrorBox('Boarderoni is already running', `Another instance of Boarderoni is already using port ${SERVER_PORT}. Close it before starting a new one.`)
+    app.exit(1)
+    return
+  }
+  throw err
+})
 
 httpServer.listen(SERVER_PORT, () => {
   console.log(`[boarderoni] server listening on :${SERVER_PORT}`)

@@ -26,7 +26,8 @@ development:
   before updating).
 - Windows only for now — several plugins (Windows Audio, some DCS-BIOS/
   input pieces) depend on Windows-specific native modules; other platforms
-  aren't tested and may not work at all.
+  aren't tested and may not work at all. Testing so far has only been done
+  on Windows 11 — other Windows versions are untested, not confirmed working.
 - No auto-update yet — you'll need to grab new installers manually from
   [Releases](../../releases) for now.
 - Expect rough edges, and please open an issue if you hit one.
