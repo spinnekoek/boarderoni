@@ -26,6 +26,20 @@ jobs:
 
       - run: npm run build
 
+      - name: Pre-create the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # electron-builder's GitHub publisher has a known race for a
+        # brand-new tag: it uploads the installer/latest.yml and the
+        # blockmap as separate calls, each independently checking "does a
+        # release exist for this tag yet?" — on a genuinely fresh tag both
+        # see no and both create one, splitting assets across two releases
+        # under the same tag. Creating the (draft) release ourselves first
+        # means every later "does it exist" check finds it, so nothing
+        # races to create a second one.
+        run: gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" --notes "" --repo "${{ github.repository }}"
+
       - run: npx electron-builder --win --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
