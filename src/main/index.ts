@@ -76,6 +76,7 @@ import { extractAllPlaceholders } from '../shared/restPlaceholders'
 import { PLUGIN_PRODUCERS } from './plugins'
 import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuality, addMjpegViewer } from './screenCapture'
 import { getAppSettings, updateAppSettings, type AppSettings } from './appSettings'
+import { checkForUpdates } from './autoUpdate'
 import { getMcpServerSettings, regenerateMcpServerToken } from './mcpServerSettings'
 import { syncMcpServer, getMcpListenStatus, type McpDeps } from './mcp/server'
 import { getCustomFonts, addCustomFont, addCustomFontWithId, deleteCustomFont, updateCustomFontLineHeight, customFontFile } from './customFonts'
@@ -4486,6 +4487,7 @@ function createTray(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Show editor', click: () => showEditorWindow() },
+      { label: 'Check for updates', click: () => checkForUpdates(true) },
       { type: 'separator' },
       {
         label: 'Quit',
@@ -4521,6 +4523,11 @@ app.whenReady().then(() => {
 
   createEditorWindow()
   createTray()
+
+  // Silent, automatic check — only surfaces UI once a download actually
+  // completes (see autoUpdate.ts's update-downloaded handler). No-ops
+  // harmlessly outside a packaged build (no app-update.yml to read).
+  checkForUpdates(false)
 
   app.on('activate', () => {
     showEditorWindow()
