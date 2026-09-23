@@ -38,3 +38,7 @@ publish:
   provider: github
   owner: spinnekoek
   repo: boarderoni
+  # electron-builder defaults to leaving the release as a draft (visible
+  # only to repo collaborators, not on the public Releases page) — this
+  # makes --publish always actually publish it live instead.
+  releaseType: release
