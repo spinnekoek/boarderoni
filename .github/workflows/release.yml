@@ -105,6 +105,10 @@ jobs:
         # on why draft has to stay the config default) — only now, once
         # every asset from both jobs has actually landed on it, so it never
         # goes public partially-populated.
+        # GET /releases/tags/{tag} only resolves PUBLISHED releases (a draft
+        # isn't actually associated with the tag ref until published) — same
+        # reason a draft's release page shows an "untagged-..." URL. Listing
+        # and filtering client-side finds it regardless of draft state.
         run: |
-          release_id=$(gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq .id)
+          release_id=$(gh api "repos/${{ github.repository }}/releases" --jq '.[] | select(.tag_name == "${{ github.ref_name }}") | .id')
           gh api "repos/${{ github.repository }}/releases/$release_id" -X PATCH -F draft=false
