@@ -67,8 +67,7 @@ This works both while a deck is open and from the deck-list screen itself.
 
 You don't need the Android app to use Boarderoni from a phone or tablet —
 **any device with a modern browser on the same local network** can open a
-deck. The desktop app shows you a URL (and, for the deployed view, a QR
-code) to open on the other device.
+deck. The desktop app shows you a URL to open on the other device.
 
 ![Phone browser showing a deck](https://placedog.net/700/400?id=3)
 

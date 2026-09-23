@@ -19,7 +19,8 @@ export function RockerSwitchWidgetContent({
   onSelect,
   onRelease,
   selectedPositionId,
-  onPositionSelect
+  onPositionSelect,
+  applyRotation = true
 }: {
   widget: RockerSwitchWidget
   variables: VariableMap
@@ -44,6 +45,10 @@ export function RockerSwitchWidgetContent({
   // widget, same as clicking anywhere else on it.
   selectedPositionId?: string | null
   onPositionSelect?: (position: SwitchPosition) => void
+  // See ButtonWidgetContent's identical prop for why — CanvasWidget.tsx
+  // rotates the outer selection/resize wrapper itself and passes false here
+  // to avoid rotating twice.
+  applyRotation?: boolean
 }): React.JSX.Element {
   const debugMode = useEditorSettings((s) => s.debugMode)
   const resolvedTrack = resolveColor(widget.track, variables)
@@ -97,7 +102,7 @@ export function RockerSwitchWidgetContent({
           borderColor,
           // Spins the shape/segments/position-labels together, in place —
           // widget.labels (rendered below, outside this div) stay upright.
-          transform: rotateAngle ? `rotate(${rotateAngle}deg)` : undefined
+          transform: applyRotation && rotateAngle ? `rotate(${rotateAngle}deg)` : undefined
         }}
       >
         {(widget.positions ?? []).map((position, index) => {

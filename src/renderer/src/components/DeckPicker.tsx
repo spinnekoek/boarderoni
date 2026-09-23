@@ -36,6 +36,13 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
   // still have warnings, and an import error shouldn't be swallowed by
   // dismissing an unrelated stale warning (or vice versa).
   const [importWarnings, setImportWarnings] = useState<string[] | null>(null)
+  // Non-blocking, dismissible — set from the export response's own
+  // `fontCount` (see the /api/decks/:id/export handler) when the just-
+  // written file actually bundled one or more custom fonts. This app can't
+  // verify a font's licence allows redistribution, so the honest thing is
+  // surfacing that bundling happened rather than silently copying font
+  // binaries into a file the user's about to hand to someone else.
+  const [exportFontNotice, setExportFontNotice] = useState<number | null>(null)
 
   const canManage = mode === 'edit'
   const decks = canManage ? restDecks : lobbyDecks
@@ -132,6 +139,8 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
     try {
       const res = await fetch(apiUrl(`/api/decks/${deck.id}/export`), { method: 'POST' })
       if (!res.ok) throw new Error(`Server responded ${res.status}`)
+      const body = (await res.json()) as { canceled?: true } | { ok: true; fontCount: number }
+      if (!('canceled' in body) && body.fontCount > 0) setExportFontNotice(body.fontCount)
     } catch {
       setError(`Could not export "${deck.name}".`)
     } finally {
@@ -192,6 +201,18 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
               ))}
             </ul>
             <button className="deck-picker__retry" onClick={() => setImportWarnings(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {exportFontNotice !== null && (
+          <div className="deck-picker__error">
+            <p>
+              This deck includes {exportFontNotice} custom font file{exportFontNotice === 1 ? '' : 's'} — make sure
+              their licence allows sharing before you send it to anyone.
+            </p>
+            <button className="deck-picker__retry" onClick={() => setExportFontNotice(null)}>
               Dismiss
             </button>
           </div>

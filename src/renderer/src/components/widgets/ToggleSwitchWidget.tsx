@@ -241,7 +241,8 @@ export function ToggleSwitchWidgetContent({
   selectedPositionId,
   onPositionSelect,
   guardOpen,
-  onGuardToggle
+  onGuardToggle,
+  applyRotation = true
 }: {
   widget: ToggleSwitchWidget
   variables: VariableMap
@@ -272,6 +273,10 @@ export function ToggleSwitchWidgetContent({
   // RockerSwitchWidgetContent's own onPositionSelect.
   selectedPositionId?: string | null
   onPositionSelect?: (position: SwitchPosition) => void
+  // See ButtonWidgetContent's identical prop for why — CanvasWidget.tsx
+  // rotates the outer selection/resize wrapper itself and passes false here
+  // to avoid rotating twice.
+  applyRotation?: boolean
 }): React.JSX.Element {
   const debugMode = useEditorSettings((s) => s.debugMode)
   const resolvedTrack = resolveColor(widget.track, variables)
@@ -363,7 +368,7 @@ export function ToggleSwitchWidgetContent({
           bezel/lever, guard — rotates together as one unit, same "no
           separate always-upright layer" choice ButtonWidget/AdjusterWidget's
           own rotateAngle makes. */}
-      <div className="deck-toggle-switch__rotated" style={rotateAngle ? { transform: `rotate(${rotateAngle}deg)` } : undefined}>
+      <div className="deck-toggle-switch__rotated" style={applyRotation && rotateAngle ? { transform: `rotate(${rotateAngle}deg)` } : undefined}>
       <div className="deck-toggle-switch__zones" style={{ flexDirection: orientation === 'vertical' ? 'column' : 'row' }}>
         {(widget.positions ?? []).map((position, index) => {
           const selected = !interactive && position.id === selectedPositionId

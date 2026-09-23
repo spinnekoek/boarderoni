@@ -30,5 +30,16 @@ export const screenCapturePlugin: PluginTypeMeta = {
     { key: 'text', label: 'Recognized text (OCR)' },
     { key: 'value', label: 'Recognized number (OCR)' }
   ],
+  config: [
+    { key: 'displayId', label: 'Display id', type: 'number', description: 'From list_displays.' },
+    {
+      key: 'region',
+      label: 'Capture region',
+      type: 'object',
+      description:
+        '{x, y, width, height} in virtual-desktop pixels — pass a display\'s own `bounds` from list_displays as-is to OCR the whole monitor. A sub-region needs the app\'s own region-picker overlay to choose precisely.'
+    },
+    { key: 'intervalMs', label: 'OCR poll interval (ms)', type: 'number', description: 'Clamped to 200-5000; defaults to 1000 if unset.' }
+  ],
   widgetTypes: ['screen-capture']
 }

@@ -11,5 +11,9 @@ export const dcsbiosPlugin: PluginTypeMeta = {
   kind: 'dcsbios',
   label: 'DCS-BIOS',
   fields: [],
-  dynamicFields: true
+  dynamicFields: true,
+  config: [
+    { key: 'aircraft', label: 'Aircraft', type: 'string', description: 'From list_dcs_bios_aircraft. Required — this instance produces nothing until set.' },
+    { key: 'updateHz', label: 'Update rate (Hz)', type: 'number', description: "Optional — defaults to this connection's own built-in rate if unset." }
+  ]
 }

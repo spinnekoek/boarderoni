@@ -18,11 +18,11 @@
 import { randomUUID } from 'node:crypto'
 import type { BrowserWindow } from 'electron'
 import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js'
-import type { Dashboard, DeckSummary, GlobalAction, Plugin, ServerToClient, Widget, WidgetEventKind } from '../../shared/types'
+import type { Dashboard, DeckSummary, GlobalAction, Plugin, RestDataSource, SequenceStep, ServerToClient, Widget, WidgetAction, WidgetEventKind } from '../../shared/types'
 import type { DeckRoom } from '../index'
 import type { AppSettings } from '../appSettings'
 import { getAppSettings } from '../appSettings'
-import { PLUGIN_TYPES } from '../../shared/plugins'
+import { PLUGIN_TYPES, getPluginType } from '../../shared/plugins'
 import { findWidgetAnywhere, getSubDeckWidgets, setSubDeckWidgets } from '../../shared/subDecks'
 import { toVariableMap } from '../../shared/expr'
 // Sandboxed main-process-only evaluator, not shared/expr.ts's own plain
@@ -30,6 +30,19 @@ import { toVariableMap } from '../../shared/expr'
 import { tryEvaluateExpression } from '../sandboxedExpr'
 import { MCP_SCHEMAS } from '../../shared/generated/mcpSchemas'
 import { captureDashboardScreenshot, captureWidgetScreenshot } from './screenshot'
+// list_variables' own metadata enrichment, plus the list_dcs_bios_*
+// discovery tools below. Live per-aircraft/live fetches, not static data,
+// since what each returns depends on config.aircraft or what's actually
+// installed/plugged in right now, not just the plugin kind.
+import { getFieldCatalog, getCommandCatalog, listInstalledAircraft } from '../dcsBios/connectionManager'
+import { listDevices as listWindowsAudioDevices } from '../windowsAudio/connectionManager'
+import { listDisplays } from '../screenCapture'
+// Read-only — no circular-require concern (neither file imports '../index')
+// unlike create/update, which route through McpDeps below since those need
+// applyRestIncoming's own emit callback, which IS main/index.ts-local.
+import { getRestDataSources } from '../restDataSources'
+import { getRestWebhookTargets } from '../restWebhookTargets'
+import { getRestListenStatus } from '../restIncoming'
 
 export interface McpDeps {
   getOrLoadRoom: (deckId: string) => DeckRoom | null
@@ -44,6 +57,18 @@ export interface McpDeps {
   applyDashboardUpdate: (room: DeckRoom, dashboard: Dashboard, final: boolean) => void
   applyAppSettingsPatch: (patch: Partial<AppSettings>) => Promise<AppSettings>
   triggerAction: (room: DeckRoom, widgetId: string, event: WidgetEventKind, value: number | undefined, final: boolean) => Promise<ServerToClient[]>
+  // send_action only — runs one WidgetAction directly (runActionStep, not
+  // runSequence/triggerAction's whole-event-sequence path), with no widget
+  // or event behind it. Same "collect replies into an array" shape as
+  // triggerAction above, for the same reason (no real client socket to
+  // target a navigate-subdeck/open-overlay/close-overlay reply at).
+  runAction: (room: DeckRoom, action: WidgetAction) => Promise<ServerToClient[]>
+  // send_actions only — runs an ad-hoc SequenceStep[] (delay/action/condition
+  // steps, same union create_widget/update_widget store on a widget event)
+  // through the real runSteps engine, so a delay step is an actual awaited
+  // setTimeout server-side rather than something the MCP client has to pace
+  // itself with separate send_action calls plus its own external sleep.
+  runActions: (room: DeckRoom, steps: SequenceStep[]) => Promise<ServerToClient[]>
   // Screenshot tools only (see main/mcp/screenshot.ts) — getEditorDeckId is
   // '' for the lobby/no deck, undefined if the desktop editor has no live
   // connection at all right now (e.g. minimized before its own WS ever
@@ -58,6 +83,15 @@ export interface McpDeps {
   // requireVisibleWindow) and hide it again afterward.
   hideEditorWindow: () => void
   showEditorWindow: () => void
+  // create_rest_data_source/update_rest_data_source only — routed through
+  // McpDeps rather than a direct import of createRestDataSource/
+  // updateRestDataSources (unlike the read-only list_rest_data_sources'
+  // own getRestDataSources import above) because a real create/update also
+  // has to restart the app's REST listeners via syncRestIncomingServers,
+  // whose own `emit` callback (applyRestIncoming) is main/index.ts-local —
+  // same reasoning as every other McpDeps entry.
+  createRestDataSource: (name: string) => RestDataSource
+  updateRestDataSource: (sourceId: string, patch: Record<string, unknown>) => RestDataSource | null
 }
 
 class McpToolError extends Error {}
@@ -99,6 +133,55 @@ function widgetSubDeckId(dashboard: Dashboard, widgetId: string): string | null 
   return null
 }
 
+interface VariableMeta {
+  label?: string
+  category?: string
+  valueRange?: { max: number }
+}
+
+// list_variables' own enrichment — a raw {id, name, value} tells an MCP
+// client nothing about what a variable MEANS, which is especially opaque for
+// DCS-BIOS-sourced ones (terse control identifiers like
+// UFC_COMM1_CHANNEL_SEL). Built by walking each Plugin instance's own
+// mappings (field -> variableName) and cross-referencing that plugin kind's
+// field metadata: PluginTypeMeta.fields for a statically-known kind, or
+// DCS-BIOS's own per-aircraft field catalog (necessarily fetched live, since
+// which fields exist depends on config.aircraft, not just the kind) for that
+// one dynamic-fields kind. A variable with no mapping behind it (set
+// directly via set_variable, or produced by an expr's own object-return
+// path — see PluginMapping's own comment in shared/types.ts) simply gets no
+// metadata, same as one fed by a plugin kind with no such data to offer at
+// all.
+async function describeVariables(dashboard: Dashboard): Promise<Map<string, VariableMeta>> {
+  const meta = new Map<string, VariableMeta>()
+  for (const plugin of dashboard.plugins ?? []) {
+    if (plugin.kind === 'dcsbios') {
+      const aircraft = plugin.config?.aircraft
+      if (typeof aircraft !== 'string' || !aircraft) continue
+      const catalog = await getFieldCatalog(aircraft)
+      const byKey = new Map(catalog.map((f) => [f.key, f]))
+      for (const mapping of plugin.mappings) {
+        const entry = byKey.get(mapping.field)
+        if (!entry) continue
+        meta.set(mapping.variableName, {
+          label: entry.label,
+          category: entry.category,
+          ...(entry.maxValue !== undefined ? { valueRange: { max: entry.maxValue } } : {})
+        })
+      }
+      continue
+    }
+    const typeMeta = getPluginType(plugin.kind)
+    if (!typeMeta || typeMeta.fields.length === 0) continue
+    const byKey = new Map(typeMeta.fields.map((f) => [f.key, f]))
+    for (const mapping of plugin.mappings) {
+      const field = byKey.get(mapping.field)
+      if (field) meta.set(mapping.variableName, { label: field.label })
+    }
+  }
+  return meta
+}
+
 // Embeds one of MCP_SCHEMAS' self-contained {$ref, definitions} schemas as a
 // named property inside a hand-written wrapper object schema. MCP's
 // Tool.inputSchema must itself be `{type: 'object', properties, ...}` at the
@@ -117,6 +200,44 @@ function refProperty(named: { $ref: string; definitions: Record<string, unknown>
 }
 
 const DECK_ID_PROP = { type: 'string', description: 'The deck id, as returned by list_decks.' }
+
+// Shared verbatim across evaluate_expression, create_widget, update_widget,
+// create_global_action, and update_global_action's own descriptions below —
+// every one of those accepts at least one expression string (a *Expr widget
+// field, evaluate_expression's own `expr`, or a global action's
+// `condition`), and an MCP client with no other context has no way to infer
+// any of this from the field's name alone. Confirmed live: another LLM
+// driving this server once wrote a bare `variables.FOO > 1` with no
+// `return`, which silently evaluates to undefined instead of erroring —
+// exactly the mistake this exists to head off.
+const EXPRESSION_SEMANTICS =
+  "An expression is a JS function body (`new Function('variables', 'console', code)`), NOT a single implicit-return expression — write `return <value>`, not just `<value>`; a bare `variables.FOO > 1` silently evaluates to undefined rather than erroring. Multiple statements, local `const`/`function` helpers, and loops are all valid, same as any real function body. `variables.NAME` reads that variable's current value; `console.log(...)` is forwarded to the app's own debug panel. Example: `return variables.THROTTLE > 0.9 ? 'red' : 'green'`."
+
+// Shared by create_widget/update_widget below — a label's displayed text
+// isn't necessarily plain text, and neither a literal '\n' nor an assumption
+// that it's plain-text-only will do what an MCP client might expect.
+const LABEL_TEXT_SEMANTICS =
+  "A label's displayed text (WidgetLabel.text, or whatever its textExpr evaluates to) can embed U+2424 '␤' to force a line break — what Shift+Enter inserts in the label's own plain-text input, since a single-line input can't hold a literal newline; a literal '\\n' character does NOT create a line break. `{{icon:fa-name}}` tokens (e.g. `{{icon:fa-image}}`) render an inline FontAwesome icon in place."
+
+// Shared by create_widget/update_widget below — a SendDcsCommandAction's
+// identifier/interface/argument are DCS-BIOS's own aircraft-specific
+// protocol vocabulary, same "don't guess it" reasoning as a dcsbios event
+// source's mapping.field (see create_event_source's own description).
+const DCS_COMMAND_SEMANTICS =
+  'A SendDcsCommandAction targets one (identifier, interface) pair from that aircraft — get valid ones from list_dcs_bios_commands (aircraft id from list_dcs_bios_aircraft) rather than guessing; the right `argument` shape depends on which interface was picked.'
+
+// Shared by create_widget/update_widget below — UpdateStateAction.code is an
+// expression too, but its RETURN CONTRACT is different from every *Expr
+// field EXPRESSION_SEMANTICS describes, so it needs calling out separately
+// rather than being lumped in with that shared text.
+const UPDATE_STATE_SEMANTICS =
+  "UpdateStateAction.code is an expression (same function-body rules as above) but with a DIFFERENT return contract than every *Expr field: it must return a plain object of {variableName: newValue} pairs to merge into the deck's variables (creating any that don't exist yet), not a single value. Example: `return {THROTTLE: variables.THROTTLE + 0.1}`."
+
+// Shared by create_widget/update_widget below — a CallRestAction's targetId
+// references an app-wide, independently-managed RestWebhookTarget, same
+// "don't guess it" reasoning as SendDcsCommandAction above.
+const CALL_REST_SEMANTICS =
+  "A CallRestAction.targetId references one REST webhook target — get valid ones from list_rest_webhook_targets rather than guessing. `values` is an array of {placeholder, value, expr?} entries, one per {{placeholderName}} token that target's own headers/payloadTemplate actually contain (a stale entry whose token no longer exists is simply ignored); `expr`, when set, takes precedence over the static `value`, same static-vs-expr precedence as SendDcsCommandAction.argument/argumentExpr."
 
 interface ToolDef {
   tool: Tool
@@ -143,6 +264,8 @@ function buildTools(): ToolDef[] {
   const widgetRef = refProperty(MCP_SCHEMAS.Widget)
   const pluginRef = refProperty(MCP_SCHEMAS.Plugin)
   const globalActionRef = refProperty(MCP_SCHEMAS.GlobalAction)
+  const actionRef = refProperty(MCP_SCHEMAS.WidgetAction)
+  const stepRef = refProperty(MCP_SCHEMAS.SequenceStep)
 
   return [
     {
@@ -181,10 +304,16 @@ function buildTools(): ToolDef[] {
     {
       tool: {
         name: 'list_variables',
-        description: "List a deck's current variables and their live values.",
+        description:
+          "List a deck's current variables and their live values. Where the event source feeding a variable has descriptive metadata, each entry also carries `label` (human-readable name), `category` (grouping), and `valueRange` (e.g. `{max: 65535}` for an integer field) — most useful for DCS-BIOS-sourced variables, whose raw names are terse control identifiers (e.g. `UFC_COMM1_CHANNEL_SEL`) that don't say what they mean on their own. A variable set directly via set_variable, or with no plugin mapping behind it, has none of these — just `id`/`name`/`value`.",
         inputSchema: objectSchema({ deckId: DECK_ID_PROP }, ['deckId'])
       },
-      handler: (deps, args) => textResult(requireRoom(deps, args.deckId).dashboard.variables ?? [])
+      handler: async (deps, args) => {
+        const room = requireRoom(deps, args.deckId)
+        const variables = room.dashboard.variables ?? []
+        const meta = await describeVariables(room.dashboard)
+        return textResult(variables.map((v) => ({ ...v, ...meta.get(v.name) })))
+      }
     },
     {
       tool: {
@@ -209,7 +338,7 @@ function buildTools(): ToolDef[] {
     {
       tool: {
         name: 'evaluate_expression',
-        description: "Dry-run a JS expression (the same kind used in any *Expr widget field) against a deck's current variables, without writing it anywhere. Useful to test an expression before committing it via update_widget.",
+        description: `Dry-run a JS expression (the same kind used in any *Expr widget field or a global action's condition) against a deck's current variables, without writing it anywhere. Useful to test an expression before committing it via update_widget. ${EXPRESSION_SEMANTICS}`,
         inputSchema: objectSchema({ deckId: DECK_ID_PROP, expr: { type: 'string' } }, ['deckId', 'expr'])
       },
       handler: (deps, args) => {
@@ -222,13 +351,14 @@ function buildTools(): ToolDef[] {
     {
       tool: {
         name: 'trigger_action',
-        description: "Fire one of a widget's events (e.g. press/release/select), running whatever action sequence is attached to it — same as a real press in the app.",
+        description:
+          "Fire one of a widget's events, running whatever action sequence is attached to it — same as a real press in the app. Which `event` values are valid depends on the widget's own type (see get_dashboard/get widget.type first): gauge-bar/gauge-arc/screen-capture/label can't be triggered at all; most other widgets only support press/release; button additionally supports doublePress/triplePress; adjuster-slider/adjuster-knob additionally supports move; encoder swaps move for increment/decrement. Switch-shaped widgets (switch-rocker, switch-dial, switch-toggle, dropdown) use `select` instead of a fixed set — `value` is the target position's index into widget.positions, which fires that position's own onSelect plus the widget's overall positionChange; switch-toggle also has guardToggle, switch-dial also has increment/decrement (steps to the adjacent position) and doublePress/triplePress. An invalid (widget, event) pair returns a clean error rather than doing anything, so it's safe to try.",
         inputSchema: objectSchema(
           {
             deckId: DECK_ID_PROP,
             widgetId: { type: 'string' },
-            event: { type: 'string', description: 'e.g. press, release, select, increment, decrement, doublePress, triplePress, guardToggle, positionChange' },
-            value: { type: 'number', description: 'Optional — a position index for select/increment/decrement, or a live drag value.' }
+            event: { type: 'string', description: 'e.g. press, release, select, increment, decrement, doublePress, triplePress, guardToggle, positionChange — see this tool\'s own description for which apply to which widget type.' },
+            value: { type: 'number', description: 'Optional — a position index for select/increment/decrement (switch-shaped widgets), or a live drag value for move.' }
           },
           ['deckId', 'widgetId', 'event']
         )
@@ -246,8 +376,56 @@ function buildTools(): ToolDef[] {
     },
     {
       tool: {
+        name: 'send_action',
+        description:
+          `Run one action against a deck right now, with no widget needed as a vehicle for it — the case trigger_action can't cover, since that one only runs an action sequence already sitting on some existing widget's event. Meant for a client that reads state via list_variables/get_action_log and then decides what to do next — e.g. "read the current COMM1 channel, then send the DCS command to change it" — without first having to create_widget a throwaway button just to attach that action to. Takes the same WidgetAction union create_widget/update_widget accept for a widget event or switch position's own action steps: send-dcs-command, update-state, call-rest, set-windows-audio, play-sound, navigate-subdeck, open-overlay, close-overlay, keypress, or none (\`kind\` selects which). ${DCS_COMMAND_SEMANTICS} ${UPDATE_STATE_SEMANTICS} ${CALL_REST_SEMANTICS} navigate-subdeck/open-overlay/close-overlay have no real triggering client to route their reply to — that reply (if any) comes back in this call's own result instead of visibly affecting anything. play-sound with target 'client' or 'both' has the exact same gap: the client half of it is a sound:play message with nowhere real to go, so it silently lands inertly in this call's own result instead of playing on any device — only target 'server'/'both' actually produces audible sound (on the machine running Boarderoni itself), since that half routes to the desktop editor's own socket regardless of who triggered it. For more than one action — e.g. a press then a release with a real pause in between, like holding a spring-loaded switch — use send_actions instead: pacing that with repeated send_action calls plus your own sleep between them is not equivalent, since the deck (and anything watching it) sees each call as a separate, fully independent event rather than one held gesture.`,
+        inputSchema: objectSchema({ deckId: DECK_ID_PROP, action: actionRef.schema }, ['deckId', 'action'], actionRef.definitions)
+      },
+      handler: async (deps, args) => {
+        const room = requireRoom(deps, args.deckId)
+        if (!args.action || typeof args.action !== 'object') throw new McpToolError('action is required')
+        const replies = await deps.runAction(room, args.action as WidgetAction)
+        return textResult({ ok: true, replies })
+      }
+    },
+    {
+      tool: {
+        name: 'send_actions',
+        description:
+          `Run a whole sequence of steps against a deck right now, in order — send_action for more than one step. Each step is a delay ({"kind":"delay","id":...,"delayMs":...}), an action ({"kind":"action","id":...,"action":<WidgetAction, see send_action for the union>}), or a condition ({"kind":"condition","id":...,"condition":<expression>,"whenTrue":[...],"whenFalse":[...]}) — the exact SequenceStep union a widget event's own stored sequence is made of (see create_widget/update_widget's \`events\`), run through the same engine: a delay step is a real awaited pause server-side, not something to approximate by pacing separate send_action calls with your own sleep in between. \`id\` on each step only needs to be unique within its own steps array (a fresh uuid is fine) — nothing persists it. Stops at the first step that throws (including inside whichever condition branch was taken) and reports which one in the error, same as a stored sequence failing partway; steps before it already ran and are not undone.`,
+        inputSchema: objectSchema(
+          { deckId: DECK_ID_PROP, steps: { type: 'array', items: stepRef.schema, minItems: 1 } },
+          ['deckId', 'steps'],
+          stepRef.definitions
+        )
+      },
+      handler: async (deps, args) => {
+        const room = requireRoom(deps, args.deckId)
+        if (!Array.isArray(args.steps) || args.steps.length === 0) throw new McpToolError('steps must be a non-empty array')
+        const replies = await deps.runActions(room, args.steps as SequenceStep[])
+        return textResult({ ok: true, replies })
+      }
+    },
+    {
+      tool: {
+        name: 'get_action_log',
+        description:
+          "Get a deck's recent action-log entries — the same messages the desktop editor's own debug panel shows: an action expression's own console.log calls, global action activity (prefixed \"[Global action]\"), and a failed CallRestAction's own error (prefixed \"[Call REST: <target name>]\", or \"[Call REST]\" if the target itself was missing/disabled). Newest last. In-memory only, capped at the last 200 entries (older ones are simply dropped, not persisted to disk) — call this right after trigger_action/evaluate_expression/set_variable to see what actually happened server-side, especially for a CallRestAction failure, which otherwise only reaches the triggering client as an action:error, never the console.",
+        inputSchema: objectSchema(
+          { deckId: DECK_ID_PROP, limit: { type: 'number', description: 'Max entries to return (most recent). Defaults to 50.' } },
+          ['deckId']
+        )
+      },
+      handler: (deps, args) => {
+        const room = requireRoom(deps, args.deckId)
+        const limit = typeof args.limit === 'number' ? Math.max(1, Math.trunc(args.limit)) : 50
+        return textResult(room.actionLog.slice(-limit))
+      }
+    },
+    {
+      tool: {
         name: 'create_widget',
-        description: 'Add a new widget to a deck (or one of its sub-decks). widget.id is generated if omitted.',
+        description: `Add a new widget to a deck (or one of its sub-decks). widget.id is generated if omitted. Every *Expr field (colorExpr, borderColorExpr, textExpr, valueExpr, visibleExpr, activeStateExpr, etc.) is an expression — ${EXPRESSION_SEMANTICS} ${LABEL_TEXT_SEMANTICS} ${DCS_COMMAND_SEMANTICS} ${UPDATE_STATE_SEMANTICS} ${CALL_REST_SEMANTICS}`,
         inputSchema: objectSchema(
           { deckId: DECK_ID_PROP, subDeckId: { type: 'string', description: 'Omit for the main deck.' }, widget: widgetRef.schema },
           ['deckId', 'widget'],
@@ -268,7 +446,7 @@ function buildTools(): ToolDef[] {
     {
       tool: {
         name: 'update_widget',
-        description: "Patch fields on an existing widget by id (works for any field, including *Expr expression fields). Can't change a widget's type.",
+        description: `Patch fields on an existing widget by id (works for any field, including *Expr expression fields). Can't change a widget's type. Every *Expr field is an expression — ${EXPRESSION_SEMANTICS} ${LABEL_TEXT_SEMANTICS} ${DCS_COMMAND_SEMANTICS} ${UPDATE_STATE_SEMANTICS} ${CALL_REST_SEMANTICS}`,
         inputSchema: objectSchema(
           { deckId: DECK_ID_PROP, widgetId: { type: 'string' }, patch: { type: 'object', description: 'Partial widget fields to merge in.', additionalProperties: true } },
           ['deckId', 'widgetId', 'patch']
@@ -320,8 +498,7 @@ function buildTools(): ToolDef[] {
     {
       tool: {
         name: 'create_global_action',
-        description:
-          "Add a global action to a deck. `watch` lists the variable names that re-check the rule (like a useEffect dependency array — a variable the condition reads but that isn't listed here will NOT re-check it). `trigger: 'change'` fires only when the condition flips false->true; 'always' fires on every watched change while it's true. globalAction.id is generated if omitted.",
+        description: `Add a global action to a deck. \`watch\` lists the variable names that re-check the rule (like a useEffect dependency array — a variable the condition reads but that isn't listed here will NOT re-check it). \`trigger: 'change'\` fires only when the condition flips false->true; 'always' fires on every watched change while it's true. globalAction.id is generated if omitted. \`condition\` is an expression — ${EXPRESSION_SEMANTICS}`,
         inputSchema: objectSchema({ deckId: DECK_ID_PROP, globalAction: globalActionRef.schema }, ['deckId', 'globalAction'], globalActionRef.definitions)
       },
       handler: (deps, args) => {
@@ -337,7 +514,7 @@ function buildTools(): ToolDef[] {
     {
       tool: {
         name: 'update_global_action',
-        description: 'Patch fields on an existing global action by id (name, enabled, watch, condition, trigger, steps).',
+        description: `Patch fields on an existing global action by id (name, enabled, watch, condition, trigger, steps). \`condition\` is an expression — ${EXPRESSION_SEMANTICS}`,
         inputSchema: objectSchema(
           {
             deckId: DECK_ID_PROP,
@@ -378,12 +555,121 @@ function buildTools(): ToolDef[] {
     {
       tool: {
         name: 'list_plugin_types',
-        description: 'List every event-source kind this app supports, and whether each is currently enabled app-wide.',
+        description:
+          "List every event-source kind this app supports, whether each is currently enabled app-wide, its mappable `fields` (each entry's `key` is what a mapping's own `field` must match — see create_event_source), and its `config` (each entry's `key` is a valid key inside that kind's own `Plugin.config`, with `type` and a `description` covering defaults/constraints). `dynamicFields: true` means `fields` is empty here because the real list depends on live state, not just the kind — currently only 'dcsbios' (use list_dcs_bios_aircraft/list_dcs_bios_fields instead). `config`, unlike `fields`, is always complete here even for 'dcsbios' — a config key never depends on which aircraft is picked.",
         inputSchema: objectSchema({}, [])
       },
       handler: () => {
         const enabled = getAppSettings().enabledPlugins
-        return textResult(PLUGIN_TYPES.map((t) => ({ kind: t.kind, label: t.label, core: t.core ?? false, enabled: enabled.includes(t.kind) })))
+        return textResult(
+          PLUGIN_TYPES.map((t) => ({
+            kind: t.kind,
+            label: t.label,
+            core: t.core ?? false,
+            enabled: enabled.includes(t.kind),
+            fields: t.fields,
+            dynamicFields: t.dynamicFields ?? false,
+            config: t.config ?? []
+          }))
+        )
+      }
+    },
+    {
+      tool: {
+        name: 'list_windows_audio_devices',
+        description:
+          "List Windows audio output devices currently visible to the OS — for picking a windowsAudio event source's `config.deviceName`, or a SetWindowsAudioAction widget action's target device. `isDefault` marks whichever device is currently the system default; a mapping's own `config.deviceName: ''` tracks that device dynamically across a default-device change rather than naming one explicitly.",
+        inputSchema: objectSchema({}, [])
+      },
+      handler: async () => textResult(await listWindowsAudioDevices())
+    },
+    {
+      tool: {
+        name: 'list_displays',
+        description:
+          "List every monitor currently connected — for picking a screenCapture event source's (or screen-capture widget's) `config.displayId`/`region`. `bounds` is that display's full virtual-desktop pixel rectangle; pass it as-is for `region` to capture the whole monitor. A sub-region within a display can't be picked from here (there's no way to see the screen through this tool) — that still needs the app's own region-picker overlay.",
+        inputSchema: objectSchema({}, [])
+      },
+      handler: () => textResult(listDisplays())
+    },
+    {
+      tool: {
+        name: 'list_dcs_bios_aircraft',
+        description:
+          "List DCS-BIOS aircraft modules installed on this machine — for picking a dcsbios event source's `config.aircraft`. Call this first; both list_dcs_bios_fields and list_dcs_bios_commands need a valid aircraft id from here, and guessing one is unreliable (aircraft ids are DCS-BIOS's own module folder names, not the aircraft's display name).",
+        inputSchema: objectSchema({}, [])
+      },
+      handler: async () => textResult(await listInstalledAircraft())
+    },
+    {
+      tool: {
+        name: 'list_dcs_bios_fields',
+        description:
+          "List every DCS-BIOS output field for one aircraft (get an `aircraft` id from list_dcs_bios_aircraft first). Each entry's `key` is exactly what a dcsbios event source mapping's own `field` must match (see create_event_source/update_event_source); `label`/`category` describe what it means, `valueType`/`maxValue` describe its range. Use this instead of guessing a control identifier — DCS-BIOS names are terse (e.g. `UFC_COMM1_CHANNEL_SEL`) and aircraft-specific.",
+        inputSchema: objectSchema({ aircraft: { type: 'string', description: 'An aircraft id from list_dcs_bios_aircraft.' } }, ['aircraft'])
+      },
+      handler: async (deps, args) => textResult(await getFieldCatalog(requireString(args, 'aircraft')))
+    },
+    {
+      tool: {
+        name: 'list_dcs_bios_commands',
+        description:
+          "List every DCS-BIOS input command for one aircraft (get an `aircraft` id from list_dcs_bios_aircraft first). Each entry is one (identifier, interface) pair a widget's SendDcsCommandAction can target — the same information the editor's own DCS-BIOS field browser shows. Use this instead of guessing an identifier/interface/argument combination. For `set_state` entries, `label` is DCS-BIOS's own free-text description (e.g. \"Battery Switch, ON/OFF/ORIDE\") and does NOT promise its word order matches ascending state values — `0` is not necessarily the first word. There is no per-value name mapping in this data; confirm which integer means which position by sending each value and observing the aircraft, not by reading the label left to right.",
+        inputSchema: objectSchema({ aircraft: { type: 'string', description: 'An aircraft id from list_dcs_bios_aircraft.' } }, ['aircraft'])
+      },
+      handler: async (deps, args) => textResult(await getCommandCatalog(requireString(args, 'aircraft')))
+    },
+    {
+      tool: {
+        name: 'list_rest_webhook_targets',
+        description:
+          "List every configured REST webhook target — app-wide, not per-deck (see RestWebhookTargetsSettingsPanel), the outgoing counterpart of list_rest_data_sources below. `id` is what a widget's CallRestAction.targetId must reference (see create_widget/update_widget); `headers`/`payloadTemplate` may contain {{placeholderName}} tokens the action's own `values` fill in. Use this before setting up a CallRestAction instead of guessing a targetId.",
+        inputSchema: objectSchema({}, [])
+      },
+      handler: () => textResult(getRestWebhookTargets())
+    },
+    {
+      tool: {
+        name: 'list_rest_data_sources',
+        description:
+          "List every configured REST data source — app-wide, not per-deck, the incoming counterpart of list_rest_webhook_targets above. Each is its own inbound HTTP listener (`port`/`bearerToken` — senders POST here with `Authorization: Bearer <bearerToken>`) feeding one deck's Variables (`targetDeckId`) through `mappings` (same {id, field, variableName, expr} shape as a plugin's own PluginMapping, but `field` here is a flattened dot/index path into whatever JSON body the sender posts, e.g. 'data.temperature' — see shared/flattenJson.ts — not a catalog key, since there's no fixed schema to look one up in). `listening`/`listenError` report whether this source's own HTTP listener is actually up right now.",
+        inputSchema: objectSchema({}, [])
+      },
+      handler: () => textResult(getRestDataSources().map((s) => ({ ...s, ...getRestListenStatus(s.id) })))
+    },
+    {
+      tool: {
+        name: 'create_rest_data_source',
+        description:
+          "Create a new REST data source (an inbound HTTP listener) — id/port/bearerToken are generated here (see the returned object). Starts with empty `mappings` and `targetDeckId: ''`; call update_rest_data_source next to point it at a deck and add mappings before anything actually flows. Restarts the app's REST listeners to pick it up immediately.",
+        inputSchema: objectSchema({ name: { type: 'string' } }, ['name'])
+      },
+      handler: (deps, args) => textResult(deps.createRestDataSource(requireString(args, 'name')))
+    },
+    {
+      tool: {
+        name: 'update_rest_data_source',
+        description:
+          "Patch fields on an existing REST data source by id — name, enabled, port, targetDeckId, and/or mappings (each element the same {id, field, variableName, expr} shape list_rest_data_sources describes; id is generated here if omitted from a new mapping). bearerToken can't be changed through this tool — there's no MCP path to rotate it, by design.",
+        inputSchema: objectSchema(
+          {
+            sourceId: { type: 'string' },
+            patch: {
+              type: 'object',
+              description: 'Partial fields to merge in: name, enabled, port, targetDeckId, and/or mappings.',
+              additionalProperties: true
+            }
+          },
+          ['sourceId', 'patch']
+        )
+      },
+      handler: (deps, args) => {
+        const sourceId = requireString(args, 'sourceId')
+        const patch = args.patch
+        if (!patch || typeof patch !== 'object') throw new McpToolError('patch must be an object')
+        const updated = deps.updateRestDataSource(sourceId, patch as Record<string, unknown>)
+        if (!updated) throw new McpToolError(`Unknown REST data source: ${sourceId}`)
+        return textResult(updated)
       }
     },
     {
@@ -412,7 +698,8 @@ function buildTools(): ToolDef[] {
     {
       tool: {
         name: 'create_event_source',
-        description: 'Add a new event source (plugin instance) to a deck. plugin.id is generated if omitted.',
+        description:
+          "Add a new event source (plugin instance) to a deck. plugin.id is generated if omitted. Call list_plugin_types first: each mapping's own `field` must match a key from that plugin `kind`'s own `fields` there (or list_dcs_bios_fields for 'dcsbios', whose fields depend on `config.aircraft` and so aren't listed statically), and each `config` key/type/constraint listed there applies to this plugin instance's own `config` object. A 'windowsAudio' instance's `config.deviceName` should come from list_windows_audio_devices; a 'dcsbios' instance's `config.aircraft` from list_dcs_bios_aircraft; a 'screenCapture' instance's `config.displayId` from list_displays.",
         inputSchema: objectSchema({ deckId: DECK_ID_PROP, plugin: pluginRef.schema }, ['deckId', 'plugin'], pluginRef.definitions)
       },
       handler: (deps, args) => {
@@ -427,7 +714,8 @@ function buildTools(): ToolDef[] {
     {
       tool: {
         name: 'update_event_source',
-        description: "Patch fields on an existing event source by id (e.g. its mappings, or its plugin-specific config).",
+        description:
+          "Patch fields on an existing event source by id (e.g. its mappings, or its plugin-specific config). See create_event_source's own description for where a mapping's `field` (and a 'windowsAudio'/'screenCapture' instance's own config values) should come from.",
         inputSchema: objectSchema(
           { deckId: DECK_ID_PROP, pluginId: { type: 'string' }, patch: { type: 'object', additionalProperties: true } },
           ['deckId', 'pluginId', 'patch']

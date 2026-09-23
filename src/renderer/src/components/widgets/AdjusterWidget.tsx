@@ -188,7 +188,8 @@ export function AdjusterWidgetContent({
   dragFraction,
   onPointerDown,
   onPointerMove,
-  onPointerUp
+  onPointerUp,
+  applyRotation = true
 }: {
   widget: AdjusterWidget
   variables: VariableMap
@@ -197,6 +198,10 @@ export function AdjusterWidgetContent({
   onPointerDown?: (e: React.PointerEvent) => void
   onPointerMove?: (e: React.PointerEvent) => void
   onPointerUp?: (e: React.PointerEvent) => void
+  // See ButtonWidgetContent's identical prop for why — CanvasWidget.tsx
+  // rotates the outer selection/resize wrapper itself and passes false here
+  // to avoid rotating twice.
+  applyRotation?: boolean
 }): React.JSX.Element {
   const debugMode = useEditorSettings((s) => s.debugMode)
   const restValue = widget.valueExpr ? (resolveNumericExpr(widget.valueExpr, variables) ?? widget.min) : widget.min
@@ -226,7 +231,7 @@ export function AdjusterWidgetContent({
       borderColor
     }),
     ...(widget.zIndex !== undefined && { zIndex: widget.zIndex }),
-    transform: rotateAngle ? `rotate(${rotateAngle}deg)` : undefined
+    transform: applyRotation && rotateAngle ? `rotate(${rotateAngle}deg)` : undefined
   }
 
   return (

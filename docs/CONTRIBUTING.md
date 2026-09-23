@@ -63,11 +63,12 @@ real, working, minimal example — copy it as your starting point.
 3. **`renderer/src/plugins/<Kind>ConfigPanel.tsx`** — optional. Only needed
    if your plugin has its own per-instance settings beyond the generic
    field→variable mapping list (e.g. DCS-BIOS's aircraft picker, Screen
-   Capture's region picker). Implement `PluginConfigPanelProps` (see
-   `renderer/src/plugins/types.ts`) and register it in
-   `renderer/src/plugins/index.ts`'s `PLUGIN_CONFIG_PANELS` map. A plugin
-   with nothing extra to configure (like `datetime` or `random`) skips this
-   entirely.
+   Capture's region picker, `random`'s own min/max range — see
+   `RandomConfigPanel.tsx` for the simplest working example of this step).
+   Implement `PluginConfigPanelProps` (see `renderer/src/plugins/types.ts`)
+   and register it in `renderer/src/plugins/index.ts`'s
+   `PLUGIN_CONFIG_PANELS` map. A plugin with nothing extra to configure
+   (like `datetime`) skips this entirely.
 
 Two smaller, rarer extension points:
 

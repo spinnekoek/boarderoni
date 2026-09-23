@@ -48,7 +48,8 @@ export function DialSwitchWidgetContent({
   onSelect,
   onPointerDown,
   onPointerMove,
-  onPointerUp
+  onPointerUp,
+  applyRotation = true
 }: {
   widget: DialSwitchWidget
   variables: VariableMap
@@ -59,6 +60,10 @@ export function DialSwitchWidgetContent({
   onPointerDown?: (e: React.PointerEvent) => void
   onPointerMove?: (e: React.PointerEvent) => void
   onPointerUp?: (e: React.PointerEvent) => void
+  // See ButtonWidgetContent's identical prop for why — CanvasWidget.tsx
+  // rotates the outer selection/resize wrapper itself and passes false here
+  // to avoid rotating twice.
+  applyRotation?: boolean
 }): React.JSX.Element {
   const debugMode = useEditorSettings((s) => s.debugMode)
   const resolvedTrack = resolveColor(widget.track, variables)
@@ -150,7 +155,7 @@ export function DialSwitchWidgetContent({
           — rotates together as one unit, same "no separate always-upright
           layer" choice ButtonWidget/AdjusterWidget/ToggleSwitchWidget's own
           rotateAngle makes. */}
-      <div className="deck-dial-switch__rotated" style={rotateAngle ? { transform: `rotate(${rotateAngle}deg)` } : undefined}>
+      <div className="deck-dial-switch__rotated" style={applyRotation && rotateAngle ? { transform: `rotate(${rotateAngle}deg)` } : undefined}>
       <svg className="deck-dial-switch__dial" viewBox="0 0 100 100">
         <circle cx={50} cy={50} r={45} fill={trackColor} stroke={borderColor} strokeWidth={2} />
         {detentShape === 'triangle' &&

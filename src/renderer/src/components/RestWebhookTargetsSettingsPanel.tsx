@@ -107,6 +107,19 @@ export function RestWebhookTargetsSettingsPanel(): React.JSX.Element {
                   onBlur={(e) => patchTarget(target.id, { url: e.target.value })}
                 />
               </label>
+              <label className="dcsbios-settings__field">
+                <input
+                  type="checkbox"
+                  checked={target.allowInvalidCertificates ?? false}
+                  onChange={(e) => patchTarget(target.id, { allowInvalidCertificates: e.target.checked })}
+                />{' '}
+                Ignore invalid certificates
+              </label>
+              <span className="properties__hint-inline">
+                Skips TLS certificate verification for this target only — for an https URL with a self-signed or otherwise invalid
+                certificate (e.g. an internal device's own admin API). Leave off unless you hit a certificate error, since this makes
+                requests to this URL vulnerable to interception.
+              </span>
 
               <h4 className="settings-modal__section-title">Headers</h4>
               {target.headers.length === 0 && <p className="properties__hint">No headers yet — e.g. add one named "Authorization".</p>}

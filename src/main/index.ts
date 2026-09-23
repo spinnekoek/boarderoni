@@ -19,6 +19,7 @@ import { join, extname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { hostname, networkInterfaces } from 'node:os'
 import { WebSocketServer, WebSocket } from 'ws'
+import { Agent as UndiciAgent } from 'undici'
 import { Bonjour, type Service } from 'bonjour-service'
 import { z } from 'zod'
 import { keyboard, Key } from '@nut-tree-fork/nut-js'
@@ -43,6 +44,8 @@ import {
   type Plugin,
   type ConditionStep,
   type KeypressAction,
+  type RestDataSource,
+  type RestWebhookTarget,
   type RockerSwitchWidget,
   type ScreenRegion,
   type SendDcsCommandAction,
@@ -58,7 +61,7 @@ import {
   type WidgetEventKind
 } from '../shared/types'
 import { getEventSteps, flattenSequenceSteps } from '../shared/widgetEvents'
-import { FONT_MIME_BY_EXTENSION, fontExtension } from '../shared/fonts'
+import { FONT_MIME_BY_EXTENSION, fontExtension, isCustomFontId, customFontIdFromFieldValue } from '../shared/fonts'
 import { findSubDeck, findWidgetAnywhere, allDeckWidgets } from '../shared/subDecks'
 import { toVariableMap, setExpressionConsoleSink, stringifyExpressionLogArgs } from '../shared/expr'
 // tryEvaluateExpression/evaluateMappingExpression come from the sandboxed
@@ -75,7 +78,7 @@ import { listDisplays, openRegionPicker, captureRegionJpeg, clampFps, clampQuali
 import { getAppSettings, updateAppSettings, type AppSettings } from './appSettings'
 import { getMcpServerSettings, regenerateMcpServerToken } from './mcpServerSettings'
 import { syncMcpServer, getMcpListenStatus, type McpDeps } from './mcp/server'
-import { getCustomFonts, addCustomFont, deleteCustomFont, updateCustomFontLineHeight, customFontFile } from './customFonts'
+import { getCustomFonts, addCustomFont, addCustomFontWithId, deleteCustomFont, updateCustomFontLineHeight, customFontFile } from './customFonts'
 import { getCustomSounds, addCustomSound, addCustomSoundWithId, deleteCustomSound, updateCustomSoundStartAt, customSoundFile } from './customSounds'
 import { SOUND_MIME_BY_EXTENSION, soundExtension, soundVolumeToGain } from '../shared/sounds'
 import { getCustomVariants, addCustomVariant, deleteCustomVariant } from './customVariants'
@@ -1081,6 +1084,13 @@ export interface DeckRoom {
   // isn't worth threading an origin argument through every
   // applyVariableUpdates call site to avoid.
   inGlobalActionRun: boolean
+  // In-memory ring buffer mirroring every action:log message this room has
+  // broadcast to its edit-role socket (see logAction below) — not persisted,
+  // capped at ACTION_LOG_MAX entries, oldest dropped first. Exists so
+  // main/mcp/get_action_log has something to read: an MCP tool call is
+  // one-shot request/response, with no way to have been listening on the WS
+  // broadcast the way the desktop editor's own debug panel is.
+  actionLog: { message: string; at: number }[]
 }
 // Keyed by deck id, lazily populated on first connection/reference (see
 // getOrLoadRoom) and never evicted — same always-resident philosophy the old
@@ -1201,7 +1211,8 @@ function getOrLoadRoom(deckId: string): DeckRoom | null {
     pendingGlobalVars: new Set(),
     pendingGlobalExternal: false,
     globalActionPassRunning: false,
-    inGlobalActionRun: false
+    inGlobalActionRun: false,
+    actionLog: []
   }
   rooms.set(deckId, room)
   syncPlugins(room)
@@ -1256,9 +1267,35 @@ function sequenceStepsForWidget(widget: Widget): SequenceStep[] {
 // exporting machine's own monitor layout. Neither of these crashes anything
 // — they just silently do the wrong thing — so this doesn't block the
 // import, it just tells the user what to go re-link/re-pick afterward.
-function collectImportWarnings(dashboard: Dashboard): string[] {
+// Compares dotted numeric version prefixes only (ignoring any -prerelease
+// suffix, e.g. "0.1.0-alpha.1" -> "0.1.0") — good enough to answer "is a
+// newer than b" for collectImportWarnings below without pulling in a full
+// semver dependency for the one comparison this app needs.
+function isVersionNewer(a: string, b: string): boolean {
+  const partsA = a.split('-')[0].split('.').map((n) => parseInt(n, 10) || 0)
+  const partsB = b.split('-')[0].split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    const x = partsA[i] ?? 0
+    const y = partsB[i] ?? 0
+    if (x !== y) return x > y
+  }
+  return false
+}
+
+function collectImportWarnings(dashboard: Dashboard, exportedAppVersion: string): string[] {
   const targetIds = new Set(getRestWebhookTargets().map((t) => t.id))
   const warnings: string[] = []
+  // DeckExportFile.appVersion used to be purely informational — this is the
+  // one place it's actually compared against anything. Only flag "newer than
+  // this install", not any mismatch: an older export is the common case
+  // (most decks predate whatever version is running now) and isn't itself a
+  // problem, while a newer one may lean on a feature/default this install
+  // doesn't have yet.
+  if (isVersionNewer(exportedAppVersion, app.getVersion())) {
+    warnings.push(
+      `This deck was exported from a newer version of Boarderoni (${exportedAppVersion}) than this install (${app.getVersion()}) — it may use a feature this version doesn't understand yet.`
+    )
+  }
   for (const widget of allDeckWidgets(dashboard)) {
     for (const step of flattenSequenceSteps(sequenceStepsForWidget(widget))) {
       if (step.kind === 'action' && step.action.kind === 'call-rest' && !targetIds.has(step.action.targetId)) {
@@ -1379,6 +1416,38 @@ function collectDeckSounds(dashboard: Dashboard): DeckExportFile['sounds'] {
   return bundled.length > 0 ? bundled : undefined
 }
 
+// Every custom font id any of this deck's labels reference, across the main
+// deck and every sub-deck — unlike collectReferencedSoundIds above, a
+// label's WidgetLabel.fontFamily is a plain top-level field (not buried in a
+// sequence step), so this can walk allDeckWidgets directly instead of
+// needing that function's own generic structural recursion.
+function collectReferencedFontIds(dashboard: Dashboard): Set<string> {
+  const ids = new Set<string>()
+  for (const widget of allDeckWidgets(dashboard)) {
+    for (const label of (widget as { labels?: { fontFamily?: string }[] }).labels ?? []) {
+      if (isCustomFontId(label.fontFamily)) ids.add(customFontIdFromFieldValue(label.fontFamily!))
+    }
+  }
+  return ids
+}
+
+// Reads each referenced font's bytes back off disk for the export envelope —
+// same "skip a manifest/disk drift instead of failing the whole export"
+// reasoning as collectDeckSounds above. See DeckExportFile.fonts' own
+// comment for why bundling a font isn't silent the way bundling a sound is.
+function collectDeckFonts(dashboard: Dashboard): DeckExportFile['fonts'] {
+  const bundled: NonNullable<DeckExportFile['fonts']> = []
+  const library = getCustomFonts()
+  for (const id of collectReferencedFontIds(dashboard)) {
+    const font = library.find((f) => f.id === id)
+    if (!font) continue
+    const file = customFontFile(id)
+    if (!existsSync(file)) continue
+    bundled.push({ id: font.id, label: font.label, filename: font.filename, dataBase64: readFileSync(file).toString('base64') })
+  }
+  return bundled.length > 0 ? bundled : undefined
+}
+
 // Loose on purpose — only checks the envelope shape (the magic marker,
 // formatVersion, and that `dashboard` at least looks like a Dashboard),
 // not every widget's own shape. Widget-level shape evolution is already
@@ -1407,7 +1476,10 @@ const deckExportFileSchema = z.object({
   // action in the deck would resolve to nothing.
   sounds: z
     .array(z.object({ id: z.string(), label: z.string(), filename: z.string(), dataBase64: z.string(), startAtMs: z.number().optional() }))
-    .optional()
+    .optional(),
+  // Same "must be declared, not left to passthrough" reasoning as sounds
+  // above.
+  fonts: z.array(z.object({ id: z.string(), label: z.string(), filename: z.string(), dataBase64: z.string() })).optional()
 })
 
 // Creating and renaming a deck are shared by the REST routes the deck picker
@@ -1490,7 +1562,8 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
       appVersion: app.getVersion(),
       dashboard,
       backgroundImage,
-      sounds: collectDeckSounds(dashboard)
+      sounds: collectDeckSounds(dashboard),
+      fonts: collectDeckFonts(dashboard)
     }
     const result = await dialog.showSaveDialog({
       defaultPath: `${dashboard.name}.boarderoni`,
@@ -1501,7 +1574,12 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
       return
     }
     writeFileSync(result.filePath, JSON.stringify(exportFile, null, 2), 'utf-8')
-    sendJson(res, 200, { ok: true })
+    // Told back to DeckPicker.tsx so it can show the one-time licensing
+    // notice DeckExportFile.fonts' own comment describes — this app can't
+    // verify a font's licence, so the honest thing is making the exporter
+    // aware rather than silently copying font binaries into a file they're
+    // about to hand to someone else.
+    sendJson(res, 200, { ok: true, fontCount: exportFile.fonts?.length ?? 0 })
     return
   }
 
@@ -1560,9 +1638,19 @@ async function handleDecksApi(req: IncomingMessage, res: ServerResponse, url: UR
       if (addCustomSoundWithId(sound.id, dataUrl, sound.label, sound.filename, sound.startAtMs)) importedSounds++
     }
     if (importedSounds > 0) broadcastCustomSounds()
+    // Same id-preserving reasoning as sounds above, applied to fonts (see
+    // addCustomFontWithId's own comment) — a label's fontFamily references a
+    // CustomFont by id, so the id has to survive import for the label to
+    // still resolve to the bundled font instead of falling back to default.
+    let importedFonts = 0
+    for (const font of exportFile.fonts ?? []) {
+      const dataUrl = `data:${FONT_MIME_BY_EXTENSION[fontExtension(font.filename)] ?? 'application/octet-stream'};base64,${font.dataBase64}`
+      if (addCustomFontWithId(font.id, dataUrl, font.label, font.filename)) importedFonts++
+    }
+    if (importedFonts > 0) broadcastCustomFonts()
     writeFileSync(deckDashboardFile(id), JSON.stringify(dashboard, null, 2), 'utf-8')
     broadcastDeckList()
-    const warnings = collectImportWarnings(dashboard)
+    const warnings = collectImportWarnings(dashboard, exportFile.appVersion)
     sendJson(res, 201, { deck: { id, name: dashboard.name } satisfies DeckSummary, warnings })
     return
   }
@@ -1972,6 +2060,23 @@ function broadcastToEditClients(room: DeckRoom, message: ServerToClient): void {
   }
 }
 
+// Oldest-dropped-first cap on DeckRoom.actionLog — generous enough to cover
+// a burst of activity between two MCP get_action_log polls without growing
+// unbounded on a long-running room nobody's actively debugging.
+const ACTION_LOG_MAX = 200
+
+// The one place an action:log message actually gets sent — mirrors it into
+// room.actionLog (see that field's own comment) in addition to the existing
+// live WS broadcast, so main/mcp's get_action_log has something to read
+// after the fact. Every call site that used to build its own `{type:
+// 'action:log', message}` and hand it to broadcastToEditClients directly
+// goes through this instead, so the two can't drift apart.
+function logAction(room: DeckRoom, message: string): void {
+  room.actionLog.push({ message, at: Date.now() })
+  if (room.actionLog.length > ACTION_LOG_MAX) room.actionLog.splice(0, room.actionLog.length - ACTION_LOG_MAX)
+  broadcastToEditClients(room, { type: 'action:log', message })
+}
+
 // How long to wait, after an fs.watch 'change' fires, before actually
 // re-reading the file and comparing it — a single external save can trigger
 // several rapid-fire 'change' events on some platforms/editors (temp-file-
@@ -2171,7 +2276,7 @@ function withLogRoom<T>(room: DeckRoom, evaluate: () => T): T {
 
 setExpressionConsoleSink((args) => {
   if (!logRoom) return
-  broadcastToEditClients(logRoom, { type: 'action:log', message: stringifyExpressionLogArgs(args) })
+  logAction(logRoom, stringifyExpressionLogArgs(args))
 })
 
 // Evaluates an update-state action's code and merges whatever it returns
@@ -2314,12 +2419,35 @@ async function runSetWindowsAudioAction(room: DeckRoom, action: SetWindowsAudioA
 // above, just resolving N named placeholders instead of one argument. Uses
 // the runtime's global fetch — this app's first outbound HTTP request
 // anywhere; everything else here only ever serves requests.
+// Every failure path here used to only ever reach the triggering client, as
+// an action:error toast on the widget that fired it (see runSequence's own
+// catch) — nothing reached the console or the debug panel, unlike an
+// UpdateStateAction/ConditionStep's own expression failures, which already
+// go through withLogRoom. A bad target, a non-2xx response, or even a raw
+// network exception (no try/catch existed around the fetch call itself)
+// were all silent from the desktop editor's point of view. The try/catch
+// below logs whatever failed via logAction before rethrowing unchanged, so
+// existing action:error behavior is untouched — this only adds visibility,
+// via both the live debug panel and (see DeckRoom.actionLog) MCP's
+// get_action_log, it doesn't change what happens on success or how a
+// failure is reported to the client that triggered it.
 async function runCallRestAction(room: DeckRoom, action: CallRestAction, trigger?: TriggerValue): Promise<void> {
   const target = getRestWebhookTargets().find((t) => t.id === action.targetId)
   if (!target || !target.enabled) {
-    throw new Error('This REST webhook target is disabled or no longer exists')
+    const message = 'This REST webhook target is disabled or no longer exists'
+    logAction(room, `[Call REST] ${message}`)
+    throw new Error(message)
   }
+  try {
+    await runCallRestActionUnlogged(room, target, action, trigger)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    logAction(room, `[Call REST: ${target.name}] ${message}`)
+    throw err
+  }
+}
 
+async function runCallRestActionUnlogged(room: DeckRoom, target: RestWebhookTarget, action: CallRestAction, trigger?: TriggerValue): Promise<void> {
   // Resolved once across every {{name}} token found in EITHER the body or
   // any header value (see extractAllPlaceholders) — a header and the body
   // referencing the same placeholder (e.g. a computed signature used in
@@ -2365,7 +2493,16 @@ async function runCallRestAction(room: DeckRoom, action: CallRestAction, trigger
 
   const body = hasBody ? substitute(target.payloadTemplate) : undefined
 
-  const res = await fetch(target.url, { method: target.method, headers, body })
+  // Node's global fetch (undici) has no per-request `rejectUnauthorized:
+  // false` the way some other HTTP clients do — a custom dispatcher built
+  // with a permissive `connect` option is the only way to skip TLS
+  // verification for just THIS target's own requests, instead of the blunt,
+  // process-wide `NODE_TLS_REJECT_UNAUTHORIZED=0` env var (see
+  // RestWebhookTarget.allowInvalidCertificates's own comment). Built fresh
+  // per call rather than cached on the target — this is a debug/internal-
+  // device escape hatch, not a hot path worth pooling connections for.
+  const dispatcher = target.allowInvalidCertificates ? new UndiciAgent({ connect: { rejectUnauthorized: false } }) : undefined
+  const res = await fetch(target.url, { method: target.method, headers, body, ...(dispatcher && { dispatcher }) })
   if (!res.ok) throw new Error(`REST call failed: ${res.status} ${res.statusText}`)
 }
 
@@ -2387,7 +2524,7 @@ function applyRestIncoming(sourceId: string, flattened: Record<string, unknown>)
     if (!(mapping.field in flattened)) continue
     const rawValue = flattened[mapping.field]
     if (mapping.expr && mapping.expr.trim()) {
-      const result = evaluateMappingExpression(mapping.expr, coerceVariableValue(rawValue), variableMap)
+      const result = withLogRoom(room, () => evaluateMappingExpression(mapping.expr!, coerceVariableValue(rawValue), variableMap))
       if (!result.ok) {
         console.error(`[boarderoni] REST incoming mapping expression failed (${source.name} -> ${mapping.variableName})`, result.error)
         continue
@@ -2557,7 +2694,7 @@ function syncPlugins(room: DeckRoom): void {
           // actual new raw value to feed it, not on every tick regardless.
           if (rawValue === previousValues[mapping.field]) continue
           if (mapping.expr && mapping.expr.trim()) {
-            const result = evaluateMappingExpression(mapping.expr, coerceVariableValue(rawValue), variableMap)
+            const result = withLogRoom(room, () => evaluateMappingExpression(mapping.expr!, coerceVariableValue(rawValue), variableMap))
             if (!result.ok) {
               console.error(`[boarderoni] plugin mapping expression failed (${current.name} -> ${mapping.variableName})`, result.error)
               continue
@@ -2914,7 +3051,7 @@ function evaluateGlobalCondition(room: DeckRoom, rule: GlobalAction): boolean {
 }
 
 function logGlobalAction(room: DeckRoom, message: string): void {
-  broadcastToEditClients(room, { type: 'action:log', message: `[Global action] ${message}` })
+  logAction(room, `[Global action] ${message}`)
 }
 
 // Runs every rule whose watch list intersects the changed variables, then
@@ -3940,6 +4077,65 @@ async function mcpTriggerAction(room: DeckRoom, widgetId: string, event: WidgetE
   return replies
 }
 
+// send_action's own backing function — runs one ad-hoc WidgetAction straight
+// through runActionStep, not runSequence/runSteps (there's no stored
+// SequenceStep[] to walk and no widgetId/event to attach a SequenceStepError's
+// path to). Same reply-collection sink as mcpTriggerAction above, for the
+// same reason. trigger: undefined, final: true — the same values
+// runGlobalActionPass passes for a global action's own steps, which have no
+// originating widget press behind them either.
+async function mcpRunAction(room: DeckRoom, action: WidgetAction): Promise<ServerToClient[]> {
+  const replies: ServerToClient[] = []
+  const sink: ActionReplyTarget = {
+    send: (data) => {
+      try {
+        replies.push(JSON.parse(data) as ServerToClient)
+      } catch {
+        // See mcpTriggerAction's identical comment above.
+      }
+    }
+  }
+  await runActionStep(room, action, undefined, true, sink)
+  return replies
+}
+
+// Renders a SequenceStepError's path as e.g. "step 2" or "step 0 > whenTrue >
+// step 1" — only ever shown inside an MCP tool error message (send_actions
+// has no widget/event to attach a structured action:error detail to, unlike
+// runSequence's own sendError path), so a flat string is enough; no client
+// needs to parse it back into a StepPath.
+function formatStepPath(path: StepPath): string {
+  return path.map((p) => (p.branch ? `step ${p.index} > ${p.branch}` : `step ${p.index}`)).join(' > ')
+}
+
+// send_actions' own backing function — runs an ad-hoc SequenceStep[] through
+// the same runSteps engine a stored widget event/global action uses, so
+// delay/condition steps behave identically (a real awaited setTimeout, not
+// something the MCP client has to pace itself with external sleeps between
+// separate send_action calls). Same reply-collection sink as mcpRunAction;
+// on failure, reformats the thrown SequenceStepError's path into the message
+// text since errorResult only ever surfaces err.message, not the structured
+// path/stepKind runSequence's own sendError gets to attach.
+async function mcpRunActions(room: DeckRoom, steps: SequenceStep[]): Promise<ServerToClient[]> {
+  const replies: ServerToClient[] = []
+  const sink: ActionReplyTarget = {
+    send: (data) => {
+      try {
+        replies.push(JSON.parse(data) as ServerToClient)
+      } catch {
+        // See mcpTriggerAction's identical comment above.
+      }
+    }
+  }
+  try {
+    await runSteps(room, steps, undefined, true, sink, [])
+  } catch (err) {
+    const stepErr = err as SequenceStepError
+    throw new Error(`${formatStepPath(stepErr.path)} (${stepErr.stepKind}) failed: ${stepErr.message}`)
+  }
+  return replies
+}
+
 // Dependency-injection surface for the MCP server (see main/mcp/tools.ts's
 // own comment on why it doesn't just import these from here directly).
 // applyDashboardUpdate's excludeSocket param is omitted here on purpose —
@@ -3961,6 +4157,44 @@ function getEditorDeckId(): string | undefined {
   return undefined
 }
 
+// MCP's own create/update entry points for REST data sources — mirrors the
+// rest-sources:create/update WS cases above (create/sync-listeners/
+// broadcast, sanitize-then-persist) since main/mcp/tools.ts can't import
+// syncRestIncomingServers's own applyRestIncoming callback directly (that's
+// main/index.ts-local, same circular-require reasoning as every other McpDeps
+// entry). Unlike rest-sources:update's own whole-array replace (the Settings
+// panel always round-trips its full locally-edited draft), this is a single-
+// source patch — more natural for a tool call, and it means an MCP client
+// never needs to have first fetched every OTHER source just to touch one.
+// bearerToken is deliberately not patchable here — rotating it has its own
+// dedicated rest-sources:regenerate-token path, not exposed to MCP; keeping
+// it out of a generic patch avoids a client accidentally clobbering it via
+// an incomplete object.
+function mcpCreateRestDataSource(name: string): RestDataSource {
+  const source = createRestDataSource(name)
+  syncRestIncomingServers(applyRestIncoming)
+  broadcastRestSources()
+  return source
+}
+
+function mcpUpdateRestDataSource(sourceId: string, patch: Record<string, unknown>): RestDataSource | null {
+  const existing = getRestDataSources().find((s) => s.id === sourceId)
+  if (!existing) return null
+  const { name, enabled, port, targetDeckId, mappings } = patch as Partial<RestDataSource>
+  const updated: RestDataSource = {
+    ...existing,
+    ...(name !== undefined && { name }),
+    ...(enabled !== undefined && { enabled }),
+    ...(port !== undefined && { port }),
+    ...(targetDeckId !== undefined && { targetDeckId }),
+    ...(mappings !== undefined && { mappings })
+  }
+  updateRestDataSources(getRestDataSources().map((s) => (s.id === sourceId ? updated : s)))
+  syncRestIncomingServers(applyRestIncoming)
+  broadcastRestSources()
+  return updated
+}
+
 const mcpDeps: McpDeps = {
   getOrLoadRoom,
   listDeckSummaries,
@@ -3970,12 +4204,16 @@ const mcpDeps: McpDeps = {
   applyDashboardUpdate: (room, dashboard, final) => applyDashboardUpdate(room, dashboard, final),
   applyAppSettingsPatch,
   triggerAction: mcpTriggerAction,
+  runAction: mcpRunAction,
+  runActions: mcpRunActions,
   getEditorWindow: () => editorWindow,
   getEditorDeckId,
   hideEditorWindow: () => {
     if (editorWindow) hideEditorToTray(editorWindow)
   },
-  showEditorWindow: () => showEditorWindow()
+  showEditorWindow: () => showEditorWindow(),
+  createRestDataSource: mcpCreateRestDataSource,
+  updateRestDataSource: mcpUpdateRestDataSource
 }
 syncMcpServer(mcpDeps)
 

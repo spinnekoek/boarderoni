@@ -9,5 +9,13 @@ import type { PluginTypeMeta } from './types'
 export const randomPlugin: PluginTypeMeta = {
   kind: 'random',
   label: 'Random Number (example)',
-  fields: [{ key: 'value', label: 'Random value (0–1)' }]
+  // Range shown here is just the built-in default — RandomConfigPanel lets
+  // it be narrowed/widened per instance, so this label doesn't reflect
+  // whatever min/max is actually configured (same "static label, live
+  // config elsewhere" split every other kind's fields already have).
+  fields: [{ key: 'value', label: 'Random value' }],
+  config: [
+    { key: 'min', label: 'Minimum', type: 'number', description: 'Defaults to 0 if unset.' },
+    { key: 'max', label: 'Maximum', type: 'number', description: 'Defaults to 1 if unset. Tolerated if saved backwards relative to min.' }
+  ]
 }

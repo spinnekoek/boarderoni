@@ -13,6 +13,23 @@ export interface PluginField {
   label: string
 }
 
+// One key of a plugin instance's own `Plugin.config` (shared/types.ts) —
+// unlike `fields` above (what a producer EMITS), this documents what a
+// producer READS to configure itself, e.g. dcsbios's own `aircraft`/
+// `updateHz` or windowsAudio's `deviceName`/`appName`/`updateHz`. `config`
+// stays `Record<string, unknown>` in the actual Plugin type (see that
+// interface's own comment on why `kind` is deliberately an open string, not
+// a discriminated union) — this is documentation, not enforcement, same
+// "declarative metadata only" reasoning as PluginTypeMeta itself. Surfaced
+// via MCP's list_plugin_types so a client doesn't have to guess a config
+// key or its shape (see main/mcp/tools.ts).
+export interface PluginConfigField {
+  key: string
+  label: string
+  type: 'string' | 'number' | 'boolean' | 'object'
+  description?: string
+}
+
 export interface PluginTypeMeta {
   kind: string
   // The plugin CAPABILITY's own name — shown in PluginsModal's enable-
@@ -29,6 +46,13 @@ export interface PluginTypeMeta {
   // `label` when unset, which covers every other kind today.
   instanceLabel?: string
   fields: PluginField[]
+  // What this kind's own instances read from `Plugin.config` — unset/empty
+  // means the kind takes no config (most core kinds, plus 'datetime', whose
+  // producer needs nothing beyond the current time). Unlike `fields`, this
+  // is always statically known even for 'dcsbios' (its aircraft/updateHz
+  // keys don't depend on which aircraft is picked, only its own per-aircraft
+  // FIELDS do — see dynamicFields below).
+  config?: PluginConfigField[]
   // True when this kind's fields aren't statically known (see 'dcsbios') —
   // EventSourcesModal.tsx checks this to render a dynamic aircraft/field-
   // browser UI instead of the generic static-list field picker. An explicit flag

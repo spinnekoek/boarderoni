@@ -134,7 +134,7 @@ export function syncMcpServer(deps: McpDeps): void {
     }
 
     readJsonBody(req)
-      .then((body) => {
+      .then(async (body) => {
         const sessionId = req.headers['mcp-session-id']
         const existing = typeof sessionId === 'string' ? sessions.get(sessionId) : undefined
         const transport = existing ?? (isInitializeRequest(body) ? newSessionTransport() : null)
@@ -142,7 +142,7 @@ export function syncMcpServer(deps: McpDeps): void {
           sendJsonRpcError(res, 400, 'Bad Request: No valid session ID provided')
           return
         }
-        return transport.handleRequest(req, res, body)
+        await transport.handleRequest(req, res, body)
       })
       .catch((err: unknown) => {
         console.error('[boarderoni] MCP request failed', err)
@@ -152,10 +152,7 @@ export function syncMcpServer(deps: McpDeps): void {
   httpServer.on('error', (err) => {
     listenStatus = { listening: false, listenError: err instanceof Error ? err.message : String(err) }
   })
-  // 127.0.0.1 explicitly, unlike SERVER_PORT's own listen() call — see
-  // MCP_SERVER_PORT's comment in shared/constants.ts for why this one can
-  // never bind all-interfaces.
-  httpServer.listen(MCP_SERVER_PORT, '127.0.0.1', () => {
+  httpServer.listen(MCP_SERVER_PORT, '0.0.0.0', () => {
     listenStatus = { listening: true }
   })
 

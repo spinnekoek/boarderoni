@@ -10,7 +10,7 @@ import { ExpressionEditorModal } from './ExpressionEditorModal'
 import { getPluginType, instantiablePluginTypes, type PluginTypeMeta } from '@shared/plugins'
 import type { Plugin, PluginMapping } from '@shared/types'
 import type { DcsBiosFieldCatalogEntry } from '@shared/dcsBiosTypes'
-import { PLUGIN_CONFIG_PANELS, defaultDcsBiosConfig, DEFAULT_OCR_INTERVAL_MS, defaultWindowsAudioConfig } from '../plugins'
+import { PLUGIN_CONFIG_PANELS, defaultDcsBiosConfig, DEFAULT_OCR_INTERVAL_MS, defaultWindowsAudioConfig, defaultRandomConfig } from '../plugins'
 
 // Kept to a single line deliberately — CodeMirror's placeholder extension
 // renders an embedded "\n" as an actual second visual row, so the empty
@@ -465,14 +465,16 @@ export function EventSourcesModal({ onClose }: { onClose: () => void }): React.J
   }
 
   // Per-kind default config on creation — deliberately left as a small
-  // switch here rather than a fully generic factory: only two kinds need
-  // anything beyond `undefined`, and both need live app state (DCS-BIOS's
-  // default update rate) that doesn't belong in shared/plugins' plain
-  // metadata. See docs/CONTRIBUTING.md if a new plugin needs to join this list.
+  // switch here rather than a fully generic factory: most kinds need
+  // nothing beyond `undefined`, and DCS-BIOS specifically needs live app
+  // state (its own default update rate) that doesn't belong in
+  // shared/plugins' plain metadata. See docs/CONTRIBUTING.md if a new
+  // plugin needs to join this list.
   function defaultConfigFor(kind: string): Record<string, unknown> | undefined {
     if (kind === 'dcsbios') return defaultDcsBiosConfig(dcsBiosSettings?.defaultUpdateHz)
     if (kind === 'screenCapture') return { intervalMs: DEFAULT_OCR_INTERVAL_MS }
     if (kind === 'windowsAudio') return defaultWindowsAudioConfig()
+    if (kind === 'random') return defaultRandomConfig()
     return undefined
   }
 

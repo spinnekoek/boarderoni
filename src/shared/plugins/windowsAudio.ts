@@ -22,5 +22,22 @@ export const windowsAudioPlugin: PluginTypeMeta = {
     { key: 'muted', label: 'Muted' },
     { key: 'deviceName', label: 'Device name' },
     { key: 'appName', label: 'Application name (when targeting an app instead of a device)' }
+  ],
+  config: [
+    {
+      key: 'deviceName',
+      label: 'Device name',
+      type: 'string',
+      description:
+        "Device mode only (ignored once appName is set). '' (the default for a freshly-added instance) tracks whichever device is currently the system default, following it across a default-device change; any other value must be an exact device name from list_windows_audio_devices."
+    },
+    {
+      key: 'appName',
+      label: 'Application name',
+      type: 'string',
+      description:
+        "Set to target one application's own audio session instead of a device — deviceName is then ignored (a session always lives on the current default device). Unset (default) means device mode."
+    },
+    { key: 'updateHz', label: 'Update rate (Hz)', type: 'number', description: "Optional — defaults to this connection's own built-in rate if unset." }
   ]
 }

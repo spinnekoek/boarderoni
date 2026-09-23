@@ -86,21 +86,30 @@ export const CanvasWidget = memo(function CanvasWidget({
   const resizeState = useRef<ResizeState | null>(null)
   const [resizing, setResizing] = useState(false)
 
-  // A line's own selection/resize box rotates to match its visual angle
-  // (see LineWidgetContent's applyRotation prop) instead of staying
-  // axis-aligned — every other rotatable widget type is roughly as wide as
-  // it is tall, so an unrotated bounding box around a rotated one is a
-  // minor visual mismatch; a line is extremely oblong (long and thin), so
-  // the same mismatch would leave a "wide" selection box around a visually
-  // "tall" line at 90°. handleResizePointerMove below counter-rotates the
-  // pointer delta to match, same projection technique as
-  // useToggleSwitchDrag.ts's own projectedDelta.
-  const lineRotateAngle =
-    widget.type === 'line'
-      ? widget.rotateAngleExpr
-        ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle)
-        : widget.rotateAngle
-      : undefined
+  // Every rotate-capable widget type's own selection/resize box rotates to
+  // match its visual angle (see each xWidgetContent's own applyRotation
+  // prop, which this component sets false for so the content doesn't also
+  // rotate a second time inside an already-rotated wrapper) instead of
+  // staying axis-aligned while the widget spins inside it. Each of these
+  // types carries the same optional rotateAngle/rotateAngleExpr shape (see
+  // shared/types.ts) — resolved identically here regardless of which one.
+  // handleResizePointerMove below counter-rotates the pointer delta to
+  // match, same projection technique as useToggleSwitchDrag.ts's own
+  // projectedDelta.
+  const wrapperRotateAngle = (() => {
+    switch (widget.type) {
+      case 'line':
+      case 'button':
+      case 'switch-dial':
+      case 'switch-toggle':
+      case 'switch-rocker':
+      case 'adjuster-slider':
+      case 'adjuster-knob':
+        return widget.rotateAngleExpr ? (resolveNumericExpr(widget.rotateAngleExpr, variables) ?? widget.rotateAngle) : widget.rotateAngle
+      default:
+        return undefined
+    }
+  })()
 
   // The editor always shows every widget regardless of visible/visibleExpr
   // (see WidgetVisibility in shared/types.ts) — hiding it here would make
@@ -157,19 +166,23 @@ export const CanvasWidget = memo(function CanvasWidget({
     // grid cell, but with snapping off there's no such constraint.
     const minSize = snapToGrid ? gridSize : 1
 
+    // Since the whole box is now visually rotated to match (wrapperRotateAngle
+    // above), the raw screen-space pointer delta no longer lines up with the
+    // box's own local width/height axes once rotated — project it onto those
+    // axes first, same rotation-matrix technique useToggleSwitchDrag.ts's own
+    // projectedDelta uses for the identical reason. Reduces to the identity
+    // (localDx = rawDx, localDy = rawDy) at 0deg, so this is a no-op for the
+    // much more common unrotated case.
+    const rad = ((wrapperRotateAngle ?? 0) * Math.PI) / 180
+    const localDx = rawDx * Math.cos(rad) + rawDy * Math.sin(rad)
+    const localDy = -rawDx * Math.sin(rad) + rawDy * Math.cos(rad)
+
     // Line widgets only ever drag their own length — h is a fixed thickness
     // set in the properties panel, not something the resize handle touches
     // (see the handle's own --horizontal CSS variant below). Use rotateAngle
     // to point it anywhere other than horizontal instead of a 2D resize.
-    // Since the whole box is now visually rotated to match (lineRotateAngle
-    // above), the raw screen-space pointer delta no longer IS the length
-    // delta once rotated — project it onto the box's own rotated axis first,
-    // same rotation-matrix technique useToggleSwitchDrag.ts's own
-    // projectedDelta uses for the identical reason.
     if (widget.type === 'line') {
-      const rad = ((lineRotateAngle ?? 0) * Math.PI) / 180
-      const dx = rawDx * Math.cos(rad) + rawDy * Math.sin(rad)
-      const w = Math.max(minSize, snap(resize.origW + dx))
+      const w = Math.max(minSize, snap(resize.origW + localDx))
 
       // Growing w always extends the box rightward in its own unrotated
       // layout — left/top/width/height are laid out BEFORE the rotate()
@@ -186,9 +199,21 @@ export const CanvasWidget = memo(function CanvasWidget({
       return
     }
 
-    const w = Math.max(minSize, snap(resize.origW + rawDx))
-    const h = Math.max(minSize, snap(resize.origH + rawDy))
-    patch({ w, h })
+    const w = Math.max(minSize, snap(resize.origW + localDx))
+    const h = Math.max(minSize, snap(resize.origH + localDy))
+
+    // Same anchor-the-opposite-corner idea as the line case above, extended
+    // to two independent axes: rotate() pivots the whole box around its own
+    // (recentering) center, so growing w and/or h without compensating x/y
+    // would visibly drag the box's near corner across the screen as it's
+    // resized, once wrapperRotateAngle is nonzero. Both halfDw/halfDh terms
+    // vanish at 0deg, leaving x/y untouched exactly as before this box could
+    // rotate at all.
+    const halfDw = (w - resize.origW) / 2
+    const halfDh = (h - resize.origH) / 2
+    const x = resize.origX + halfDw * (Math.cos(rad) - 1) - halfDh * Math.sin(rad)
+    const y = resize.origY + halfDw * Math.sin(rad) + halfDh * (Math.cos(rad) - 1)
+    patch({ w, h, x, y })
   }
 
   function handleResizePointerUp(e: React.PointerEvent): void {
@@ -210,7 +235,7 @@ export const CanvasWidget = memo(function CanvasWidget({
         top: widget.y,
         width: widget.w,
         height: widget.h,
-        transform: lineRotateAngle ? `rotate(${lineRotateAngle}deg)` : undefined
+        transform: wrapperRotateAngle ? `rotate(${wrapperRotateAngle}deg)` : undefined
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -218,7 +243,7 @@ export const CanvasWidget = memo(function CanvasWidget({
       onContextMenu={onContextMenu}
     >
       {widget.type === 'button' && previewState && (
-        <ButtonWidgetContent widget={widget} state={previewState} interactive={false} variables={variables} />
+        <ButtonWidgetContent widget={widget} state={previewState} interactive={false} variables={variables} applyRotation={false} />
       )}
       {widget.type === 'gauge-bar' && <BarGaugeWidgetContent widget={widget} variables={variables} />}
       {widget.type === 'gauge-arc' && <ArcGaugeWidgetContent widget={widget} variables={variables} />}
@@ -227,7 +252,7 @@ export const CanvasWidget = memo(function CanvasWidget({
       {widget.type === 'screen-capture' && <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />}
       {widget.type === 'dcs-viewport' && <DcsViewportWidgetContent widget={widget} variables={variables} deckId={deckId} />}
       {(widget.type === 'adjuster-slider' || widget.type === 'adjuster-knob') && (
-        <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} />
+        <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} applyRotation={false} />
       )}
       {widget.type === 'encoder' && <EncoderWidgetContent widget={widget} variables={variables} interactive={false} />}
       {widget.type === 'switch-rocker' && (
@@ -245,6 +270,7 @@ export const CanvasWidget = memo(function CanvasWidget({
             if (!isSoleSelection) return
             selectBlock(selectedBlockId === position.id ? null : position.id)
           }}
+          applyRotation={false}
         />
       )}
       {widget.type === 'switch-dial' && (
@@ -253,6 +279,7 @@ export const CanvasWidget = memo(function CanvasWidget({
           variables={variables}
           interactive={false}
           activeIndex={resolveActivePositionIndex(widget.positions ?? [], widget.activePositionExpr, variables) ?? 0}
+          applyRotation={false}
         />
       )}
       {widget.type === 'switch-toggle' && (
@@ -272,6 +299,7 @@ export const CanvasWidget = memo(function CanvasWidget({
             // event regardless).
             selectBlock(isSoleSelection && selectedBlockId === position.id ? null : position.id)
           }}
+          applyRotation={false}
         />
       )}
       {widget.type === 'dropdown' && (
@@ -286,10 +314,10 @@ export const CanvasWidget = memo(function CanvasWidget({
         <div
           className="canvas-widget__size-label"
           // Counter-rotates back upright against the outer box's own
-          // lineRotateAngle (see its comment above) — inherited rotation
+          // wrapperRotateAngle (see its comment above) — inherited rotation
           // would otherwise turn this sideways/upside-down right along with
           // the box at anything but 0deg.
-          style={{ transform: `scale(${1 / zoom}) rotate(${-(lineRotateAngle ?? 0)}deg)` }}
+          style={{ transform: `scale(${1 / zoom}) rotate(${-(wrapperRotateAngle ?? 0)}deg)` }}
         >
           {Math.round(widget.w)} × {Math.round(widget.h)}
         </div>

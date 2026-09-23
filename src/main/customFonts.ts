@@ -44,20 +44,39 @@ function saveManifest(fonts: CustomFont[]): void {
   writeFileSync(manifestFile(), JSON.stringify(fonts, null, 2), 'utf-8')
 }
 
-// Returns null for a malformed data URL or a filename extension outside
-// ALLOWED_FONT_EXTENSIONS — the caller (main/index.ts's fonts:upload
-// handler) treats either the same way, silently dropping the message, same
-// as background-image:upload's own malformed-data-URL handling.
-export function addCustomFont(dataUrl: string, label: string, filename: string): CustomFont | null {
+// Shared by both entry points below. Returns null for a malformed data URL
+// or a filename extension outside ALLOWED_FONT_EXTENSIONS — callers treat
+// either the same way (silently drop), same as background-image:upload's own
+// malformed-data-URL handling.
+function writeFont(id: string, dataUrl: string, label: string, filename: string): CustomFont | null {
   const match = /^data:([\w/+.-]*);base64,(.+)$/.exec(dataUrl)
   if (!match) return null
   if (!ALLOWED_FONT_EXTENSIONS.includes(fontExtension(filename))) return null
   const [, , base64] = match
-  const font: CustomFont = { id: randomUUID(), label: label.trim() || filename, filename }
+  const font: CustomFont = { id, label: label.trim() || filename, filename }
   mkdirSync(fontsDir(), { recursive: true })
   writeFileSync(customFontFile(font.id), Buffer.from(base64, 'base64'))
-  saveManifest([...getCustomFonts(), font])
+  saveManifest([...getCustomFonts().filter((f) => f.id !== id), font])
   return font
+}
+
+export function addCustomFont(dataUrl: string, label: string, filename: string): CustomFont | null {
+  return writeFont(randomUUID(), dataUrl, label, filename)
+}
+
+// Deck import's own entry point — mirrors addCustomSoundWithId in
+// customSounds.ts (see that file's own comment on why this exists and sounds
+// share the same shape): keeps the id the export carried so the imported
+// deck's labels, which reference a font BY id via WidgetLabel.fontFamily,
+// still resolve, and so re-importing (or importing two decks sharing a font)
+// doesn't accumulate duplicate copies. An id already present is left
+// completely alone — whatever is on disk here is assumed to be the same
+// font, and overwriting it would silently change every other deck already
+// using it.
+export function addCustomFontWithId(id: string, dataUrl: string, label: string, filename: string): CustomFont | null {
+  const existing = getCustomFonts().find((f) => f.id === id)
+  if (existing) return existing
+  return writeFont(id, dataUrl, label, filename)
 }
 
 export function deleteCustomFont(id: string): void {

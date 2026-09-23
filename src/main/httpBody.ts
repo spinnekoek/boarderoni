@@ -30,7 +30,7 @@ export function readBody(req: IncomingMessage, maxBytes: number = MAX_REQUEST_BO
         reject(new Error(`Request body exceeded ${maxBytes} bytes`))
         return
       }
-      data += chunk
+      data += chunk.toString('utf-8')
     })
     req.on('end', () => resolve(data))
     req.on('error', reject)

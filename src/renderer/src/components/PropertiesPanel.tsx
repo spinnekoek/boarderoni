@@ -559,7 +559,11 @@ function LabelFields({
           type="number"
           min={1}
           value={label.fontSize ?? DEFAULT_WIDGET_FONT_SIZE}
-          onChange={(e) => onChange({ fontSize: Math.max(1, Number(e.target.value)) })}
+          onChange={(e) => {
+            const n = Number(e.target.value)
+            if (!Number.isNaN(n)) onChange({ fontSize: n })
+          }}
+          onBlur={(e) => onChange({ fontSize: Math.max(1, Number(e.target.value)) })}
         />
       </label>
 
@@ -793,7 +797,11 @@ function DetentShapeEditor({
             type="number"
             min={1}
             value={style?.width ?? defaultSize.width}
-            onChange={(e) => onStyleChange({ ...style, width: Math.max(1, Number(e.target.value)) })}
+            onChange={(e) => {
+              const n = Number(e.target.value)
+              if (!Number.isNaN(n)) onStyleChange({ ...style, width: n })
+            }}
+            onBlur={(e) => onStyleChange({ ...style, width: Math.max(1, Number(e.target.value)) })}
           />
         </label>
         <label className="properties__field">
@@ -802,7 +810,11 @@ function DetentShapeEditor({
             type="number"
             min={1}
             value={style?.height ?? defaultSize.height}
-            onChange={(e) => onStyleChange({ ...style, height: Math.max(1, Number(e.target.value)) })}
+            onChange={(e) => {
+              const n = Number(e.target.value)
+              if (!Number.isNaN(n)) onStyleChange({ ...style, height: n })
+            }}
+            onBlur={(e) => onStyleChange({ ...style, height: Math.max(1, Number(e.target.value)) })}
           />
         </label>
       </div>
@@ -864,7 +876,11 @@ function DetentShapeEditor({
                 type="number"
                 min={0}
                 value={style?.borderWidth ?? 0}
-                onChange={(e) => onStyleChange({ ...style, borderWidth: Math.max(0, Number(e.target.value)) })}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) onStyleChange({ ...style, borderWidth: n })
+                }}
+                onBlur={(e) => onStyleChange({ ...style, borderWidth: Math.max(0, Number(e.target.value)) })}
               />
             </label>
             {showBorderRadius && (
@@ -874,7 +890,11 @@ function DetentShapeEditor({
                   type="number"
                   min={0}
                   value={style?.borderRadius ?? defaultBorderRadius}
-                  onChange={(e) => onStyleChange({ ...style, borderRadius: Math.max(0, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) onStyleChange({ ...style, borderRadius: n })
+                  }}
+                  onBlur={(e) => onStyleChange({ ...style, borderRadius: Math.max(0, Number(e.target.value)) })}
                 />
               </label>
             )}
@@ -964,7 +984,13 @@ function DialShapeFields({
             <div className="properties__grid2">
               <label className="properties__field">
                 <span>Square width</span>
-                <input type="number" min={1} value={value.squareWidth ?? 24} onChange={(e) => onChange({ squareWidth: Math.max(1, Number(e.target.value)) })} />
+                <input type="number" min={1} value={value.squareWidth ?? 24}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) onChange({ squareWidth: n })
+                  }}
+                  onBlur={(e) => onChange({ squareWidth: Math.max(1, Number(e.target.value)) })}
+                />
               </label>
               <label className="properties__field">
                 <span>Square height</span>
@@ -972,7 +998,11 @@ function DialShapeFields({
                   type="number"
                   min={1}
                   value={value.squareHeight ?? 24}
-                  onChange={(e) => onChange({ squareHeight: Math.max(1, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) onChange({ squareHeight: n })
+                  }}
+                  onBlur={(e) => onChange({ squareHeight: Math.max(1, Number(e.target.value)) })}
                 />
               </label>
             </div>
@@ -983,7 +1013,11 @@ function DialShapeFields({
                   type="number"
                   min={0}
                   value={value.squareBorderWidth ?? 0}
-                  onChange={(e) => onChange({ squareBorderWidth: Math.max(0, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) onChange({ squareBorderWidth: n })
+                  }}
+                  onBlur={(e) => onChange({ squareBorderWidth: Math.max(0, Number(e.target.value)) })}
                 />
               </label>
               <label className="properties__field">
@@ -992,7 +1026,11 @@ function DialShapeFields({
                   type="number"
                   min={0}
                   value={value.squareBorderRadius ?? 2}
-                  onChange={(e) => onChange({ squareBorderRadius: Math.max(0, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) onChange({ squareBorderRadius: n })
+                  }}
+                  onBlur={(e) => onChange({ squareBorderRadius: Math.max(0, Number(e.target.value)) })}
                 />
               </label>
             </div>
@@ -1017,7 +1055,13 @@ function DialShapeFields({
             <div className="properties__grid2">
               <label className="properties__field">
                 <span>Circle size</span>
-                <input type="number" min={1} value={value.circleSize ?? 20} onChange={(e) => onChange({ circleSize: Math.max(1, Number(e.target.value)) })} />
+                <input type="number" min={1} value={value.circleSize ?? 20}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) onChange({ circleSize: n })
+                  }}
+                  onBlur={(e) => onChange({ circleSize: Math.max(1, Number(e.target.value)) })}
+                />
               </label>
               <label className="properties__field">
                 <span>Circle border width</span>
@@ -1025,7 +1069,11 @@ function DialShapeFields({
                   type="number"
                   min={0}
                   value={value.circleBorderWidth ?? 0}
-                  onChange={(e) => onChange({ circleBorderWidth: Math.max(0, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) onChange({ circleBorderWidth: n })
+                  }}
+                  onBlur={(e) => onChange({ circleBorderWidth: Math.max(0, Number(e.target.value)) })}
                 />
               </label>
             </div>
@@ -1049,7 +1097,11 @@ function DialShapeFields({
                   type="number"
                   min={0}
                   value={value.circleIndentCount ?? 0}
-                  onChange={(e) => onChange({ circleIndentCount: Math.max(0, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) onChange({ circleIndentCount: n })
+                  }}
+                  onBlur={(e) => onChange({ circleIndentCount: Math.max(0, Number(e.target.value)) })}
                 />
               </label>
               <label className="properties__field">
@@ -1058,7 +1110,11 @@ function DialShapeFields({
                   type="number"
                   min={0}
                   value={value.circleIndentSize ?? Math.round(((value.circleSize ?? 20) / 6) * 10) / 10}
-                  onChange={(e) => onChange({ circleIndentSize: Math.max(0, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) onChange({ circleIndentSize: n })
+                  }}
+                  onBlur={(e) => onChange({ circleIndentSize: Math.max(0, Number(e.target.value)) })}
                 />
               </label>
             </div>
@@ -1069,7 +1125,11 @@ function DialShapeFields({
                   type="number"
                   min={0}
                   value={value.circleIndentDistance ?? (value.circleSize ?? 20) / 2}
-                  onChange={(e) => onChange({ circleIndentDistance: Math.max(0, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) onChange({ circleIndentDistance: n })
+                  }}
+                  onBlur={(e) => onChange({ circleIndentDistance: Math.max(0, Number(e.target.value)) })}
                 />
               </label>
               <label className="properties__field">
@@ -1127,7 +1187,11 @@ function DialShapeFields({
               type="number"
               min={0}
               value={value.indicatorDistance ?? (dialShape === 'square' ? (value.squareHeight ?? 24) / 2 : (value.circleSize ?? 20) / 2)}
-              onChange={(e) => onChange({ indicatorDistance: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) onChange({ indicatorDistance: n })
+              }}
+              onBlur={(e) => onChange({ indicatorDistance: Math.max(0, Number(e.target.value)) })}
             />
           </label>
         </PropertiesSection>
@@ -1346,7 +1410,11 @@ function SequenceStepFields({
             type="number"
             min={0}
             value={step.delayMs}
-            onChange={(e) => onChange({ ...step, delayMs: Math.max(0, Math.round(Number(e.target.value))) })}
+            onChange={(e) => {
+              const n = Math.round(Number(e.target.value))
+              if (!Number.isNaN(n)) onChange({ ...step, delayMs: n })
+            }}
+            onBlur={(e) => onChange({ ...step, delayMs: Math.max(0, Math.round(Number(e.target.value))) })}
           />
         </label>
         <button type="button" className="properties__file-remove" onClick={onRemove}>
@@ -3207,11 +3275,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={lw.w} onChange={(e) => patchWidget({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={lw.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchWidget({ w: n })
+                }}
+                onBlur={(e) => patchWidget({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={lw.h} onChange={(e) => patchWidget({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={lw.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchWidget({ h: n })
+                }}
+                onBlur={(e) => patchWidget({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -3289,7 +3369,11 @@ export function PropertiesPanel(): React.JSX.Element {
               min={1}
               max={line.h}
               value={line.lineWidth ?? line.h}
-              onChange={(e) => patchLine({ lineWidth: Math.max(1, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchLine({ lineWidth: n })
+              }}
+              onBlur={(e) => patchLine({ lineWidth: Math.max(1, Number(e.target.value)) })}
             />
           </label>
           <p className="properties__hint">
@@ -3358,7 +3442,11 @@ export function PropertiesPanel(): React.JSX.Element {
                 type="number"
                 min={minSize}
                 value={line.w}
-                onChange={(e) => patchLine({ w: Math.max(minSize, Number(e.target.value)) })}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchLine({ w: n })
+                }}
+                onBlur={(e) => patchLine({ w: Math.max(minSize, Number(e.target.value)) })}
               />
             </label>
             <label className="properties__field">
@@ -3367,7 +3455,11 @@ export function PropertiesPanel(): React.JSX.Element {
                 type="number"
                 min={minSize}
                 value={line.h}
-                onChange={(e) => patchLine({ h: Math.max(minSize, Number(e.target.value)) })}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchLine({ h: n })
+                }}
+                onBlur={(e) => patchLine({ h: Math.max(minSize, Number(e.target.value)) })}
               />
             </label>
           </div>
@@ -3582,11 +3674,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={gauge.w} onChange={(e) => patchGauge({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={gauge.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchGauge({ w: n })
+                }}
+                onBlur={(e) => patchGauge({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={gauge.h} onChange={(e) => patchGauge({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={gauge.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchGauge({ h: n })
+                }}
+                onBlur={(e) => patchGauge({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -3764,7 +3868,11 @@ export function PropertiesPanel(): React.JSX.Element {
                         type="number"
                         min={2}
                         value={tickSet.count ?? 5}
-                        onChange={(e) => patchTickSet(tickSet.id, { count: Math.max(2, Math.round(Number(e.target.value))) })}
+                        onChange={(e) => {
+                          const n = Math.round(Number(e.target.value))
+                          if (!Number.isNaN(n)) patchTickSet(tickSet.id, { count: n })
+                        }}
+                        onBlur={(e) => patchTickSet(tickSet.id, { count: Math.max(2, Math.round(Number(e.target.value))) })}
                       />
                     </label>
                     <label className="properties__field">
@@ -3781,7 +3889,11 @@ export function PropertiesPanel(): React.JSX.Element {
                         type="number"
                         min={0}
                         value={tickSet.size ?? 6}
-                        onChange={(e) => patchTickSet(tickSet.id, { size: Math.max(0, Number(e.target.value)) })}
+                        onChange={(e) => {
+                          const n = Number(e.target.value)
+                          if (!Number.isNaN(n)) patchTickSet(tickSet.id, { size: n })
+                        }}
+                        onBlur={(e) => patchTickSet(tickSet.id, { size: Math.max(0, Number(e.target.value)) })}
                       />
                     </label>
                     <label className="properties__field">
@@ -3790,7 +3902,11 @@ export function PropertiesPanel(): React.JSX.Element {
                         type="number"
                         min={0}
                         value={tickSet.thickness ?? 2}
-                        onChange={(e) => patchTickSet(tickSet.id, { thickness: Math.max(0, Number(e.target.value)) })}
+                        onChange={(e) => {
+                          const n = Number(e.target.value)
+                          if (!Number.isNaN(n)) patchTickSet(tickSet.id, { thickness: n })
+                        }}
+                        onBlur={(e) => patchTickSet(tickSet.id, { thickness: Math.max(0, Number(e.target.value)) })}
                       />
                     </label>
                   </div>
@@ -3816,7 +3932,11 @@ export function PropertiesPanel(): React.JSX.Element {
                         type="number"
                         min={0}
                         value={tickSet.borderWidth ?? 0}
-                        onChange={(e) => patchTickSet(tickSet.id, { borderWidth: Math.max(0, Number(e.target.value)) })}
+                        onChange={(e) => {
+                          const n = Number(e.target.value)
+                          if (!Number.isNaN(n)) patchTickSet(tickSet.id, { borderWidth: n })
+                        }}
+                        onBlur={(e) => patchTickSet(tickSet.id, { borderWidth: Math.max(0, Number(e.target.value)) })}
                       />
                     </label>
                   </div>
@@ -3854,7 +3974,11 @@ export function PropertiesPanel(): React.JSX.Element {
                             type="number"
                             min={1}
                             value={tickSet.labelFontSize ?? DEFAULT_WIDGET_FONT_SIZE}
-                            onChange={(e) => patchTickSet(tickSet.id, { labelFontSize: Math.max(1, Number(e.target.value)) })}
+                            onChange={(e) => {
+                              const n = Number(e.target.value)
+                              if (!Number.isNaN(n)) patchTickSet(tickSet.id, { labelFontSize: n })
+                            }}
+                            onBlur={(e) => patchTickSet(tickSet.id, { labelFontSize: Math.max(1, Number(e.target.value)) })}
                           />
                         </label>
                         <label className="properties__field">
@@ -3863,7 +3987,11 @@ export function PropertiesPanel(): React.JSX.Element {
                             type="number"
                             min={0}
                             value={tickSet.labelDecimals ?? 0}
-                            onChange={(e) => patchTickSet(tickSet.id, { labelDecimals: Math.max(0, Math.round(Number(e.target.value))) })}
+                            onChange={(e) => {
+                              const n = Math.round(Number(e.target.value))
+                              if (!Number.isNaN(n)) patchTickSet(tickSet.id, { labelDecimals: n })
+                            }}
+                            onBlur={(e) => patchTickSet(tickSet.id, { labelDecimals: Math.max(0, Math.round(Number(e.target.value))) })}
                           />
                         </label>
                       </div>
@@ -4017,7 +4145,11 @@ export function PropertiesPanel(): React.JSX.Element {
                         type="number"
                         min={0}
                         value={gauge.indicatorStartDistance ?? 0}
-                        onChange={(e) => patchGauge({ indicatorStartDistance: Math.max(0, Number(e.target.value)) })}
+                        onChange={(e) => {
+                          const n = Number(e.target.value)
+                          if (!Number.isNaN(n)) patchGauge({ indicatorStartDistance: n })
+                        }}
+                        onBlur={(e) => patchGauge({ indicatorStartDistance: Math.max(0, Number(e.target.value)) })}
                       />
                     </label>
                     <label className="properties__field">
@@ -4026,7 +4158,11 @@ export function PropertiesPanel(): React.JSX.Element {
                         type="number"
                         min={0}
                         value={gauge.indicatorEndDistance ?? 29}
-                        onChange={(e) => patchGauge({ indicatorEndDistance: Math.max(0, Number(e.target.value)) })}
+                        onChange={(e) => {
+                          const n = Number(e.target.value)
+                          if (!Number.isNaN(n)) patchGauge({ indicatorEndDistance: n })
+                        }}
+                        onBlur={(e) => patchGauge({ indicatorEndDistance: Math.max(0, Number(e.target.value)) })}
                       />
                     </label>
                   </div>
@@ -4037,7 +4173,11 @@ export function PropertiesPanel(): React.JSX.Element {
                       type="number"
                       min={0}
                       value={gauge.indicatorWidth ?? 2}
-                      onChange={(e) => patchGauge({ indicatorWidth: Math.max(0, Number(e.target.value)) })}
+                      onChange={(e) => {
+                        const n = Number(e.target.value)
+                        if (!Number.isNaN(n)) patchGauge({ indicatorWidth: n })
+                      }}
+                      onBlur={(e) => patchGauge({ indicatorWidth: Math.max(0, Number(e.target.value)) })}
                     />
                   </label>
 
@@ -4051,7 +4191,11 @@ export function PropertiesPanel(): React.JSX.Element {
                         type="number"
                         min={0}
                         value={gauge.indicatorCenterSize ?? 4}
-                        onChange={(e) => patchGauge({ indicatorCenterSize: Math.max(0, Number(e.target.value)) })}
+                        onChange={(e) => {
+                          const n = Number(e.target.value)
+                          if (!Number.isNaN(n)) patchGauge({ indicatorCenterSize: n })
+                        }}
+                        onBlur={(e) => patchGauge({ indicatorCenterSize: Math.max(0, Number(e.target.value)) })}
                       />
                     </label>
                     <label className="properties__field">
@@ -4060,7 +4204,11 @@ export function PropertiesPanel(): React.JSX.Element {
                         type="number"
                         min={0}
                         value={gauge.indicatorCenterBorderWidth ?? 0}
-                        onChange={(e) => patchGauge({ indicatorCenterBorderWidth: Math.max(0, Number(e.target.value)) })}
+                        onChange={(e) => {
+                          const n = Number(e.target.value)
+                          if (!Number.isNaN(n)) patchGauge({ indicatorCenterBorderWidth: n })
+                        }}
+                        onBlur={(e) => patchGauge({ indicatorCenterBorderWidth: Math.max(0, Number(e.target.value)) })}
                       />
                     </label>
                   </div>
@@ -4114,11 +4262,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={gauge.w} onChange={(e) => patchGauge({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={gauge.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchGauge({ w: n })
+                }}
+                onBlur={(e) => patchGauge({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={gauge.h} onChange={(e) => patchGauge({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={gauge.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchGauge({ h: n })
+                }}
+                onBlur={(e) => patchGauge({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -4267,7 +4427,11 @@ export function PropertiesPanel(): React.JSX.Element {
                         type="number"
                         min={1}
                         value={adjuster.handleWidth ?? adjuster.handleSize ?? 14}
-                        onChange={(e) => patchAdjuster({ handleWidth: Math.max(1, Number(e.target.value)) })}
+                        onChange={(e) => {
+                          const n = Number(e.target.value)
+                          if (!Number.isNaN(n)) patchAdjuster({ handleWidth: n })
+                        }}
+                        onBlur={(e) => patchAdjuster({ handleWidth: Math.max(1, Number(e.target.value)) })}
                       />
                     </label>
                     <label className="properties__field">
@@ -4276,7 +4440,11 @@ export function PropertiesPanel(): React.JSX.Element {
                         type="number"
                         min={1}
                         value={adjuster.handleHeight ?? adjuster.handleSize ?? 14}
-                        onChange={(e) => patchAdjuster({ handleHeight: Math.max(1, Number(e.target.value)) })}
+                        onChange={(e) => {
+                          const n = Number(e.target.value)
+                          if (!Number.isNaN(n)) patchAdjuster({ handleHeight: n })
+                        }}
+                        onBlur={(e) => patchAdjuster({ handleHeight: Math.max(1, Number(e.target.value)) })}
                       />
                     </label>
                   </div>
@@ -4286,7 +4454,11 @@ export function PropertiesPanel(): React.JSX.Element {
                       type="number"
                       min={0}
                       value={adjuster.handleRadius ?? 0}
-                      onChange={(e) => patchAdjuster({ handleRadius: Math.max(0, Number(e.target.value)) })}
+                      onChange={(e) => {
+                        const n = Number(e.target.value)
+                        if (!Number.isNaN(n)) patchAdjuster({ handleRadius: n })
+                      }}
+                      onBlur={(e) => patchAdjuster({ handleRadius: Math.max(0, Number(e.target.value)) })}
                     />
                   </label>
                 </>
@@ -4297,7 +4469,11 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="number"
                     min={1}
                     value={adjuster.handleSize ?? 14}
-                    onChange={(e) => patchAdjuster({ handleSize: Math.max(1, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchAdjuster({ handleSize: n })
+                    }}
+                    onBlur={(e) => patchAdjuster({ handleSize: Math.max(1, Number(e.target.value)) })}
                   />
                 </label>
               )}
@@ -4318,7 +4494,11 @@ export function PropertiesPanel(): React.JSX.Element {
                   type="number"
                   min={0}
                   value={adjuster.handleBorderWidth ?? 0}
-                  onChange={(e) => patchAdjuster({ handleBorderWidth: Math.max(0, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) patchAdjuster({ handleBorderWidth: n })
+                  }}
+                  onBlur={(e) => patchAdjuster({ handleBorderWidth: Math.max(0, Number(e.target.value)) })}
                 />
               </label>
               <div className="properties__field">
@@ -4516,11 +4696,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={adjuster.w} onChange={(e) => patchAdjuster({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={adjuster.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchAdjuster({ w: n })
+                }}
+                onBlur={(e) => patchAdjuster({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={adjuster.h} onChange={(e) => patchAdjuster({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={adjuster.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchAdjuster({ h: n })
+                }}
+                onBlur={(e) => patchAdjuster({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -4671,7 +4863,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={1}
               value={adjuster.bezelRadius ?? 32}
-              onChange={(e) => patchAdjuster({ bezelRadius: Math.max(1, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchAdjuster({ bezelRadius: n })
+              }}
+              onBlur={(e) => patchAdjuster({ bezelRadius: Math.max(1, Number(e.target.value)) })}
             />
           </label>
           <div className="properties__field">
@@ -4691,7 +4887,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={0}
               value={adjuster.bezelBorderWidth ?? 0}
-              onChange={(e) => patchAdjuster({ bezelBorderWidth: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchAdjuster({ bezelBorderWidth: n })
+              }}
+              onBlur={(e) => patchAdjuster({ bezelBorderWidth: Math.max(0, Number(e.target.value)) })}
             />
           </label>
         </PropertiesSection>
@@ -4703,7 +4903,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={0}
               value={adjuster.innerBezelRadius ?? 0}
-              onChange={(e) => patchAdjuster({ innerBezelRadius: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchAdjuster({ innerBezelRadius: n })
+              }}
+              onBlur={(e) => patchAdjuster({ innerBezelRadius: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <p className="properties__hint">A second circle drawn on top of the base circle. 0 hides it entirely.</p>
@@ -4724,7 +4928,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={0}
               value={adjuster.innerBezelBorderWidth ?? 0}
-              onChange={(e) => patchAdjuster({ innerBezelBorderWidth: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchAdjuster({ innerBezelBorderWidth: n })
+              }}
+              onBlur={(e) => patchAdjuster({ innerBezelBorderWidth: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <div className="properties__field">
@@ -4802,7 +5010,11 @@ export function PropertiesPanel(): React.JSX.Element {
                       type="number"
                       min={2}
                       value={tickSet.count ?? 5}
-                      onChange={(e) => patchTickSet(tickSet.id, { count: Math.max(2, Math.round(Number(e.target.value))) })}
+                      onChange={(e) => {
+                        const n = Math.round(Number(e.target.value))
+                        if (!Number.isNaN(n)) patchTickSet(tickSet.id, { count: n })
+                      }}
+                      onBlur={(e) => patchTickSet(tickSet.id, { count: Math.max(2, Math.round(Number(e.target.value))) })}
                     />
                   </label>
                   <label className="properties__field">
@@ -4819,7 +5031,11 @@ export function PropertiesPanel(): React.JSX.Element {
                       type="number"
                       min={0}
                       value={tickSet.size ?? 6}
-                      onChange={(e) => patchTickSet(tickSet.id, { size: Math.max(0, Number(e.target.value)) })}
+                      onChange={(e) => {
+                        const n = Number(e.target.value)
+                        if (!Number.isNaN(n)) patchTickSet(tickSet.id, { size: n })
+                      }}
+                      onBlur={(e) => patchTickSet(tickSet.id, { size: Math.max(0, Number(e.target.value)) })}
                     />
                   </label>
                   <label className="properties__field">
@@ -4828,7 +5044,11 @@ export function PropertiesPanel(): React.JSX.Element {
                       type="number"
                       min={0}
                       value={tickSet.thickness ?? 2}
-                      onChange={(e) => patchTickSet(tickSet.id, { thickness: Math.max(0, Number(e.target.value)) })}
+                      onChange={(e) => {
+                        const n = Number(e.target.value)
+                        if (!Number.isNaN(n)) patchTickSet(tickSet.id, { thickness: n })
+                      }}
+                      onBlur={(e) => patchTickSet(tickSet.id, { thickness: Math.max(0, Number(e.target.value)) })}
                     />
                   </label>
                 </div>
@@ -4854,7 +5074,11 @@ export function PropertiesPanel(): React.JSX.Element {
                       type="number"
                       min={0}
                       value={tickSet.borderWidth ?? 0}
-                      onChange={(e) => patchTickSet(tickSet.id, { borderWidth: Math.max(0, Number(e.target.value)) })}
+                      onChange={(e) => {
+                        const n = Number(e.target.value)
+                        if (!Number.isNaN(n)) patchTickSet(tickSet.id, { borderWidth: n })
+                      }}
+                      onBlur={(e) => patchTickSet(tickSet.id, { borderWidth: Math.max(0, Number(e.target.value)) })}
                     />
                   </label>
                 </div>
@@ -4892,7 +5116,11 @@ export function PropertiesPanel(): React.JSX.Element {
                           type="number"
                           min={1}
                           value={tickSet.labelFontSize ?? DEFAULT_WIDGET_FONT_SIZE}
-                          onChange={(e) => patchTickSet(tickSet.id, { labelFontSize: Math.max(1, Number(e.target.value)) })}
+                          onChange={(e) => {
+                            const n = Number(e.target.value)
+                            if (!Number.isNaN(n)) patchTickSet(tickSet.id, { labelFontSize: n })
+                          }}
+                          onBlur={(e) => patchTickSet(tickSet.id, { labelFontSize: Math.max(1, Number(e.target.value)) })}
                         />
                       </label>
                       <label className="properties__field">
@@ -4901,7 +5129,11 @@ export function PropertiesPanel(): React.JSX.Element {
                           type="number"
                           min={0}
                           value={tickSet.labelDecimals ?? 0}
-                          onChange={(e) => patchTickSet(tickSet.id, { labelDecimals: Math.max(0, Math.round(Number(e.target.value))) })}
+                          onChange={(e) => {
+                            const n = Math.round(Number(e.target.value))
+                            if (!Number.isNaN(n)) patchTickSet(tickSet.id, { labelDecimals: n })
+                          }}
+                          onBlur={(e) => patchTickSet(tickSet.id, { labelDecimals: Math.max(0, Math.round(Number(e.target.value))) })}
                         />
                       </label>
                     </div>
@@ -5082,11 +5314,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={adjuster.w} onChange={(e) => patchAdjuster({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={adjuster.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchAdjuster({ w: n })
+                }}
+                onBlur={(e) => patchAdjuster({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={adjuster.h} onChange={(e) => patchAdjuster({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={adjuster.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchAdjuster({ h: n })
+                }}
+                onBlur={(e) => patchAdjuster({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -5180,7 +5424,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={1}
               value={encoder.stepDegrees ?? 15}
-              onChange={(e) => patchEncoder({ stepDegrees: Math.max(1, Math.round(Number(e.target.value))) })}
+              onChange={(e) => {
+                const n = Math.round(Number(e.target.value))
+                if (!Number.isNaN(n)) patchEncoder({ stepDegrees: n })
+              }}
+              onBlur={(e) => patchEncoder({ stepDegrees: Math.max(1, Math.round(Number(e.target.value))) })}
             />
           </label>
           <p className="properties__hint">
@@ -5255,7 +5503,11 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="number"
                     min={1}
                     value={tickSet.count ?? 12}
-                    onChange={(e) => patchTickSet(tickSet.id, { count: Math.max(1, Math.round(Number(e.target.value))) })}
+                    onChange={(e) => {
+                      const n = Math.round(Number(e.target.value))
+                      if (!Number.isNaN(n)) patchTickSet(tickSet.id, { count: n })
+                    }}
+                    onBlur={(e) => patchTickSet(tickSet.id, { count: Math.max(1, Math.round(Number(e.target.value))) })}
                   />
                 </label>
                 <label className="properties__field">
@@ -5272,7 +5524,11 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="number"
                     min={0}
                     value={tickSet.size ?? 6}
-                    onChange={(e) => patchTickSet(tickSet.id, { size: Math.max(0, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchTickSet(tickSet.id, { size: n })
+                    }}
+                    onBlur={(e) => patchTickSet(tickSet.id, { size: Math.max(0, Number(e.target.value)) })}
                   />
                 </label>
                 <label className="properties__field">
@@ -5281,7 +5537,11 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="number"
                     min={0}
                     value={tickSet.thickness ?? 2}
-                    onChange={(e) => patchTickSet(tickSet.id, { thickness: Math.max(0, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchTickSet(tickSet.id, { thickness: n })
+                    }}
+                    onBlur={(e) => patchTickSet(tickSet.id, { thickness: Math.max(0, Number(e.target.value)) })}
                   />
                 </label>
               </div>
@@ -5307,7 +5567,11 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="number"
                     min={0}
                     value={tickSet.borderWidth ?? 0}
-                    onChange={(e) => patchTickSet(tickSet.id, { borderWidth: Math.max(0, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchTickSet(tickSet.id, { borderWidth: n })
+                    }}
+                    onBlur={(e) => patchTickSet(tickSet.id, { borderWidth: Math.max(0, Number(e.target.value)) })}
                   />
                 </label>
               </div>
@@ -5397,11 +5661,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={encoder.w} onChange={(e) => patchEncoder({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={encoder.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchEncoder({ w: n })
+                }}
+                onBlur={(e) => patchEncoder({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={encoder.h} onChange={(e) => patchEncoder({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={encoder.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchEncoder({ h: n })
+                }}
+                onBlur={(e) => patchEncoder({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -5674,11 +5950,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={sw.w} onChange={(e) => patchSwitch({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={sw.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchSwitch({ w: n })
+                }}
+                onBlur={(e) => patchSwitch({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={sw.h} onChange={(e) => patchSwitch({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={sw.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchSwitch({ h: n })
+                }}
+                onBlur={(e) => patchSwitch({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -5813,7 +6101,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={1}
               value={sw.bezelRadius ?? 45}
-              onChange={(e) => patchSwitch({ bezelRadius: Math.max(1, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchSwitch({ bezelRadius: n })
+              }}
+              onBlur={(e) => patchSwitch({ bezelRadius: Math.max(1, Number(e.target.value)) })}
             />
           </label>
 
@@ -5868,7 +6160,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={0}
               value={sw.innerBezelRadius ?? 0}
-              onChange={(e) => patchSwitch({ innerBezelRadius: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchSwitch({ innerBezelRadius: n })
+              }}
+              onBlur={(e) => patchSwitch({ innerBezelRadius: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <p className="properties__hint">A second circle drawn on top of the base circle. 0 hides it entirely.</p>
@@ -5889,7 +6185,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={0}
               value={sw.innerBezelBorderWidth ?? 0}
-              onChange={(e) => patchSwitch({ innerBezelBorderWidth: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchSwitch({ innerBezelBorderWidth: n })
+              }}
+              onBlur={(e) => patchSwitch({ innerBezelBorderWidth: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <div className="properties__field">
@@ -5922,7 +6222,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={1}
               value={sw.leverLength ?? 36}
-              onChange={(e) => patchSwitch({ leverLength: Math.max(1, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchSwitch({ leverLength: n })
+              }}
+              onBlur={(e) => patchSwitch({ leverLength: Math.max(1, Number(e.target.value)) })}
             />
           </label>
           <label className="properties__field">
@@ -5931,7 +6235,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={1}
               value={sw.leverTipRadius ?? 9}
-              onChange={(e) => patchSwitch({ leverTipRadius: Math.max(1, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchSwitch({ leverTipRadius: n })
+              }}
+              onBlur={(e) => patchSwitch({ leverTipRadius: Math.max(1, Number(e.target.value)) })}
             />
           </label>
           <p className="properties__hint">
@@ -5958,7 +6266,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={1}
               value={sw.leverBaseRadius ?? 4}
-              onChange={(e) => patchSwitch({ leverBaseRadius: Math.max(1, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchSwitch({ leverBaseRadius: n })
+              }}
+              onBlur={(e) => patchSwitch({ leverBaseRadius: Math.max(1, Number(e.target.value)) })}
             />
           </label>
           <p className="properties__hint">The narrow end, where the lever tapers down into the pivot.</p>
@@ -5968,7 +6280,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={0}
               value={sw.leverBorderWidth ?? 0}
-              onChange={(e) => patchSwitch({ leverBorderWidth: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchSwitch({ leverBorderWidth: n })
+              }}
+              onBlur={(e) => patchSwitch({ leverBorderWidth: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <div className="properties__field">
@@ -5991,7 +6307,11 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="number"
                     min={1}
                     value={sw.barWidth ?? 20}
-                    onChange={(e) => patchSwitch({ barWidth: Math.max(1, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchSwitch({ barWidth: n })
+                    }}
+                    onBlur={(e) => patchSwitch({ barWidth: Math.max(1, Number(e.target.value)) })}
                   />
                 </label>
                 <label className="properties__field">
@@ -6000,7 +6320,11 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="number"
                     min={1}
                     value={sw.barHeight ?? 10}
-                    onChange={(e) => patchSwitch({ barHeight: Math.max(1, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchSwitch({ barHeight: n })
+                    }}
+                    onBlur={(e) => patchSwitch({ barHeight: Math.max(1, Number(e.target.value)) })}
                   />
                 </label>
               </div>
@@ -6022,7 +6346,11 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="number"
                     min={0}
                     value={sw.barBorderWidth ?? 0}
-                    onChange={(e) => patchSwitch({ barBorderWidth: Math.max(0, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchSwitch({ barBorderWidth: n })
+                    }}
+                    onBlur={(e) => patchSwitch({ barBorderWidth: Math.max(0, Number(e.target.value)) })}
                   />
                 </label>
                 <label className="properties__field">
@@ -6031,7 +6359,11 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="number"
                     min={0}
                     value={sw.barBorderRadius ?? 0}
-                    onChange={(e) => patchSwitch({ barBorderRadius: Math.max(0, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchSwitch({ barBorderRadius: n })
+                    }}
+                    onBlur={(e) => patchSwitch({ barBorderRadius: Math.max(0, Number(e.target.value)) })}
                   />
                 </label>
               </div>
@@ -6051,7 +6383,11 @@ export function PropertiesPanel(): React.JSX.Element {
                 type="number"
                 min={1}
                 value={sw.circleRadius ?? sw.leverTipRadius ?? 9}
-                onChange={(e) => patchSwitch({ circleRadius: Math.max(1, Number(e.target.value)) })}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchSwitch({ circleRadius: n })
+                }}
+                onBlur={(e) => patchSwitch({ circleRadius: Math.max(1, Number(e.target.value)) })}
               />
             </label>
             <p className="properties__hint">Defaults to the Lever tip size above (see Lever section) until set separately here.</p>
@@ -6072,7 +6408,11 @@ export function PropertiesPanel(): React.JSX.Element {
                 type="number"
                 min={0}
                 value={sw.circleBorderWidth ?? 0}
-                onChange={(e) => patchSwitch({ circleBorderWidth: Math.max(0, Number(e.target.value)) })}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchSwitch({ circleBorderWidth: n })
+                }}
+                onBlur={(e) => patchSwitch({ circleBorderWidth: Math.max(0, Number(e.target.value)) })}
               />
             </label>
             <div className="properties__field">
@@ -6133,7 +6473,11 @@ export function PropertiesPanel(): React.JSX.Element {
                   type="number"
                   min={0}
                   value={sw.guardBorderWidth ?? 1}
-                  onChange={(e) => patchSwitch({ guardBorderWidth: Math.max(0, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) patchSwitch({ guardBorderWidth: n })
+                  }}
+                  onBlur={(e) => patchSwitch({ guardBorderWidth: Math.max(0, Number(e.target.value)) })}
                 />
               </label>
 
@@ -6143,7 +6487,11 @@ export function PropertiesPanel(): React.JSX.Element {
                   type="number"
                   min={0}
                   value={sw.guardRadius ?? 6}
-                  onChange={(e) => patchSwitch({ guardRadius: Math.max(0, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) patchSwitch({ guardRadius: n })
+                  }}
+                  onBlur={(e) => patchSwitch({ guardRadius: Math.max(0, Number(e.target.value)) })}
                 />
               </label>
 
@@ -6159,7 +6507,14 @@ export function PropertiesPanel(): React.JSX.Element {
                     min={1}
                     placeholder={String(sw.w)}
                     value={sw.guardWidth ?? ''}
-                    onChange={(e) => patchSwitch({ guardWidth: e.target.value === '' ? undefined : Math.max(1, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      if (e.target.value === '') return patchSwitch({ guardWidth: undefined })
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchSwitch({ guardWidth: n })
+                    }}
+                    onBlur={(e) =>
+                      patchSwitch({ guardWidth: e.target.value === '' ? undefined : Math.max(1, Number(e.target.value)) })
+                    }
                   />
                 </label>
                 <label className="properties__field">
@@ -6169,7 +6524,14 @@ export function PropertiesPanel(): React.JSX.Element {
                     min={1}
                     placeholder={String(sw.h)}
                     value={sw.guardHeight ?? ''}
-                    onChange={(e) => patchSwitch({ guardHeight: e.target.value === '' ? undefined : Math.max(1, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      if (e.target.value === '') return patchSwitch({ guardHeight: undefined })
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchSwitch({ guardHeight: n })
+                    }}
+                    onBlur={(e) =>
+                      patchSwitch({ guardHeight: e.target.value === '' ? undefined : Math.max(1, Number(e.target.value)) })
+                    }
                   />
                 </label>
               </div>
@@ -6198,7 +6560,11 @@ export function PropertiesPanel(): React.JSX.Element {
                     type="number"
                     min={1}
                     value={sw.guardOpenHeight ?? 14}
-                    onChange={(e) => patchSwitch({ guardOpenHeight: Math.max(1, Number(e.target.value)) })}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isNaN(n)) patchSwitch({ guardOpenHeight: n })
+                    }}
+                    onBlur={(e) => patchSwitch({ guardOpenHeight: Math.max(1, Number(e.target.value)) })}
                   />
                 </label>
                 <label className="properties__field">
@@ -6306,7 +6672,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={0}
               value={sw.borderWidth ?? 2}
-              onChange={(e) => patchSwitch({ borderWidth: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchSwitch({ borderWidth: n })
+              }}
+              onBlur={(e) => patchSwitch({ borderWidth: Math.max(0, Number(e.target.value)) })}
             />
           </label>
         </PropertiesSection>
@@ -6435,11 +6805,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={sw.w} onChange={(e) => patchSwitch({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={sw.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchSwitch({ w: n })
+                }}
+                onBlur={(e) => patchSwitch({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={sw.h} onChange={(e) => patchSwitch({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={sw.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchSwitch({ h: n })
+                }}
+                onBlur={(e) => patchSwitch({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -6582,7 +6964,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={0}
               value={sw.detentRadius ?? 40}
-              onChange={(e) => patchSwitch({ detentRadius: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchSwitch({ detentRadius: n })
+              }}
+              onBlur={(e) => patchSwitch({ detentRadius: Math.max(0, Number(e.target.value)) })}
             />
           </label>
         </PropertiesSection>
@@ -6759,11 +7145,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={sw.w} onChange={(e) => patchSwitch({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={sw.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchSwitch({ w: n })
+                }}
+                onBlur={(e) => patchSwitch({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={sw.h} onChange={(e) => patchSwitch({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={sw.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchSwitch({ h: n })
+                }}
+                onBlur={(e) => patchSwitch({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -6956,11 +7354,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={dd.w} onChange={(e) => patchDropdown({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={dd.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchDropdown({ w: n })
+                }}
+                onBlur={(e) => patchDropdown({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={dd.h} onChange={(e) => patchDropdown({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={dd.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchDropdown({ h: n })
+                }}
+                onBlur={(e) => patchDropdown({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -7113,7 +7523,11 @@ export function PropertiesPanel(): React.JSX.Element {
               step={0.05}
               min={0}
               value={sc.brightness ?? 1}
-              onChange={(e) => patchScreenCapture({ brightness: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchScreenCapture({ brightness: n })
+              }}
+              onBlur={(e) => patchScreenCapture({ brightness: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <label className="properties__field">
@@ -7123,7 +7537,11 @@ export function PropertiesPanel(): React.JSX.Element {
               step={0.05}
               min={0}
               value={sc.contrast ?? 1}
-              onChange={(e) => patchScreenCapture({ contrast: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchScreenCapture({ contrast: n })
+              }}
+              onBlur={(e) => patchScreenCapture({ contrast: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <label className="properties__field">
@@ -7133,7 +7551,11 @@ export function PropertiesPanel(): React.JSX.Element {
               step={0.05}
               min={0}
               value={sc.saturation ?? 1}
-              onChange={(e) => patchScreenCapture({ saturation: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchScreenCapture({ saturation: n })
+              }}
+              onBlur={(e) => patchScreenCapture({ saturation: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <label className="properties__checkbox">
@@ -7173,11 +7595,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={sc.w} onChange={(e) => patchScreenCapture({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={sc.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchScreenCapture({ w: n })
+                }}
+                onBlur={(e) => patchScreenCapture({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={sc.h} onChange={(e) => patchScreenCapture({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={sc.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchScreenCapture({ h: n })
+                }}
+                onBlur={(e) => patchScreenCapture({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -7400,7 +7834,11 @@ export function PropertiesPanel(): React.JSX.Element {
               step={0.05}
               min={0}
               value={dv.brightness ?? 1}
-              onChange={(e) => patchDcsViewport({ brightness: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchDcsViewport({ brightness: n })
+              }}
+              onBlur={(e) => patchDcsViewport({ brightness: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <label className="properties__field">
@@ -7410,7 +7848,11 @@ export function PropertiesPanel(): React.JSX.Element {
               step={0.05}
               min={0}
               value={dv.contrast ?? 1}
-              onChange={(e) => patchDcsViewport({ contrast: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchDcsViewport({ contrast: n })
+              }}
+              onBlur={(e) => patchDcsViewport({ contrast: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <label className="properties__field">
@@ -7420,7 +7862,11 @@ export function PropertiesPanel(): React.JSX.Element {
               step={0.05}
               min={0}
               value={dv.saturation ?? 1}
-              onChange={(e) => patchDcsViewport({ saturation: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchDcsViewport({ saturation: n })
+              }}
+              onBlur={(e) => patchDcsViewport({ saturation: Math.max(0, Number(e.target.value)) })}
             />
           </label>
           <label className="properties__checkbox">
@@ -7451,7 +7897,11 @@ export function PropertiesPanel(): React.JSX.Element {
               type="number"
               min={0}
               value={dv.borderWidth ?? 2}
-              onChange={(e) => patchDcsViewport({ borderWidth: Math.max(0, Number(e.target.value)) })}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchDcsViewport({ borderWidth: n })
+              }}
+              onBlur={(e) => patchDcsViewport({ borderWidth: Math.max(0, Number(e.target.value)) })}
             />
           </label>
         </PropertiesSection>
@@ -7469,11 +7919,23 @@ export function PropertiesPanel(): React.JSX.Element {
             </label>
             <label className="properties__field">
               <span>W</span>
-              <input type="number" min={minSize} value={dv.w} onChange={(e) => patchDcsViewport({ w: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={dv.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchDcsViewport({ w: n })
+                }}
+                onBlur={(e) => patchDcsViewport({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
             <label className="properties__field">
               <span>H</span>
-              <input type="number" min={minSize} value={dv.h} onChange={(e) => patchDcsViewport({ h: Math.max(minSize, Number(e.target.value)) })} />
+              <input type="number" min={minSize} value={dv.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchDcsViewport({ h: n })
+                }}
+                onBlur={(e) => patchDcsViewport({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
             </label>
           </div>
 
@@ -8089,7 +8551,11 @@ export function PropertiesPanel(): React.JSX.Element {
                   type="number"
                   min={minSize}
                   value={widget.w}
-                  onChange={(e) => patch({ w: Math.max(minSize, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) patch({ w: n })
+                  }}
+                  onBlur={(e) => patch({ w: Math.max(minSize, Number(e.target.value)) })}
                 />
               </label>
               <label className="properties__field">
@@ -8098,7 +8564,11 @@ export function PropertiesPanel(): React.JSX.Element {
                   type="number"
                   min={minSize}
                   value={widget.h}
-                  onChange={(e) => patch({ h: Math.max(minSize, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) patch({ h: n })
+                  }}
+                  onBlur={(e) => patch({ h: Math.max(minSize, Number(e.target.value)) })}
                 />
               </label>
             </>
@@ -8110,7 +8580,11 @@ export function PropertiesPanel(): React.JSX.Element {
                   type="number"
                   min={minSize}
                   value={widget.cellW}
-                  onChange={(e) => patch({ cellW: Math.max(minSize, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) patch({ cellW: n })
+                  }}
+                  onBlur={(e) => patch({ cellW: Math.max(minSize, Number(e.target.value)) })}
                 />
               </label>
               <label className="properties__field">
@@ -8119,7 +8593,11 @@ export function PropertiesPanel(): React.JSX.Element {
                   type="number"
                   min={minSize}
                   value={widget.cellH}
-                  onChange={(e) => patch({ cellH: Math.max(minSize, Number(e.target.value)) })}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) patch({ cellH: n })
+                  }}
+                  onBlur={(e) => patch({ cellH: Math.max(minSize, Number(e.target.value)) })}
                 />
               </label>
             </>

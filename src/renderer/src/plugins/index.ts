@@ -7,15 +7,18 @@ import type { ComponentType } from 'react'
 import { DcsBiosConfigPanel } from './DcsBiosConfigPanel'
 import { ScreenCaptureConfigPanel } from './ScreenCaptureConfigPanel'
 import { WindowsAudioConfigPanel } from './WindowsAudioConfigPanel'
+import { RandomConfigPanel } from './RandomConfigPanel'
 import type { PluginConfigPanelProps } from './types'
 
 export type { PluginConfigPanelProps } from './types'
 export { defaultDcsBiosConfig } from './DcsBiosConfigPanel'
 export { DEFAULT_OCR_INTERVAL_MS } from './ScreenCaptureConfigPanel'
 export { defaultWindowsAudioConfig } from './WindowsAudioConfigPanel'
+export { defaultRandomConfig } from './RandomConfigPanel'
 
 export const PLUGIN_CONFIG_PANELS: Partial<Record<string, ComponentType<PluginConfigPanelProps>>> = {
   dcsbios: DcsBiosConfigPanel,
   screenCapture: ScreenCaptureConfigPanel,
-  windowsAudio: WindowsAudioConfigPanel
+  windowsAudio: WindowsAudioConfigPanel,
+  random: RandomConfigPanel
 }

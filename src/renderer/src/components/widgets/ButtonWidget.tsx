@@ -12,7 +12,8 @@ export function ButtonWidgetContent({
   interactive,
   error,
   variables,
-  onKeyboardActivate
+  onKeyboardActivate,
+  applyRotation = true
 }: {
   widget: ButtonWidget
   state: WidgetState
@@ -26,6 +27,14 @@ export function ButtonWidgetContent({
   // handler below) so a real pointer/touch click doesn't also fire this and
   // double-trigger.
   onKeyboardActivate?: () => void
+  // The editor (CanvasWidget.tsx) rotates its own outer selection/resize box
+  // to match instead of leaving it axis-aligned around a visually rotated
+  // widget (see LineWidgetContent's identical applyRotation for the original
+  // version of this), so it passes false here and applies the identical
+  // angle up there itself, rather than this component rotating AGAIN inside
+  // an already-rotated wrapper. The deployed view (ViewCanvas.tsx) has no
+  // such box to keep in sync, so it leaves this at the default.
+  applyRotation?: boolean
 }): React.JSX.Element {
   const debugMode = useEditorSettings((s) => s.debugMode)
   const resolvedColor = resolveColor(state, variables)
@@ -50,7 +59,7 @@ export function ButtonWidgetContent({
     // explicit z-index here overrides that per-state, e.g. to pop a
     // "Clicked" state above whatever it's overlapping while held.
     ...(state.zIndex !== undefined && { zIndex: state.zIndex }),
-    transform: rotateAngle ? `rotate(${rotateAngle}deg)` : undefined,
+    transform: applyRotation && rotateAngle ? `rotate(${rotateAngle}deg)` : undefined,
     // Off entirely (no shadow) until there's an actual color to show — see
     // WidgetState.glowColor's own comment. Fixed blur/spread rather than
     // configurable, same "one deliberate look, not a knob for every

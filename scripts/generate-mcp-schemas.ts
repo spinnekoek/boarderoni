@@ -14,7 +14,7 @@ import { createGenerator } from 'ts-json-schema-generator'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const TYPES = ['Widget', 'Variable', 'Plugin', 'GlobalAction'] as const
+const TYPES = ['Widget', 'Variable', 'Plugin', 'GlobalAction', 'WidgetAction', 'SequenceStep'] as const
 
 const outPath = join(__dirname, '../src/shared/generated/mcpSchemas.ts')
 
@@ -22,7 +22,12 @@ const generator = createGenerator({
   path: join(__dirname, '../src/shared/types.ts'),
   expose: 'export',
   topRef: true,
-  jsDoc: 'none',
+  // 'basic' would still miss @-tag-free plain doc comments' full text in
+  // some cases; 'extended' pulls the complete comment into `description`
+  // via TS's own symbol.getDocumentationComment (confirmed: it's already
+  // the FULL text, not just a first sentence — no need for the separate
+  // fullDescription option, which would just duplicate it under another key).
+  jsDoc: 'extended',
   skipTypeCheck: true,
   additionalProperties: false
 })

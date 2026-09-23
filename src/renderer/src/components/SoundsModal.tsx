@@ -87,7 +87,7 @@ export function SoundsModal({ onClose }: { onClose: () => void }): React.JSX.Ele
                       <input
                         type="number"
                         min={0}
-                        step={10}
+                        step={1}
                         placeholder="0"
                         value={sound.startAtMs ?? ''}
                         onChange={(e) => {
