@@ -50,9 +50,11 @@ development:
 - **Custom fonts**, multiple screens per deck (sub-decks) with in-editor
   navigation, and a live variables system synced in real time to every
   connected device.
-- **Mobile companion app** — an Android WebView client that pairs with the
-  desktop over your local network (mDNS auto-discovery, per-device approval),
-  no cloud/account required.
+- **Mobile companion app** — an Android WebView client (source in
+  [`android/`](android/)) that pairs with the desktop over your local
+  network (mDNS auto-discovery, per-device approval), no cloud/account
+  required. Not on the Play Store — build it yourself with the Gradle
+  wrapper in `android/`.
 - **Plugins** (event sources + actions):
   - **DCS-BIOS** — read/write DCS World cockpit state over its UDP export.
   - **DCS Viewports** — multi-monitor MFCD/cockpit display export.
