@@ -17,9 +17,27 @@ android {
         versionName = "0.1.0-alpha.1"
     }
 
+    // CI provides these via ANDROID_KEYSTORE_PATH (a decoded file, see
+    // release.yml) + the password/alias secrets; unset locally, so
+    // assembleRelease only produces a signed APK in CI.
+    val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+    if (keystorePath != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (keystorePath != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
