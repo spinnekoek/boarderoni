@@ -31,9 +31,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate release notes
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --generate-notes
+        run: |
+          notes=$(gh api "repos/${{ github.repository }}/releases/generate-notes" -f tag_name="${{ github.ref_name }}" --jq .body)
+          gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --notes "$notes"
 
   release-android:
     needs: release
