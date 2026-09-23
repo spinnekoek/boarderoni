@@ -79,16 +79,11 @@ export function MobileAppModal({ onClose }: { onClose: () => void }): React.JSX.
 
           {!error && !info && <p className="properties__hint">Checking for a build…</p>}
 
-          {!error && info && !info.available && (
-            <p className="properties__hint">
-              No Android build found yet at dist/boarderoni-latest.apk. Build the app and it'll show up here
-              automatically — no need to reopen this.
-            </p>
-          )}
-
           {!error && info?.available && info.url && (
             <>
-              <p className="properties__hint">Scan with your phone's camera to download and install the app.</p>
+              <p className="properties__hint">
+                Scan with your phone's camera to download the latest release from GitHub and install the app.
+              </p>
               {qrDataUrl && (
                 <div style={{ textAlign: 'center', margin: '12px 0' }}>
                   <img src={qrDataUrl} alt="QR code linking to the Boarderoni APK download" width={240} height={240} />

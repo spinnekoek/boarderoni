@@ -67,8 +67,17 @@ jobs:
       - name: Attach APK to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Renamed (not just labeled — gh release upload's #label only sets
+        # a display name, the actual asset filename still comes from the
+        # local file) to a fixed name so the desktop app's QR code
+        # (MobileAppModal.tsx) can link to the stable
+        # releases/latest/download/boarderoni-latest.apk redirect — that URL
+        # shape matches on the real filename and can't wildcard a version in
+        # it. The release's own title/tag already shows which version this
+        # is, so nothing is lost by not versioning the filename too.
         run: |
+          mv android/app/build/outputs/apk/release/app-release.apk /tmp/boarderoni-latest.apk
           gh release upload "${{ github.ref_name }}" \
-            android/app/build/outputs/apk/release/app-release.apk#boarderoni-${{ github.ref_name }}.apk \
+            /tmp/boarderoni-latest.apk \
             --repo "${{ github.repository }}" \
             --clobber

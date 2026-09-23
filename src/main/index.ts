@@ -472,7 +472,18 @@ const rendererDist = join(__dirname, '../renderer')
 // Same fixed name every rebuild, so the desktop always has a stable path to
 // serve regardless of which debug/versioned .apk most recently landed here —
 // see android/README (or the build step) for what copies the latest build in.
+// Kept around for build-android.sh's local-testing loop (a debug build
+// dropped here doesn't require cutting a real release to try) — no longer
+// what the QR/link in MobileAppModal.tsx points at, see APK_DOWNLOAD_URL.
 const APK_PATH = join(__dirname, '../../dist/boarderoni-latest.apk')
+
+// GitHub's "always resolves to whatever release is currently latest"
+// redirect — release.yml's release-android job re-uploads a fixed-name copy
+// of the APK to every tagged release specifically so this URL never needs
+// updating here as new versions ship. Requires that fixed-name upload step
+// to keep existing; a plain versioned asset name wouldn't work since this
+// URL shape can't wildcard the filename.
+const APK_DOWNLOAD_URL = 'https://github.com/spinnekoek/boarderoni/releases/latest/download/boarderoni-latest.apk'
 
 // Used to build the "scan to install" link shown alongside the QR code in
 // the desktop editor — window.location.hostname isn't usable there since the
@@ -1761,10 +1772,14 @@ const httpServer = createServer((req, res) => {
   // see MDNS_SERVICE_TYPE's comment in shared/constants.ts).
   if (url.pathname === '/api/apk-info') {
     const lanAddress = getLanAddress()
-    const available = existsSync(APK_PATH)
     sendJson(res, 200, {
-      available,
-      url: available && lanAddress ? `http://${lanAddress}:${SERVER_PORT}/download/apk` : null,
+      // Always true/non-null now that this points at GitHub rather than a
+      // local build that may or may not exist yet — a release with no APK
+      // asset published is the one case this doesn't cover, which just
+      // surfaces as a 404 if actually followed rather than as available:
+      // false here.
+      available: true,
+      url: APK_DOWNLOAD_URL,
       appUrl: lanAddress ? `http://${lanAddress}:${webPort}/?mode=view` : null,
       // Read by the Android app's probeAndShowFoundPrompt (MainActivity.kt)
       // to show which desktop version it found, alongside its own
