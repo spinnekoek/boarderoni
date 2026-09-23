@@ -81,3 +81,16 @@ jobs:
             /tmp/boarderoni-latest.apk \
             --repo "${{ github.repository }}" \
             --clobber
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Un-drafts the one release electron-builder + this job have been
+        # uploading every asset to (see electron-builder.yml's own comment
+        # on why draft has to stay the config default) — only now, once
+        # every asset from both jobs has actually landed on it, so it never
+        # goes public partially-populated.
+        run: |
+          release_id=$(gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" --jq .id)
+          gh api "repos/${{ github.repository }}/releases/$release_id" -X PATCH -F draft=false

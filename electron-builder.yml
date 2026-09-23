@@ -38,7 +38,11 @@ publish:
   provider: github
   owner: spinnekoek
   repo: boarderoni
-  # electron-builder defaults to leaving the release as a draft (visible
-  # only to repo collaborators, not on the public Releases page) — this
-  # makes --publish always actually publish it live instead.
-  releaseType: release
+  # Deliberately left at the default (draft) rather than releaseType:
+  # release: electron-builder only reuses an existing DRAFT release across
+  # multiple asset uploads (installer, then blockmap/latest.yml) — once a
+  # release is published it can't append to it, so releaseType: release
+  # silently fractured every multi-asset publish into several one-asset
+  # releases all sharing the same tag. release.yml's final workflow step
+  # un-drafts this explicitly instead, once every asset (including the
+  # Android APK, uploaded by a later job) has actually landed on it.
