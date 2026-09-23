@@ -206,4 +206,51 @@
 
     </FrameLayout>
 
+    <!--
+      Sits above both status_overlay and the live WebView (root-level
+      sibling, not nested inside status_overlay like app_version_label) —
+      unlike the version label's diagnostic-only purpose, this needs to be
+      visible whenever a newer release exists, including while an already-
+      connected dashboard is on screen.
+    -->
+    <LinearLayout
+        android:id="@+id/update_banner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/update_banner_background"
+        android:paddingStart="16dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/update_banner_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@color/update_banner_text_color"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/update_banner_download_button"
+            style="@style/Boarderoni.Button.Text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/update_banner_download"
+            android:textColor="@color/update_banner_text_color" />
+
+        <Button
+            android:id="@+id/update_banner_dismiss_button"
+            style="@style/Boarderoni.Button.Text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/update_banner_dismiss"
+            android:textColor="@color/update_banner_text_color" />
+
+    </LinearLayout>
+
 </FrameLayout>

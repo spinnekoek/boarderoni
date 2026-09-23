@@ -27,4 +27,10 @@
          standalone desktop icon.svg/icon.png this is otherwise matching.
          See ic_launcher_foreground.xml for the matching foreground. -->
     <color name="ic_launcher_background">#FF181A20</color>
+    <!-- update_banner's own background — same blue as found_title (status
+         screen's "Boarderoni found" heading), solid rather than translucent
+         since the banner sits over the live WebView dashboard too, not just
+         the dark status_overlay. -->
+    <color name="update_banner_background">#FF5B8DEF</color>
+    <color name="update_banner_text_color">#FFFFFFFF</color>
 </resources>

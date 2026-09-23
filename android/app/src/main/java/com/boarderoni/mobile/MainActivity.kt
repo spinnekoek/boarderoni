@@ -3,6 +3,7 @@ package com.boarderoni.mobile
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
@@ -99,6 +100,12 @@ private const val KEY_LAST_CONNECTED_TARGET = "last_connected_target"
 // whenever it's next convenient to plug in.
 private const val KEY_DEBUG_LOGGING_ENABLED = "debug_logging_enabled"
 
+// GitHub Releases API — same repo the desktop app's own electron-updater
+// points at (see boarderoni/electron-builder.yml's publish block). "latest"
+// excludes drafts/prereleases automatically, so this never surfaces a
+// half-published or intentionally-hidden release.
+private const val LATEST_RELEASE_API_URL = "https://api.github.com/repos/spinnekoek/boarderoni/releases/latest"
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
@@ -120,6 +127,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var foundConnectButton: Button
     private lateinit var foundKeepSearchingButton: Button
     private lateinit var appVersionLabel: TextView
+    private lateinit var updateBanner: View
+    private lateinit var updateBannerText: TextView
+    private lateinit var updateBannerDownloadButton: Button
+    private lateinit var updateBannerDismissButton: Button
+    private var pendingUpdateApkUrl: String? = null
 
     private lateinit var nsdManager: NsdManager
     private lateinit var connectivityManager: ConnectivityManager
@@ -226,6 +238,11 @@ class MainActivity : AppCompatActivity() {
         foundKeepSearchingButton = findViewById(R.id.found_keep_searching_button)
         appVersionLabel = findViewById(R.id.app_version_label)
         appVersionLabel.text = getString(R.string.status_app_version, BuildConfig.VERSION_NAME)
+        updateBanner = findViewById(R.id.update_banner)
+        updateBannerText = findViewById(R.id.update_banner_text)
+        updateBannerDownloadButton = findViewById(R.id.update_banner_download_button)
+        updateBannerDismissButton = findViewById(R.id.update_banner_dismiss_button)
+        setUpUpdateBanner()
 
         nsdManager = getSystemService(Context.NSD_SERVICE) as NsdManager
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -244,6 +261,76 @@ class MainActivity : AppCompatActivity() {
         }
 
         showSearching()
+        checkForAppUpdate()
+    }
+
+    // One-shot check against GitHub's "latest release" — deliberately no
+    // retry/backoff, since a failed/offline check just means the banner
+    // stays hidden and the next app launch tries again. Compares tag_name
+    // directly against BuildConfig.VERSION_NAME rather than doing real
+    // semver comparison: tags are always "v" + the exact versionName this
+    // build was tagged with (see release.yml's version-bump step), so any
+    // mismatch means a different release exists, newer or not — simpler
+    // than parsing alpha/beta suffixes correctly for little practical gain.
+    private fun checkForAppUpdate() {
+        networkExecutor.execute {
+            try {
+                val connection = URL(LATEST_RELEASE_API_URL).openConnection() as HttpURLConnection
+                connection.connectTimeout = 4000
+                connection.readTimeout = 4000
+                connection.setRequestProperty("Accept", "application/vnd.github+json")
+                val tagName: String
+                val apkUrl: String?
+                try {
+                    if (connection.responseCode !in 200..299) return@execute
+                    val body = connection.inputStream.bufferedReader().readText()
+                    val json = JSONObject(body)
+                    tagName = json.optString("tag_name")
+                    val assets = json.optJSONArray("assets")
+                    var foundApkUrl: String? = null
+                    if (assets != null) {
+                        for (i in 0 until assets.length()) {
+                            val asset = assets.getJSONObject(i)
+                            val name = asset.optString("name")
+                            if (name.endsWith(".apk")) {
+                                foundApkUrl = asset.optString("browser_download_url")
+                                break
+                            }
+                        }
+                    }
+                    apkUrl = foundApkUrl
+                } finally {
+                    connection.disconnect()
+                }
+                if (tagName.isEmpty() || apkUrl.isNullOrEmpty()) return@execute
+                val currentTag = "v${BuildConfig.VERSION_NAME}"
+                if (tagName == currentTag) return@execute
+                mainHandler.post {
+                    if (isFinishing || isDestroyed) return@post
+                    showUpdateBanner(tagName, apkUrl)
+                }
+            } catch (_: Exception) {
+                // Offline, GitHub unreachable, unexpected response shape — all
+                // treated the same as "no update to show", not an error the
+                // user needs to see.
+            }
+        }
+    }
+
+    private fun showUpdateBanner(tagName: String, apkUrl: String) {
+        pendingUpdateApkUrl = apkUrl
+        updateBannerText.text = getString(R.string.update_banner_text, tagName)
+        updateBanner.visibility = View.VISIBLE
+    }
+
+    private fun setUpUpdateBanner() {
+        updateBannerDownloadButton.setOnClickListener {
+            val url = pendingUpdateApkUrl ?: return@setOnClickListener
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }
+        updateBannerDismissButton.setOnClickListener {
+            updateBanner.visibility = View.GONE
+        }
     }
 
     // TEMP DEBUG LOGGING — the manifest's android:configChanges list already

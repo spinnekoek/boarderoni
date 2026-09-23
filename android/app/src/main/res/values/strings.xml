@@ -19,4 +19,7 @@
     <string name="status_found_connect">Connect</string>
     <string name="status_found_keep_searching">Keep searching</string>
     <string name="status_app_version">v%1$s</string>
+    <string name="update_banner_text">Update available: %1$s</string>
+    <string name="update_banner_download">Download</string>
+    <string name="update_banner_dismiss">✕</string>
 </resources>
