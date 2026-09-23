@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- As of Android 13 (API 33), NsdManager discovery/resolve is gated
+         behind this runtime permission — without it, discoverServices()
+         silently finds nothing on a targetSdk 34 app. neverForLocation is
+         safe here since this app only uses NSD for service discovery, never
+         to derive physical location from Wi-Fi scan results. -->
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.Boarderoni"
+        android:usesCleartextTraffic="true"
+        android:forceDarkAllowed="false"
+        tools:targetApi="29">
+
+        <!--
+          The dashboard is served plain HTTP over LAN by the desktop app (no
+          TLS — it's a local-only control link, not internet-facing), so
+          cleartext traffic has to stay allowed globally: the desktop's IP is
+          discovered at runtime via mDNS, not a fixed hostname a
+          network-security-config domain rule could pin to.
+        -->
+
+        <!--
+          screenLayout|smallestScreenSize|density|uiMode added alongside the
+          original three — Honor's own window-manager layer fires frequent
+          "recompute display mode" config changes (adaptive display/desktop-
+          mode features, logcat tag HwWindowManagerServiceEx) that aren't
+          covered by orientation/screenSize/keyboardHidden alone. Any config
+          change NOT declared here makes Android destroy and recreate this
+          Activity outright — confirmed in logcat as a genuine onStop()
+          (releaseMulticastLock/stopDiscovery) immediately followed by
+          onStart() (acquireMulticastLock/startDiscovery), which is what was
+          showing up as the WebView losing its connection and the native
+          "looking for boarderoni" screen reappearing with no user action.
+          The WebView's own content doesn't need to react specially to any
+          of these, so handling them here (a no-op onConfigurationChanged,
+          same as the original three already implicitly are) avoids the
+          teardown entirely instead of needing to survive it.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The found/connect card's own surface — one shade lighter than
+     status_overlay_background (matches icon.svg's #bg gradient's darker
+     stop, see colors.xml's ic_launcher_background comment) with a hairline
+     border in the same gray the desktop editor uses for panel dividers
+     (.properties's border-left in styles.css), so the card reads as a
+     distinct surface floating on the overlay rather than just more flat
+     background. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FF1C1F26" />
+    <corners android:radius="16dp" />
+    <stroke android:width="1dp" android:color="#FF2A2E37" />
+</shape>

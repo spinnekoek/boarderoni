@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches DEFAULT_DASHBOARD.backgroundColor in shared/types.ts — the
+         window/overlay/WebView all sit at this same color so nothing flashes
+         white during launch or while a page is loading/reloading. -->
+    <color name="status_overlay_background">#FF14161B</color>
+    <color name="status_text_color">#FFF5F5F5</color>
+    <!-- manual_ip_input's own text/hint/underline — Theme.Boarderoni is a
+         *Light* MaterialComponents theme (see themes.xml's own comment on
+         why), so a plain EditText with no color overrides defaults to dark
+         text/hint/underline meant for a light background, which reads as
+         near-invisible against this screen's dark status_overlay_background.
+         hint dimmer than the typed-text color so there's still a visible cue
+         once the field isn't empty. -->
+    <color name="status_input_text_color">#FFF5F5F5</color>
+    <color name="status_input_hint_color">#99F5F5F5</color>
+    <!-- manual_ip_input's own placeholder specifically — status_input_hint_color
+         above (60% white) reads close enough to status_input_text_color's
+         solid white that the empty field looked pre-filled rather than
+         showing a placeholder. A plain muted gray (matching the desktop
+         app's own secondary-text gray, styles.css's #6b7280) instead of a
+         translucent white reads unambiguously as a hint. -->
+    <color name="status_input_hint_dim_color">#FF6B7280</color>
+    <!-- Average of icon.svg's #bg gradient (#1c1f26 -> #14161b) — the
+         adaptive icon's background layer has to be a flat color/simple
+         pattern (no gradients across the mask boundary), unlike the
+         standalone desktop icon.svg/icon.png this is otherwise matching.
+         See ic_launcher_foreground.xml for the matching foreground. -->
+    <color name="ic_launcher_background">#FF181A20</color>
+</resources>

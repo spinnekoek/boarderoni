@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      No values-night/ variant exists for this theme on purpose — paired with
+      AppCompatDelegate.setDefaultNightMode(MODE_NIGHT_NO) in MainActivity,
+      there's nothing for the system dark theme to switch to. This is the
+      fix for the white-background-in-dark-theme glitches from the previous
+      app build.
+    -->
+    <style name="Theme.Boarderoni" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="android:windowBackground">@color/status_overlay_background</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="29">false</item>
+    </style>
+
+    <!-- Applied to every "Connect" button on the status overlay (manual
+         entry's and the found/connect screen's) — Theme.Boarderoni never
+         sets colorPrimary/colorAccent, so a plain MaterialComponents button
+         here would default to stock Material purple, clashing with the rest
+         of the app's own #5b8def blue. android:background fully replaces
+         the button's default Material drawable (ripple included), which is
+         fine at this size/on this screen — no elevation/stateListAnimator
+         needed either, hence forcing both off explicitly. -->
+    <style name="Boarderoni.Button.Primary" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/button_primary_background</item>
+        <item name="android:textColor">#FFFFFFFF</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:paddingStart">24dp</item>
+        <item name="android:paddingEnd">24dp</item>
+        <item name="android:elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <!-- The found/connect screen's "Keep searching" — a deliberately quieter
+         secondary action next to Primary above, not a second thing fighting
+         for attention. -->
+    <style name="Boarderoni.Button.Text" parent="Widget.AppCompat.Button.Borderless">
+        <item name="android:textColor">@color/status_input_hint_color</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+</resources>
