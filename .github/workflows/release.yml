@@ -38,7 +38,28 @@ jobs:
         # under the same tag. Creating the (draft) release ourselves first
         # means every later "does it exist" check finds it, so nothing
         # races to create a second one.
-        run: gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" --notes "" --repo "${{ github.repository }}"
+        #
+        # Idempotent (skips if one already exists) because publishing a
+        # draft release via the API auto-creates its git tag if the tag
+        # didn't already exist as a real ref — which fires another tag-push
+        # event and re-triggers this whole workflow. Only actually hit that
+        # by manually deleting+republishing a tag out of band while
+        # debugging this file; the normal git-push-a-tag flow always has
+        # the real ref in place before this step ever runs, and won't
+        # re-trigger itself. Still worth being safe against regardless.
+        # Listed and filtered client-side, not `gh release view`/GET
+        # /releases/tags/{tag} — that endpoint only resolves PUBLISHED
+        # releases, so it'd miss an existing DRAFT and create a duplicate
+        # anyway, defeating the point for exactly the mid-pipeline case
+        # that matters most (same gap the "Publish release" step below
+        # had to work around).
+        run: |
+          existing=$(gh api "repos/${{ github.repository }}/releases" --jq '.[] | select(.tag_name == "${{ github.ref_name }}") | .id')
+          if [ -n "$existing" ]; then
+            echo "Release already exists for ${{ github.ref_name }} (id $existing), skipping create"
+          else
+            gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" --notes "" --repo "${{ github.repository }}"
+          fi
 
       - run: npx electron-builder --win --publish always
         env:
