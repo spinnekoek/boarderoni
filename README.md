@@ -65,6 +65,13 @@ development:
   - **REST Data Sources** — poll or receive from any HTTP API.
   - **Date & Time** — clock/calendar values for labels and expressions.
 
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE) — free to use, modify, and share for
+any noncommercial purpose (personal, hobby, research, nonprofit/educational/
+government use). Commercial use requires a separate arrangement with the
+copyright holder.
+
 ## Support
 
 If Boarderoni's useful to you, consider supporting development:
