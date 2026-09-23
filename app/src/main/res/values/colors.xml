@@ -14,6 +14,13 @@
          once the field isn't empty. -->
     <color name="status_input_text_color">#FFF5F5F5</color>
     <color name="status_input_hint_color">#99F5F5F5</color>
+    <!-- manual_ip_input's own placeholder specifically — status_input_hint_color
+         above (60% white) reads close enough to status_input_text_color's
+         solid white that the empty field looked pre-filled rather than
+         showing a placeholder. A plain muted gray (matching the desktop
+         app's own secondary-text gray, styles.css's #6b7280) instead of a
+         translucent white reads unambiguously as a hint. -->
+    <color name="status_input_hint_dim_color">#FF6B7280</color>
     <!-- Average of icon.svg's #bg gradient (#1c1f26 -> #14161b) — the
          adaptive icon's background layer has to be a flat color/simple
          pattern (no gradients across the mask boundary), unlike the

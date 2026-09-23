@@ -8,14 +8,18 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <LinearLayout
+    <FrameLayout
         android:id="@+id/status_overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:gravity="center"
         android:background="@color/status_overlay_background"
         android:visibility="visible">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center">
 
         <ImageView
             android:layout_width="96dp"
@@ -88,7 +92,7 @@
                     android:inputType="textUri"
                     android:singleLine="true"
                     android:textColor="@color/status_input_text_color"
-                    android:textColorHint="@color/status_input_hint_color"
+                    android:textColorHint="@color/status_input_hint_dim_color"
                     android:backgroundTint="@color/status_input_text_color" />
 
                 <Button
@@ -151,6 +155,15 @@
                     android:textColor="@color/status_input_hint_color"
                     android:textSize="14sp" />
 
+                <TextView
+                    android:id="@+id/found_desktop_version"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="@color/status_input_hint_color"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
                 <Button
                     android:id="@+id/found_connect_button"
                     style="@style/Boarderoni.Button.Primary"
@@ -171,6 +184,26 @@
 
         </LinearLayout>
 
-    </LinearLayout>
+        </LinearLayout>
+
+        <!--
+          This device's own installed app version — subtle/low-key (dim gray,
+          small) since it's a diagnostic aid (e.g. for a bug report, see
+          .github/ISSUE_TEMPLATE/bug_report.yml's version field) rather than
+          something a user needs to look at normally. Only shown over the
+          searching/connecting/found screens (a child of status_overlay, not
+          the root FrameLayout), same reasoning as not wanting an "↑ Decks"-
+          style persistent chrome element over the live dashboard WebView.
+        -->
+        <TextView
+            android:id="@+id/app_version_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="12dp"
+            android:textColor="@color/status_input_hint_color"
+            android:textSize="11sp" />
+
+    </FrameLayout>
 
 </FrameLayout>

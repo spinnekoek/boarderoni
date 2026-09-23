@@ -11,9 +11,12 @@
          optionally :port) in one example rather than spelling out "or". -->
     <string name="manual_connect_placeholder">192.168.1.23:5173</string>
     <string name="manual_connect_button">Connect</string>
+    <string name="manual_connect_invalid">Enter an address like 192.168.1.23 or 192.168.1.23:5173</string>
     <string name="status_connecting">Connecting to %1$s:%2$d…</string>
     <string name="status_found_title">Boarderoni found</string>
     <string name="status_found_address">%1$s:%2$d</string>
+    <string name="status_found_desktop_version">Desktop v%1$s</string>
     <string name="status_found_connect">Connect</string>
     <string name="status_found_keep_searching">Keep searching</string>
+    <string name="status_app_version">v%1$s</string>
 </resources>

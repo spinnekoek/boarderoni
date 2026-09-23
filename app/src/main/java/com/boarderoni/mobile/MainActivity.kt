@@ -10,6 +10,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
@@ -19,9 +20,11 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -32,8 +35,11 @@ import android.widget.TextView
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
@@ -110,8 +116,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var connectingText: TextView
     private lateinit var foundGroup: View
     private lateinit var foundText: TextView
+    private lateinit var foundDesktopVersion: TextView
     private lateinit var foundConnectButton: Button
     private lateinit var foundKeepSearchingButton: Button
+    private lateinit var appVersionLabel: TextView
 
     private lateinit var nsdManager: NsdManager
     private lateinit var connectivityManager: ConnectivityManager
@@ -123,6 +131,14 @@ class MainActivity : AppCompatActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var retryRunnable: Runnable? = null
     private var discoveryWatchdog: Runnable? = null
+
+    // Backs resolveManualWebPort/probeAndShowFoundPrompt's network probes — a
+    // fixed cap (rather than each spawning its own bare Thread) since the
+    // discovery watchdog restarting every DISCOVERY_WATCHDOG_MS could
+    // otherwise queue up an unbounded number of live threads over a long
+    // unattended session. Two is enough for both call sites to run
+    // concurrently without ever actually queueing in practice.
+    private val networkExecutor: ExecutorService = Executors.newFixedThreadPool(2)
 
     // "host:port" of whatever's currently loaded, so a redundant onServiceFound
     // for the same instance doesn't reload a perfectly fine WebView.
@@ -167,7 +183,6 @@ class MainActivity : AppCompatActivity() {
             if (granted) startDiscovery()
         }
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         // Belt-and-suspenders alongside Theme.Boarderoni (which has no
         // values-night variant): this stops the system dark theme from
@@ -206,13 +221,16 @@ class MainActivity : AppCompatActivity() {
         connectingText = findViewById(R.id.connecting_text)
         foundGroup = findViewById(R.id.found_group)
         foundText = findViewById(R.id.found_text)
+        foundDesktopVersion = findViewById(R.id.found_desktop_version)
         foundConnectButton = findViewById(R.id.found_connect_button)
         foundKeepSearchingButton = findViewById(R.id.found_keep_searching_button)
+        appVersionLabel = findViewById(R.id.app_version_label)
+        appVersionLabel.text = getString(R.string.status_app_version, BuildConfig.VERSION_NAME)
 
         nsdManager = getSystemService(Context.NSD_SERVICE) as NsdManager
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-        setUpWebView()
+        configureWebView(webView)
         setUpManualConnect()
         setUpFoundPrompt()
 
@@ -267,7 +285,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setUpWebView() {
+    // Parameterized on `view` rather than the fixed webView field so
+    // recreateWebView() can run the exact same setup on a freshly created
+    // replacement after onRenderProcessGone — a crashed WebView's render
+    // process is gone for good, so recovery means building a new instance,
+    // not reconfiguring the dead one.
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun configureWebView(view: WebView) {
         // WebView paints white by default until the page's own CSS has
         // something to show — visible as a bright flash on every load/
         // reload (a new deck, a reconnect, `changeServer()`) even with the
@@ -275,9 +299,9 @@ class MainActivity : AppCompatActivity() {
         // DEFAULT_DASHBOARD.backgroundColor (shared/types.ts) and
         // status_overlay_background (colors.xml) so there's no seam between
         // this, the overlay, and whatever the loaded dashboard itself paints.
-        webView.setBackgroundColor(Color.parseColor("#14161B"))
+        view.setBackgroundColor(Color.parseColor("#14161B"))
 
-        val settings = webView.settings
+        val settings = view.settings
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
@@ -308,9 +332,9 @@ class MainActivity : AppCompatActivity() {
         // than a regular mobile browser — see androidBridge.ts on the web
         // side, which gates the "Prevent screen timeout" option in the
         // 5-finger device settings modal on this object's mere existence.
-        webView.addJavascriptInterface(WebAppBridge(), "BoarderoniAndroid")
+        view.addJavascriptInterface(WebAppBridge(), "BoarderoniAndroid")
 
-        webView.webViewClient = object : WebViewClient() {
+        view.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 dlog("webView.onPageFinished: url=$url")
                 hideSearching()
@@ -347,6 +371,46 @@ class MainActivity : AppCompatActivity() {
                     scheduleRediscovery()
                 }
             }
+
+            // addJavascriptInterface's BoarderoniAndroid bridge is exposed to
+            // whatever origin currently occupies the top frame, not scoped to
+            // the desktop we actually meant to connect to — with cleartext
+            // traffic required app-wide (see the manifest's own comment: no
+            // fixed hostname a network-security-config domain rule could
+            // pin to, since the desktop's IP is only known via runtime mDNS),
+            // a LAN actor able to inject a redirect/navigation could
+            // otherwise steer the WebView to a page that inherits the bridge.
+            // Only ever reached for page-driven navigation (link, JS, or
+            // redirect) — our own loadUrl() calls in loadMobileLink() don't
+            // go through this callback at all, so the app's own legitimate
+            // loads are never affected.
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val url = request?.url ?: return false
+                if (request.isForMainFrame && !isAllowedNavigationTarget(url)) {
+                    dlog("webView.shouldOverrideUrlLoading: blocked url=$url currentTarget=$currentTarget")
+                    return true
+                }
+                return false
+            }
+
+            // Required as of targetSdk O (see this method's own Android
+            // docs) — without it, a WebView renderer crash (or the system
+            // reclaiming a backgrounded one under memory pressure) takes the
+            // whole app down with no recovery, which matters more here than
+            // for a typical app since this is meant to run unattended on a
+            // mounted cockpit tablet with nobody there to relaunch it.
+            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                dlog(
+                    "webView.onRenderProcessGone: didCrash=${detail?.didCrash()} " +
+                        "rendererPriorityAtExit=${detail?.rendererPriorityAtExit()}"
+                )
+                // Already tearing down for an unrelated reason — nothing to
+                // recover into, and touching views mid-teardown would be
+                // unsafe. Returning true either way avoids the crash the
+                // system falls back to if this callback returns false.
+                if (!isFinishing && !isDestroyed) recreateWebView()
+                return true
+            }
         }
     }
 
@@ -369,10 +433,7 @@ class MainActivity : AppCompatActivity() {
     // above) if nothing's remembered.
     private fun attemptRememberedConnect() {
         val remembered = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_LAST_CONNECTED_TARGET, null) ?: return
-        val colonIndex = remembered.lastIndexOf(':')
-        val port = if (colonIndex >= 0) remembered.substring(colonIndex + 1).toIntOrNull() else null
-        if (colonIndex < 0 || port == null) return
-        val host = remembered.substring(0, colonIndex)
+        val (host, port) = splitHostPort(remembered) ?: return
         dlog("attemptRememberedConnect: target=$remembered")
         awaitingRememberedConnect = true
         currentTarget = remembered
@@ -382,6 +443,20 @@ class MainActivity : AppCompatActivity() {
         // discovery scan is what's actually happening.
         showConnecting(host, port)
         loadMobileLink(host, port)
+    }
+
+    // Splits an internally-constructed "host:port" string — always produced
+    // by this app itself as "$host:$port" (currentTarget, KEY_LAST_CONNECTED_
+    // TARGET), never user-typed (see parseManualTarget for that) — back into
+    // its parts. Only needs to survive a missing/corrupt pref value, not
+    // arbitrary input.
+    private fun splitHostPort(value: String): Pair<String, Int>? {
+        val colonIndex = value.lastIndexOf(':')
+        if (colonIndex < 0) return null
+        val port = value.substring(colonIndex + 1).toIntOrNull() ?: return null
+        val host = value.substring(0, colonIndex)
+        if (host.isEmpty()) return null
+        return host to port
     }
 
     // NsdManager discovery/resolve throws SecurityException without
@@ -411,6 +486,85 @@ class MainActivity : AppCompatActivity() {
         releaseMulticastLock()
     }
 
+    override fun onDestroy() {
+        dlog("onDestroy")
+        networkExecutor.shutdownNow()
+        destroyWebView(webView)
+        super.onDestroy()
+    }
+
+    // A WebView holds a reference back to this Activity (via its Context) for
+    // as long as it's alive — addJavascriptInterface's WebAppBridge makes
+    // that worse, since it's an inner class carrying its own implicit outer-
+    // Activity reference too. Neither is cleaned up automatically just
+    // because the Activity is finishing, so an un-destroyed WebView is a
+    // guaranteed per-instance Activity leak. destroy() itself needs the
+    // WebView detached from its parent first and no further callbacks able
+    // to fire into now-gone views — same ordering Google's own WebView
+    // cleanup guidance recommends.
+    private fun destroyWebView(view: WebView) {
+        (view.parent as? ViewGroup)?.removeView(view)
+        view.stopLoading()
+        view.webViewClient = object : WebViewClient() {}
+        view.webChromeClient = null
+        view.removeJavascriptInterface("BoarderoniAndroid")
+        view.loadUrl("about:blank")
+        view.destroy()
+    }
+
+    // Called from onRenderProcessGone: the crashed WebView's underlying
+    // render process is gone for good, so recovery means swapping in a
+    // brand new instance, not reusing the dead one. Deliberately does NOT
+    // call the old view's destroy() — per Android's own onRenderProcessGone
+    // guidance, that's for the still-alive teardown path (destroyWebView(),
+    // used from onDestroy()); the crashed instance is just detached and
+    // dropped so it can be garbage collected.
+    private fun recreateWebView() {
+        dlog("recreateWebView")
+        val target = currentTarget
+        val old = webView
+        val parent = old.parent as? ViewGroup
+        val index = parent?.indexOfChild(old) ?: -1
+        val layoutParams = old.layoutParams
+        parent?.removeView(old)
+
+        val fresh = WebView(this)
+        configureWebView(fresh)
+        if (parent != null) {
+            if (index >= 0) parent.addView(fresh, index, layoutParams) else parent.addView(fresh, layoutParams)
+        }
+        webView = fresh
+
+        // Reconnect to whatever was loaded before the crash, same as a fresh
+        // launch's attemptRememberedConnect — falling back to plain discovery
+        // if nothing was actually connected yet (e.g. it crashed while still
+        // on the searching/found screen).
+        val hostPort = target?.let { splitHostPort(it) }
+        if (hostPort != null) {
+            val (host, port) = hostPort
+            showConnecting(host, port)
+            loadMobileLink(host, port)
+        } else {
+            currentTarget = null
+            showSearching()
+            restartDiscovery()
+        }
+    }
+
+    // Guards shouldOverrideUrlLoading: only the desktop this WebView actually
+    // connected to (currentTarget, set immediately before every loadMobileLink
+    // call) may navigate the top frame — see shouldOverrideUrlLoading's own
+    // comment for why. currentTarget being unset (nothing connected yet)
+    // means there's nothing legitimate for the page to navigate to, so that
+    // correctly denies by default rather than allowing.
+    private fun isAllowedNavigationTarget(url: Uri): Boolean {
+        val target = currentTarget ?: return false
+        val (allowedHost, allowedPort) = splitHostPort(target) ?: return false
+        return url.scheme.equals("http", ignoreCase = true) &&
+            url.host?.equals(allowedHost, ignoreCase = true) == true &&
+            url.port == allowedPort
+    }
+
     private fun setUpManualConnect() {
         val lastInput = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_LAST_MANUAL_INPUT, null)
@@ -437,21 +591,48 @@ class MainActivity : AppCompatActivity() {
     private fun connectManually() {
         val input = manualIpInput.text.toString().trim()
         if (input.isEmpty()) return
-        val colonIndex = input.lastIndexOf(':')
-        val host = if (colonIndex >= 0) input.substring(0, colonIndex) else input
-        if (host.isEmpty()) return
+        val parsed = parseManualTarget(input)
+        if (parsed == null) {
+            manualIpInput.error = getString(R.string.manual_connect_invalid)
+            return
+        }
+        manualIpInput.error = null
+        val (host, typedPort) = parsed
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
             .putString(KEY_LAST_MANUAL_INPUT, input)
             .apply()
         cancelDiscoveryWatchdog()
         cancelRetry()
-        if (colonIndex >= 0) {
-            val port = input.substring(colonIndex + 1).toIntOrNull() ?: DEFAULT_WEB_PORT
-            currentTarget = "$host:$port"
-            showConnecting(host, port)
-            loadMobileLink(host, port)
+        if (typedPort != null) {
+            currentTarget = "$host:$typedPort"
+            showConnecting(host, typedPort)
+            loadMobileLink(host, typedPort)
         } else {
             resolveManualWebPort(host)
+        }
+    }
+
+    // input is whatever the user actually typed/pasted — unlike splitHostPort
+    // (which trusts a string this app built itself), this has to survive a
+    // pasted browser-bar URL ("http://192.168.1.23:5173/") and reject genuine
+    // garbage instead of silently mis-splitting it. Returns (host, port) with
+    // port null when none was typed (the "figure it out via resolveManualWebPort"
+    // case), or null outright for input that can't be parsed with any
+    // confidence — notably an unbracketed IPv6 literal (2+ colons), which
+    // this app has never needed LAN support for and won't guess a split for
+    // rather than silently loading whatever comes out.
+    private fun parseManualTarget(raw: String): Pair<String, Int?>? {
+        val input = raw.trim().removePrefix("http://").removePrefix("https://").substringBefore('/')
+        if (input.isEmpty()) return null
+        return when (input.count { it == ':' }) {
+            0 -> input to null
+            1 -> {
+                val colonIndex = input.indexOf(':')
+                val host = input.substring(0, colonIndex)
+                val port = input.substring(colonIndex + 1).toIntOrNull()
+                if (host.isEmpty() || port == null) null else host to port
+            }
+            else -> null
         }
     }
 
@@ -465,7 +646,7 @@ class MainActivity : AppCompatActivity() {
     // read. Falls back to DEFAULT_WEB_PORT if the probe fails for any
     // reason (unreachable host, older desktop build, timeout).
     private fun resolveManualWebPort(host: String) {
-        Thread {
+        networkExecutor.execute {
             val resolvedPort = try {
                 val connection =
                     URL("http://$host:$DEFAULT_WEB_PORT/api/apk-info").openConnection() as HttpURLConnection
@@ -482,11 +663,16 @@ class MainActivity : AppCompatActivity() {
                 null
             } ?: DEFAULT_WEB_PORT
             mainHandler.post {
+                // The Activity can finish (or already be gone) by the time
+                // this probe — run on networkExecutor, with no lifecycle tie-in
+                // of its own — actually completes; touching views or prefs
+                // past that point would be unsafe/pointless.
+                if (isFinishing || isDestroyed) return@post
                 currentTarget = "$host:$resolvedPort"
                 showConnecting(host, resolvedPort)
                 loadMobileLink(host, resolvedPort)
             }
-        }.start()
+        }
     }
 
     // Most real-world NSD "discovery just doesn't find anything" reports
@@ -570,10 +756,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun startDiscovery() {
         if (discoveryActive) return
+        // Set optimistically, before discoverServices() rather than after
+        // onDiscoveryStarted confirms it — that callback fires from NsdManager's
+        // own thread (not guaranteed main, and sometimes badly delayed on OEM
+        // stacks, see armDiscoveryWatchdog's own comment), so leaving the guard
+        // false until then let two close-together callers (onStart, the 8s
+        // watchdog) both slip past it and register a second listener on top of
+        // the first, leaking it for the Activity's lifetime.
+        discoveryActive = true
         val listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) {
                 dlog("Nsd.onDiscoveryStarted: serviceType=$serviceType")
-                discoveryActive = true
             }
 
             override fun onServiceFound(service: NsdServiceInfo) {
@@ -626,7 +819,17 @@ class MainActivity : AppCompatActivity() {
         }
         discoveryListener = listener
         dlog("startDiscovery: calling nsdManager.discoverServices")
-        nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+        try {
+            nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+        } catch (e: Exception) {
+            // Synchronous failure (e.g. SecurityException) — the async
+            // onStartDiscoveryFailed above never fires in this case, so the
+            // optimistic flag set above would otherwise strand discoveryActive
+            // true forever, permanently blocking every future startDiscovery().
+            dlog("startDiscovery: discoverServices threw: $e")
+            discoveryActive = false
+            discoveryListener = null
+        }
     }
 
     private fun stopDiscovery() {
@@ -654,7 +857,52 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // resolveService/host is deprecated as of API 34 in favor of
+    // registerServiceInfoCallback/hostAddresses (also fixes the old API's
+    // IPv4-only single-address limitation) — but the new API needs API 34,
+    // and minSdk here is 26, so both paths stay: the modern one on 34+, the
+    // legacy one (suppressed, not removed) below it.
     private fun resolveService(service: NsdServiceInfo) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            resolveServiceModern(service)
+        } else {
+            resolveServiceLegacy(service)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private fun resolveServiceModern(service: NsdServiceInfo) {
+        val callback = object : NsdManager.ServiceInfoCallback {
+            override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) {
+                dlog("Nsd.onServiceInfoCallbackRegistrationFailed: errorCode=$errorCode")
+            }
+
+            override fun onServiceUpdated(serviceInfo: NsdServiceInfo) {
+                onServiceResolved(serviceInfo.hostAddresses.firstOrNull()?.hostAddress, serviceInfo)
+                // One-shot, like the legacy resolveService below — this app
+                // only wants a single current address, not to keep tracking
+                // updates for the service's whole remaining lifetime, so
+                // unregister right after the first callback.
+                try {
+                    nsdManager.unregisterServiceInfoCallback(this)
+                } catch (_: IllegalArgumentException) {
+                    // Already unregistered — fine.
+                }
+            }
+
+            override fun onServiceLost() {
+                dlog("Nsd.ServiceInfoCallback.onServiceLost: $service")
+            }
+
+            override fun onServiceInfoCallbackUnregistered() {
+                dlog("Nsd.onServiceInfoCallbackUnregistered: $service")
+            }
+        }
+        nsdManager.registerServiceInfoCallback(service, ContextCompat.getMainExecutor(this), callback)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun resolveServiceLegacy(service: NsdServiceInfo) {
         nsdManager.resolveService(service, object : NsdManager.ResolveListener {
             override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                 dlog("Nsd.onResolveFailed: $serviceInfo errorCode=$errorCode")
@@ -663,31 +911,37 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                val host = serviceInfo.host?.hostAddress ?: return
-                val webPort = serviceInfo.txtValue("webPort")?.toIntOrNull() ?: serviceInfo.port
-                val target = "$host:$webPort"
-                dlog(
-                    "Nsd.onServiceResolved: target=$target currentTarget=$currentTarget " +
-                        "pendingTarget=$pendingTarget awaitingRememberedConnect=$awaitingRememberedConnect"
-                )
-                // Already connected (or connecting) to this exact target —
-                // nothing to do, same as before.
-                if (target == currentTarget) return
-                // Still waiting to see whether a silent remembered-reconnect
-                // succeeds — don't pop the found/connect screen over that; a
-                // real failure (onReceivedError) is what un-suppresses this.
-                if (awaitingRememberedConnect) return
-                // Already connected to something ELSE and just viewing it —
-                // a background mDNS re-announcement shouldn't interrupt an
-                // active session with a found/connect prompt.
-                if (statusOverlay.visibility != View.VISIBLE) return
-                // Already showing the found/connect screen for this exact
-                // target — a periodic re-announcement while the user just
-                // hasn't tapped Connect yet shouldn't re-show/reset it.
-                if (target == pendingTarget) return
-                probeAndShowFoundPrompt(host, webPort, target)
+                onServiceResolved(serviceInfo.host?.hostAddress, serviceInfo)
             }
         })
+    }
+
+    // Shared tail end of both resolution paths above — everything from here
+    // down is unchanged from before the API split.
+    private fun onServiceResolved(hostAddress: String?, serviceInfo: NsdServiceInfo) {
+        val host = hostAddress ?: return
+        val webPort = serviceInfo.txtValue("webPort")?.toIntOrNull() ?: serviceInfo.port
+        val target = "$host:$webPort"
+        dlog(
+            "Nsd.onServiceResolved: target=$target currentTarget=$currentTarget " +
+                "pendingTarget=$pendingTarget awaitingRememberedConnect=$awaitingRememberedConnect"
+        )
+        // Already connected (or connecting) to this exact target —
+        // nothing to do, same as before.
+        if (target == currentTarget) return
+        // Still waiting to see whether a silent remembered-reconnect
+        // succeeds — don't pop the found/connect screen over that; a
+        // real failure (onReceivedError) is what un-suppresses this.
+        if (awaitingRememberedConnect) return
+        // Already connected to something ELSE and just viewing it —
+        // a background mDNS re-announcement shouldn't interrupt an
+        // active session with a found/connect prompt.
+        if (statusOverlay.visibility != View.VISIBLE) return
+        // Already showing the found/connect screen for this exact
+        // target — a periodic re-announcement while the user just
+        // hasn't tapped Connect yet shouldn't re-show/reset it.
+        if (target == pendingTarget) return
+        probeAndShowFoundPrompt(host, webPort, target)
     }
 
     // mDNS only knows a service WAS advertised, not that it's still actually
@@ -702,21 +956,36 @@ class MainActivity : AppCompatActivity() {
     // dev/packaged mode" — is what tells "actually there" apart from "still
     // cached" before claiming to have found something.
     private fun probeAndShowFoundPrompt(host: String, port: Int, target: String) {
-        Thread {
-            val reachable = try {
+        networkExecutor.execute {
+            // desktopVersion stays null on anything short of a clean 200 +
+            // parseable body — an older desktop build (pre-version-field
+            // apk-info) or a body read hiccup just means the found screen
+            // shows no desktop version, not a fake reachable=false.
+            var reachable = false
+            var desktopVersion: String? = null
+            try {
                 val connection = URL("http://$host:$port/api/apk-info").openConnection() as HttpURLConnection
                 connection.connectTimeout = 2000
                 connection.readTimeout = 2000
                 try {
-                    connection.responseCode in 200..299
+                    reachable = connection.responseCode in 200..299
+                    if (reachable) {
+                        val body = connection.inputStream.bufferedReader().readText()
+                        desktopVersion = JSONObject(body).optString("version").ifEmpty { null }
+                    }
                 } finally {
                     connection.disconnect()
                 }
             } catch (_: Exception) {
-                false
+                // reachable/desktopVersion already at their not-found defaults
             }
             mainHandler.post {
-                dlog("probeAndShowFoundPrompt: target=$target reachable=$reachable")
+                // Same reasoning as resolveManualWebPort's own guard — this
+                // probe runs on networkExecutor with no lifecycle tie-in, so
+                // the Activity may already be finishing by the time it posts
+                // back.
+                if (isFinishing || isDestroyed) return@post
+                dlog("probeAndShowFoundPrompt: target=$target reachable=$reachable desktopVersion=$desktopVersion")
                 if (!reachable) return@post
                 // Several seconds may have passed since the probe started —
                 // re-check the same dedupe/suppression guards onServiceResolved
@@ -726,9 +995,9 @@ class MainActivity : AppCompatActivity() {
                 if (target == currentTarget || target == pendingTarget) return@post
                 if (awaitingRememberedConnect) return@post
                 if (statusOverlay.visibility != View.VISIBLE) return@post
-                showFoundPrompt(host, port)
+                showFoundPrompt(host, port, desktopVersion)
             }
-        }.start()
+        }
     }
 
     private fun NsdServiceInfo.txtValue(key: String): String? {
@@ -776,11 +1045,17 @@ class MainActivity : AppCompatActivity() {
     // onServiceResolved above) on a first launch with nothing remembered yet,
     // or after an explicit "Change server" — never while already connected,
     // or mid a silent remembered-reconnect attempt (attemptRememberedConnect).
-    private fun showFoundPrompt(host: String, port: Int) {
-        dlog("showFoundPrompt: host=$host port=$port")
+    private fun showFoundPrompt(host: String, port: Int, desktopVersion: String? = null) {
+        dlog("showFoundPrompt: host=$host port=$port desktopVersion=$desktopVersion")
         pendingHost = host
         pendingPort = port
         foundText.text = getString(R.string.status_found_address, host, port)
+        if (desktopVersion != null) {
+            foundDesktopVersion.text = getString(R.string.status_found_desktop_version, desktopVersion)
+            foundDesktopVersion.visibility = View.VISIBLE
+        } else {
+            foundDesktopVersion.visibility = View.GONE
+        }
         connectingGroup.visibility = View.GONE
         searchingGroup.visibility = View.GONE
         foundGroup.visibility = View.VISIBLE
