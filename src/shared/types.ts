@@ -586,7 +586,7 @@ export interface WidgetState extends BoxAppearance, ColorAppearance {
 
 /**
  * Whether a widget renders at all on the deployed view (a phone, the
- * desktop's own /?mode=view) — the editor itself always shows every
+ * desktop's own browser pointed at this server) — the editor itself always shows every
  * widget regardless, so it stays selectable/editable while hidden.
  * Undefined behaves as true (opt-in to hide, not opt-in to show), so an
  * existing dashboard saved before this field existed renders exactly as
@@ -2781,10 +2781,13 @@ export type ClientToServer =
       // first-ever hello (nothing to send yet) or an old approval that
       // predates this field existing, both of which fall through to the
       // normal approval flow the same as a never-approved device would.
-      // Never meaningful for role: 'edit' — the desktop's own window earns
-      // trust from being loopback-only (see main/index.ts's isTrustedSocket/
-      // hello handling), not a token.
+      // Never meaningful for role: 'edit' — see editorToken below instead.
       deviceToken?: string
+      // role: 'edit' only — the per-launch secret only the editor's own
+      // Electron window receives (via its preload; see EDITOR_TOKEN in
+      // main/index.ts). Required, together with a loopback connection, for
+      // the server to grant edit rights.
+      editorToken?: string
     }
   // final follows the same convention as action:trigger's own final below:
   // false for an in-flight rAF-throttled drag tick (useWidgetDrag's

@@ -1,17 +1,14 @@
 import { SERVER_PORT } from '@shared/constants'
 import { customFontFieldValue, fontFormatHint, type CustomFont } from '@shared/fonts'
-import { getDeviceId, getDeviceToken } from './id'
+import { contentAuthParams } from './id'
 
 // Same absolute-URL reasoning as background.ts's backgroundImageUrl — the
 // renderer's own origin is the Vite dev server in development, not the app's
 // actual HTTP/WS server (SERVER_PORT), so a relative url() would 404 there.
-// device/token — see backgroundImageUrl's own comment for why these are
-// appended unconditionally regardless of edit vs view mode.
+// Auth params: see id.ts's contentAuthParams.
 function customFontUrl(id: string): string {
   const host = window.location.hostname || 'localhost'
-  const device = encodeURIComponent(getDeviceId())
-  const token = encodeURIComponent(getDeviceToken() ?? '')
-  return `http://${host}:${SERVER_PORT}/fonts/${id}?device=${device}&token=${token}`
+  return `http://${host}:${SERVER_PORT}/fonts/${id}?${contentAuthParams()}`
 }
 
 const STYLE_ELEMENT_ID = 'custom-font-faces'

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { nextId } from '../id'
+import { editorHeaders } from '../electronBridge'
 import { SERVER_PORT } from '@shared/constants'
 import type { DeckSummary, RestDataSourceStatus, RestIncomingMapping } from '@shared/types'
 import { RestMappingRow } from './RestMappingRow'
@@ -42,7 +43,7 @@ export function RestDataSourcesSettingsPanel(): React.JSX.Element {
   // target-deck dropdown needs deck names, not just whichever deck happens
   // to be open right now.
   useEffect(() => {
-    fetch(apiUrl('/api/decks'))
+    fetch(apiUrl('/api/decks'), { headers: editorHeaders() })
       .then((res) => res.json() as Promise<DeckSummary[]>)
       .then(setDecks)
       .catch(() => setDecks([]))

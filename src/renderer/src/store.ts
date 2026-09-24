@@ -37,6 +37,7 @@ import { registerCustomFonts, type CustomFont } from '@shared/fonts'
 import type { CustomSound } from '@shared/sounds'
 import { playSound } from './soundPlayer'
 import { getDeviceId, getDeviceToken, setDeviceToken, setLastDeckId, clearLastDeckId, nextId } from './id'
+import { getEditorToken } from './electronBridge'
 import { syncCustomFontFaces } from './customFontFaces'
 import { useConfirmStore } from './confirmStore'
 import { pushRemoteDebugLog } from './debugConsoleStore'
@@ -472,7 +473,7 @@ function sendHello(mode: Mode): void {
       deviceToken: getDeviceToken() ?? undefined
     })
   } else {
-    send({ type: 'hello', role: mode })
+    send({ type: 'hello', role: mode, editorToken: getEditorToken() })
   }
 }
 

@@ -1,3 +1,5 @@
+import { getEditorToken } from './electronBridge'
+
 export function nextId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -34,6 +36,19 @@ export function getDeviceToken(): string | null {
 
 export function setDeviceToken(token: string): void {
   localStorage.setItem(DEVICE_TOKEN_KEY, token)
+}
+
+// Query string for every device-gated content URL (background image, custom
+// fonts/sounds, screen-capture frames) — see main/index.ts's
+// hasDeviceContentAccess. The editor authenticates with `editor`, an
+// approved client with `device`/`token`; both are always appended, and
+// whichever doesn't apply in this mode is just empty and fails verification
+// harmlessly.
+export function contentAuthParams(): string {
+  const device = encodeURIComponent(getDeviceId())
+  const token = encodeURIComponent(getDeviceToken() ?? '')
+  const editor = encodeURIComponent(getEditorToken() ?? '')
+  return `device=${device}&token=${token}&editor=${editor}`
 }
 
 const LAST_DECK_ID_KEY = 'boarderoni-last-deck-id'

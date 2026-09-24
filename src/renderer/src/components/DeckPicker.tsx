@@ -5,6 +5,7 @@ import { useSettingsGesture } from '../useSettingsGesture'
 import { SERVER_PORT } from '@shared/constants'
 import type { DeckSummary } from '@shared/types'
 import { DeviceSettingsModal } from './DeviceSettingsModal'
+import { editorHeaders } from '../electronBridge'
 
 function apiUrl(path: string): string {
   const host = window.location.hostname || 'localhost'
@@ -57,7 +58,7 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
   function load(): void {
     setError(null)
     setRestDecks(null)
-    fetch(apiUrl('/api/decks'))
+    fetch(apiUrl('/api/decks'), { headers: editorHeaders() })
       .then((res) => {
         if (!res.ok) throw new Error(`Server responded ${res.status}`)
         return res.json() as Promise<DeckSummary[]>
@@ -80,7 +81,7 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
     try {
       const res = await fetch(apiUrl('/api/decks'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: editorHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ name: newName.trim() || undefined })
       })
       if (!res.ok) throw new Error(`Server responded ${res.status}`)
@@ -106,7 +107,7 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
     try {
       const res = await fetch(apiUrl(`/api/decks/${id}`), {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: editorHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ name })
       })
       if (!res.ok) throw new Error(`Server responded ${res.status}`)
@@ -122,7 +123,7 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
     const previous = restDecks
     setRestDecks(restDecks.filter((d) => d.id !== deck.id))
     try {
-      const res = await fetch(apiUrl(`/api/decks/${deck.id}`), { method: 'DELETE' })
+      const res = await fetch(apiUrl(`/api/decks/${deck.id}`), { method: 'DELETE', headers: editorHeaders() })
       if (!res.ok && res.status !== 404) throw new Error(`Server responded ${res.status}`)
     } catch {
       setRestDecks(previous)
@@ -137,7 +138,7 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
     if (exportingId) return
     setExportingId(deck.id)
     try {
-      const res = await fetch(apiUrl(`/api/decks/${deck.id}/export`), { method: 'POST' })
+      const res = await fetch(apiUrl(`/api/decks/${deck.id}/export`), { method: 'POST', headers: editorHeaders() })
       if (!res.ok) throw new Error(`Server responded ${res.status}`)
       const body = (await res.json()) as { canceled?: true } | { ok: true; fontCount: number }
       if (!('canceled' in body) && body.fontCount > 0) setExportFontNotice(body.fontCount)
@@ -156,7 +157,7 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
     setImporting(true)
     setImportWarnings(null)
     try {
-      const res = await fetch(apiUrl('/api/decks/import'), { method: 'POST' })
+      const res = await fetch(apiUrl('/api/decks/import'), { method: 'POST', headers: editorHeaders() })
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null
         setError(body?.error ?? 'Could not import that deck.')

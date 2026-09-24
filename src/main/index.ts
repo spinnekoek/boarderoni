@@ -16,7 +16,7 @@ import {
   type FSWatcher
 } from 'node:fs'
 import { join, extname } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { hostname, networkInterfaces } from 'node:os'
 import { WebSocketServer, WebSocket } from 'ws'
 import { Agent as UndiciAgent } from 'undici'
@@ -1126,15 +1126,12 @@ interface SocketContext {
   // separately.
   deviceToken?: string
   // Captured once from the raw HTTP upgrade request in wss.on('connection')
-  // — req isn't available in the ws.on('message') closure otherwise. The
-  // ONLY thing role: 'edit' is gated on (see the 'hello' handler below):
-  // the desktop editor's own window always connects loopback (packaged
-  // build's win.loadFile is file://, dev's win.loadURL is Vite's own
-  // http://localhost:5173 — neither ever resolves to a LAN address), so
-  // "this connection originated on this machine" is a sufficient (and much
-  // simpler) proxy for "this is the desktop, not a claim any LAN device can
-  // make" — no credential needed for a fact the OS itself already
-  // guarantees.
+  // — req isn't available in the ws.on('message') closure otherwise. One of
+  // the two things role: 'edit' is gated on (see the 'hello' handler below),
+  // alongside EDITOR_TOKEN: the desktop editor's own window always connects
+  // loopback, so a LAN device can never pass this half. Loopback alone
+  // isn't enough, though — any browser tab (or any web page open in one)
+  // on this same machine is loopback too, which is what EDITOR_TOKEN is for.
   remoteAddress?: string
   // Known once the socket's first 'hello' arrives — undefined briefly
   // between raw connect and that first message. Drives both which sockets
@@ -1155,23 +1152,73 @@ function isLoopbackAddress(address: string | undefined): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
 }
 
-// Gates the four subresource routes an <img src>/@font-face url() actually
-// loads (background-image, fonts/:id, screen-capture/frame|stream) —
+// Minted fresh every launch and handed ONLY to the editor BrowserWindow, via
+// the 'get-editor-token' IPC below (sender-checked) and the preload bridge —
+// never in the editor page's own URL, and never sent anywhere by the server
+// (the editor does put it on its own loopback subresource URLs, see
+// hasDeviceContentAccess, since those can't carry a header). It's what
+// makes "is this the editor?" something only the Electron window can
+// answer yes to: a browser tab on this same machine passes the loopback
+// check but has no preload, so it can never learn this value. Required for
+// the WS role: 'edit' hello, every /api/decks* request, and the editor's
+// own reads of the device-gated content routes.
+const EDITOR_TOKEN = randomBytes(32).toString('hex')
+
+function isEditorToken(token: unknown): boolean {
+  if (typeof token !== 'string') return false
+  const given = Buffer.from(token)
+  const expected = Buffer.from(EDITOR_TOKEN)
+  return given.length === expected.length && timingSafeEqual(given, expected)
+}
+
+// Loopback AND the token — same two-part check as the WS 'hello' handler,
+// for the REST side (see /api/decks* below). A header rather than a query
+// param so it never lands in a URL.
+const EDITOR_TOKEN_HEADER = 'x-boarderoni-editor-token'
+
+function isEditorRequest(req: IncomingMessage): boolean {
+  return isLoopbackAddress(req.socket.remoteAddress) && isEditorToken(req.headers[EDITOR_TOKEN_HEADER])
+}
+
+// Defense in depth on the /ws upgrade, on top of EDITOR_TOKEN/device
+// approval: browsers don't apply same-origin rules to WebSockets, so without
+// this any web page open on any machine's browser could open a socket here
+// and, at minimum, spam device-approval requests at the editor. Every
+// legitimate page (editor in dev, web/Android clients) is served from this
+// same machine, so its Origin's hostname always matches the Host it
+// connects to. Hostname only, not port: in dev a client can load the page
+// from Vite's port (mDNS advertises it as webPort) while its WS still goes
+// to SERVER_PORT. The packaged editor loads from file://, whose Origin isn't
+// http(s) at all, and a non-browser client sends none — both let through.
+// Not a substitute for the token: DNS rebinding can make a hostile page's
+// Origin match Host.
+function isAllowedWsOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin
+  if (!origin || !/^https?:\/\//i.test(origin)) return true
+  try {
+    return new URL(origin).hostname === new URL(`http://${req.headers.host ?? ''}`).hostname
+  } catch {
+    return false
+  }
+}
+
+// Gates the subresource routes an <img src>/@font-face url()/Audio actually
+// loads (background-image, fonts/:id, sounds/:id, screen-capture/frame|stream) —
 // unlike /api/decks*, these ARE meant to be reachable by a real approved
 // view device (that's the whole point: this is the dashboard content
 // itself), so a loopback-only gate would be wrong here. Two valid ways in,
 // mirroring the WS protocol's own two trust paths: the desktop editor's own
-// window (loopback — same reasoning as role: 'edit', see isLoopbackAddress's
-// own callers) needs no token at all, since it's not "a device" in the
-// approval sense; a genuinely remote view client supplies `device`/`token`
-// query params (an Authorization header isn't an option — none of these
-// four are fetch()ed, they're all browser-loaded subresources with no way
-// to attach one, see background.ts/customFontFaces.ts/screenCapture.ts's
-// own URL builders, which append both unconditionally regardless of mode —
-// the editor's own request just has empty/absent values that never matter
-// because loopback already grants it access).
+// window (loopback plus EDITOR_TOKEN, same as role: 'edit' — loopback alone
+// would let any browser tab on this machine in) supplies an `editor` query
+// param, since it's not "a device" in the approval sense; a genuinely
+// remote view client supplies `device`/`token` query params instead. Query
+// params, not a header — none of these are fetch()ed, they're all
+// browser-loaded subresources (img/@font-face/Audio) with no way to attach
+// one. id.ts's contentAuthParams builds all three for every URL builder
+// (background.ts, customFontFaces.ts, screenCapture.ts, soundPlayer.ts),
+// whichever mode it's in; whichever doesn't apply is just empty.
 function hasDeviceContentAccess(req: IncomingMessage, url: URL): boolean {
-  if (isLoopbackAddress(req.socket.remoteAddress)) return true
+  if (isLoopbackAddress(req.socket.remoteAddress) && isEditorToken(url.searchParams.get('editor'))) return true
   return verifyDeviceToken(url.searchParams.get('device') ?? undefined, url.searchParams.get('token') ?? undefined)
 }
 
@@ -1350,7 +1397,7 @@ function stripMachineSpecificFields(dashboard: Dashboard): Dashboard {
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type'
+  'Access-Control-Allow-Headers': 'Content-Type, X-Boarderoni-Editor-Token'
 }
 
 function sendJson(res: ServerResponse, status: number, body?: unknown): void {
@@ -1780,7 +1827,7 @@ const httpServer = createServer((req, res) => {
       // false here.
       available: true,
       url: APK_DOWNLOAD_URL,
-      appUrl: lanAddress ? `http://${lanAddress}:${webPort}/?mode=view` : null,
+      appUrl: lanAddress ? `http://${lanAddress}:${webPort}/` : null,
       // Read by the Android app's probeAndShowFoundPrompt (MainActivity.kt)
       // to show which desktop version it found, alongside its own
       // BuildConfig.VERSION_NAME — this endpoint was already the "always
@@ -1807,17 +1854,15 @@ const httpServer = createServer((req, res) => {
     // Every real caller (DeckPicker.tsx's own fetches — list/create/
     // rename/delete/export/import — and RestDataSourcesSettingsPanel.tsx's
     // deck-picker dropdown) is editor-only UI, which only ever runs inside
-    // the desktop's own loopback-loaded window (see remoteAddress's comment
-    // on SocketContext for why that's already trusted the same way for the
-    // WS role: 'edit' hello) — a deployed 'view' device gets its deck list
-    // over the WS protocol instead (decks:list), gated by device approval
-    // like everything else it sees. So unlike that WS path, this route
-    // needs no separate device-token scheme of its own: nothing legitimate
-    // ever calls it from off-box, and several of its actions (export/import
-    // in particular) pop native Save/Open dialogs on the desktop's own
-    // screen — exactly the kind of thing a random LAN host, or any web page
-    // a user has open, shouldn't be able to trigger unauthenticated.
-    if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    // the desktop's own Electron window — so this is gated exactly like the
+    // WS role: 'edit' hello, loopback plus EDITOR_TOKEN (see
+    // isEditorRequest). A deployed 'view' device gets its deck list over the
+    // WS protocol instead (decks:list), gated by device approval like
+    // everything else it sees. Several of this route's actions (export/
+    // import in particular) pop native Save/Open dialogs on the desktop's
+    // own screen — exactly the kind of thing a random LAN host, or any web
+    // page a user has open on this machine, shouldn't be able to trigger.
+    if (!isEditorRequest(req)) {
       sendJson(res, 403, { error: 'Forbidden' })
       return
     }
@@ -1853,6 +1898,11 @@ const wss = new WebSocketServer({ noServer: true })
 httpServer.on('upgrade', (req, socket, head) => {
   const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
   if (pathname === '/ws') {
+    if (!isAllowedWsOrigin(req)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
+      socket.destroy()
+      return
+    }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
     return
   }
@@ -3401,9 +3451,9 @@ wss.on('connection', (ws: TrackedSocket, req) => {
       case 'hello':
         if (message.role === 'edit') {
           // The editor's own window — always trusted, no approval gate, but
-          // ONLY from loopback (see remoteAddress's own comment on
-          // SocketContext for why that's a sufficient proxy for "this is
-          // the desktop"). A LAN device — or a browser tab a user opened,
+          // ONLY from loopback AND carrying EDITOR_TOKEN, which only the
+          // Electron window's preload can hand it (see EDITOR_TOKEN's own
+          // comment). A LAN device — or a browser tab on this machine,
           // which can reach this same WS port with no same-origin
           // restriction — claiming role: 'edit' gets silently ignored
           // exactly like any other message a not-yet-trusted socket sends
@@ -3411,7 +3461,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
           // indistinguishable, from the client's own point of view, from a
           // slow/pending approval, so no separate rejection message exists
           // to leak "you tried to claim edit" to whoever's probing.
-          if (!isLoopbackAddress(ctx.remoteAddress)) break
+          if (!isLoopbackAddress(ctx.remoteAddress) || !isEditorToken(message.editorToken)) break
           // Guarded so a resize-triggered re-hello (if edit mode ever sends
           // one) doesn't re-send the initial state or double-register.
           if (ctx.role !== 'edit') {
@@ -4242,6 +4292,14 @@ ipcMain.handle('open-external', (_event, url: string) => {
   shell.openExternal(url)
 })
 
+// Synchronous (sendSync from preload/index.ts) so the token is already on
+// window.electronAPI by the time the renderer's first line runs — App.tsx's
+// readMode keys off its presence. Sender-checked so no other window this
+// app ever opens (e.g. screenCapture.ts's region picker) can obtain it.
+ipcMain.on('get-editor-token', (event) => {
+  event.returnValue = editorWindow && event.sender === editorWindow.webContents ? EDITOR_TOKEN : null
+})
+
 // Lets the Android app find this machine via NsdManager instead of a
 // manually-typed IP — see MDNS_SERVICE_TYPE in shared/constants.ts for the
 // TXT record contract.
@@ -4479,9 +4537,11 @@ function createEditorWindow(): void {
     // Our own server, not Vite's, even in dev — it proxies through to Vite
     // (see proxyRequestToDevServer), so the editor window sits on the same
     // origin as the API exactly as a deployed view client does.
-    win.loadURL(`http://localhost:${SERVER_PORT}/?mode=edit&version=${encodeURIComponent(app.getVersion())}`)
+    // No mode param: edit mode comes from the preload bridge's editor token
+    // (see App.tsx's readMode), which a plain browser tab can't have.
+    win.loadURL(`http://localhost:${SERVER_PORT}/?version=${encodeURIComponent(app.getVersion())}`)
   } else {
-    win.loadFile(join(rendererDist, 'index.html'), { query: { mode: 'edit', version: app.getVersion() } })
+    win.loadFile(join(rendererDist, 'index.html'), { query: { version: app.getVersion() } })
   }
 }
 

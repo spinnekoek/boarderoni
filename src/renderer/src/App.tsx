@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo } from 'react'
 import { useDashboardStore } from './store'
 import { getLastDeckId } from './id'
+import { getEditorToken } from './electronBridge'
 import { Canvas } from './components/Canvas'
 import { ViewCanvas } from './components/ViewCanvas'
 import { Palette } from './components/Palette'
@@ -14,13 +15,16 @@ import { DeviceApprovalBanner } from './components/DeviceApprovalBanner'
 import { DebugPanel } from './components/DebugPanel'
 import { StatusBar } from './components/StatusBar'
 
+// Not a URL param: only the editor's own Electron window gets an editor
+// token from its preload, so a plain browser tab (or the Android WebView)
+// at the same address always boots as a client. A stale ?mode=... in an old
+// bookmark is simply ignored.
 function readMode(): 'edit' | 'view' {
-  const params = new URLSearchParams(window.location.search)
-  return params.get('mode') === 'view' ? 'view' : 'edit'
+  return getEditorToken() ? 'edit' : 'view'
 }
 
-// Passed by main/index.ts's createEditorWindow as a query param (same
-// mechanism as mode above) rather than read from package.json directly —
+// Passed by main/index.ts's createEditorWindow as a query param rather
+// than read from package.json directly —
 // the renderer bundle is also served as-is to Android view clients, which
 // have no window title bar to show it in and no reason to know it.
 function readVersion(): string {

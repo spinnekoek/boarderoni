@@ -1,5 +1,6 @@
 import { SERVER_PORT } from '@shared/constants'
 import type { CustomSound } from '@shared/sounds'
+import { contentAuthParams } from './id'
 
 // Plays a sound:play message's audio (see runPlaySoundAction in
 // main/index.ts). Lives outside the React tree deliberately: a sound has no
@@ -13,9 +14,10 @@ import type { CustomSound } from '@shared/sounds'
 // would usually work — but a deployed view client on a phone is on that same
 // origin too, and DevTools/file:// edge cases aren't worth the ambiguity, so
 // the host is resolved explicitly the same way DeckPicker's own apiUrl does.
+// /sounds/ is device-gated like fonts — see id.ts's contentAuthParams.
 function soundUrl(sound: CustomSound): string {
   const host = window.location.hostname || 'localhost'
-  return `http://${host}:${SERVER_PORT}/sounds/${sound.id}`
+  return `http://${host}:${SERVER_PORT}/sounds/${sound.id}?${contentAuthParams()}`
 }
 
 // Every Audio element currently playing, so nothing is garbage-collected
