@@ -27,6 +27,10 @@ function actionKindTitle(action: WidgetAction): string {
       return 'Call REST'
     case 'set-windows-audio':
       return 'Set Windows Audio'
+    case 'play-sound':
+      // Generic for the same reason as 'call-rest' above — no custom sound
+      // list in scope to resolve soundId to a name.
+      return 'Play sound'
   }
 }
 
