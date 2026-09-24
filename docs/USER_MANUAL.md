@@ -25,7 +25,8 @@ are captured from the app.
 12. [REST webhook targets (optional/advanced)](#12-rest-webhook-targets-optionaladvanced)
 13. [DCS-BIOS setup (optional/advanced)](#13-dcs-bios-setup-optionaladvanced)
 14. [Global actions](#14-global-actions)
-15. [Troubleshooting / FAQ](#15-troubleshooting--faq)
+15. [AI agents (MCP)](#15-ai-agents-mcp)
+16. [Troubleshooting / FAQ](#16-troubleshooting--faq)
 
 ---
 
@@ -33,11 +34,10 @@ are captured from the app.
 
 Boarderoni is a desktop app (Windows only for now) with two roles:
 
-- The **desktop app** is where you design dashboards — the editor.
-- Any other device (a phone, tablet, or second PC) can **connect to a
-  desktop deck** and use it as a physical control panel.
+- The **desktop app** is where you design dashboards — the editor.![Main editor window](images/Boarderoni_JjVBlwAOBt.png)
 
-![Main editor window](images/getting-started-main-window.jpg)
+- Any other device (a phone, tablet, or second PC) can **connect to a
+  desktop deck** and use it as a physical control panel. ![Main editor window](images/chrome_Q95PP4yDrJ.png)
 
 When you launch Boarderoni for the first time, you'll land on the **deck
 picker** (see [Decks](#3-decks)) since there's nothing to open yet. Create a
@@ -59,7 +59,7 @@ To reach it:
 - **Desktop browser** (no touchscreen): press **Ctrl+I** (or **Cmd+I** on
   Mac).
 
-![Device settings modal](https://placedog.net/700/400?id=2)
+![Device settings modal](images/chrome_gj33rWRfHm.png)
 
 This works both while a deck is open and from the deck-list screen itself.
 
@@ -69,15 +69,14 @@ You don't need the Android app to use Boarderoni from a phone or tablet —
 **any device with a modern browser on the same local network** can open a
 deck. The desktop app shows you a URL to open on the other device.
 
-![Phone browser showing a deck](https://placedog.net/700/400?id=3)
+![Phone browser showing a deck](images/opera_ONoep6q7Qs.png)
 
 The **Android app** exists to make this more convenient, not because it's
 required:
 
 - It auto-discovers the desktop on your network (no typing an IP address).
 - It reconnects automatically and remembers the last deck you had open.
-- It's a paid download, which is one way to support ongoing development if
-  you find Boarderoni useful.
+- It's a free download - unfortunately not on Google Play. The source code for the app is on this repository however, if you want to assure yourself theres nothing fishy.
 
 If you'd rather not use it, a kiosk-style browser app (for example, **Fully
 Kiosk Browser** on Android) pointed at the same URL works just as well —
@@ -90,7 +89,7 @@ handles for you.
 A **deck** is one dashboard — its own set of widgets, variables, and
 plugins. You can have as many as you like.
 
-![Deck picker](https://placedog.net/700/400?id=4)
+![Deck picker](images/Boarderoni_WgWOu0DE9g.png)
 
 From the deck picker you can:
 
@@ -105,7 +104,7 @@ From the deck picker you can:
 
 ## 4. The editor
 
-![Editor layout](https://placedog.net/700/400?id=5)
+![Editor layout](images/Boarderoni_wmy2VGWFnP.png)
 
 The editor has three main areas:
 
@@ -165,7 +164,7 @@ Every widget's full field list is documented in
   **Save as variant** to add it to the palette as a reusable preset,
   alongside the built-in aircraft-panel-style presets.
 
-![Copy style menu](https://placedog.net/700/400?id=6)
+![Copy style menu](images/Boarderoni_AVoumlnQRA.png)
 
 ## 7. Actions & event sequences
 
@@ -173,7 +172,7 @@ Every button, switch position, and dropdown option can run a **sequence**
 of steps when triggered (press, release, double-press, triple-press, or a
 position/value change, depending on the widget).
 
-![Event sequence editor](https://placedog.net/700/400?id=7)
+![Event sequence editor](images/Boarderoni_lGVkgWOLLs.png)
 
 A step is one of:
 
@@ -204,7 +203,7 @@ function body with every current variable available as `variables.NAME`.
 For example:
 
 ```js
-return variables.THROTTLE > 0.9 ? '#e05252' : '#3a3f4a';
+return variables.THROTTLE > 0.9 ? "#e05252" : "#3a3f4a";
 ```
 
 The Variables panel (Toolbar) lists every variable currently in the deck
@@ -217,7 +216,7 @@ A **plugin** is a data source (and sometimes an action) you add to a deck.
 Each kind is toggled on/off app-wide in [Settings](#11-settings); once
 enabled, add an instance of it from the deck's **Event Sources** panel.
 
-![Event sources modal](https://placedog.net/700/400?id=8)
+![Event sources modal](images/Boarderoni_xusTla5j6l.png)
 
 - **Date & Time** — clock/calendar fields for labels and expressions.
 - **Random** — a random-number generator, mainly useful as a template for
@@ -246,7 +245,7 @@ Any device that connects to a deck (other than the desktop editor itself,
 which is always trusted) needs to be **approved** the first time, so a
 random device on your network can't just watch or control your dashboard.
 
-![Approval banner](https://placedog.net/700/400?id=9)
+![Approval banner](images/Boarderoni_z6NaoRYnMp.png)
 
 - A pending device shows a banner in the editor — **Approve** or **Deny**
   it there.
@@ -255,7 +254,7 @@ random device on your network can't just watch or control your dashboard.
 
 ## 11. Settings
 
-![Settings modal](https://placedog.net/700/400?id=10)
+![Settings modal](images/Boarderoni_VNfyD4eT1Q.png)
 
 - **Plugins** — enable/disable each plugin kind app-wide. Disabling one
   stops its data/actions everywhere, including any widget already using it
@@ -268,8 +267,8 @@ random device on your network can't just watch or control your dashboard.
 
 ## 12. REST webhook targets (optional/advanced)
 
-*Skip this section unless you specifically want a button to call an
-external HTTP API.*
+_Skip this section unless you specifically want a button to call an
+external HTTP API._
 
 A **REST webhook target** (Settings → REST Webhook Targets) is a named,
 reusable outgoing HTTP request: a method (GET/POST/PUT/PATCH/DELETE), a
@@ -292,7 +291,7 @@ your quoting.
 
 ## 13. DCS-BIOS setup (optional/advanced)
 
-*Skip this section unless you're building a DCS World cockpit panel.*
+_Skip this section unless you're building a DCS World cockpit panel._
 
 DCS-BIOS reads and writes DCS World's own cockpit state over UDP. To use
 it:
@@ -324,9 +323,9 @@ Open them from **Global Actions** in the toolbar. Each rule has four parts:
   same idea as a `useEffect` dependency array.
 - **Condition** — a JS function body returning true or false, with the usual
   `variables.NAME` access.
-- **Fire** — *when the condition becomes true* runs the actions once on the
-  false → true transition, then re-arms when it goes back to false. *Every
-  time a watched variable changes* runs them on every change for as long as
+- **Fire** — _when the condition becomes true_ runs the actions once on the
+  false → true transition, then re-arms when it goes back to false. _Every
+  time a watched variable changes_ runs them on every change for as long as
   the condition holds.
 - **Actions** — the same action/delay/condition sequence editor used for
   widget events, so anything a button can do, a rule can do.

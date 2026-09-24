@@ -1,6 +1,6 @@
-// The MCP HTTP listener — loopback-only (see MCP_SERVER_PORT's own comment
-// in shared/constants.ts for why this can't share the app's LAN-facing
-// SERVER_PORT) and bearer-token gated (see mcpServerSettings.ts), on top of
+// The MCP HTTP listener — its own port on all interfaces (see
+// MCP_SERVER_PORT's own comment in shared/constants.ts) and bearer-token
+// gated (see mcpServerSettings.ts), on top of
 // the low-level @modelcontextprotocol/sdk Server rather than the high-level
 // McpServer convenience wrapper — McpServer.registerTool only accepts Zod
 // schemas for a tool's inputSchema, which would mean hand-writing a second,

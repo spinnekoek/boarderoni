@@ -89,7 +89,7 @@ export function MobileAppModal({ onClose }: { onClose: () => void }): React.JSX.
                   <img src={qrDataUrl} alt="QR code linking to the Boarderoni APK download" width={240} height={240} />
                 </div>
               )}
-              <p className="properties__hint-inline">{info.url}</p>
+              <p className="properties__hint-inline mobile-app-modal__url">{info.url}</p>
             </>
           )}
 

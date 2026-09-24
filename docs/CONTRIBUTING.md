@@ -12,10 +12,11 @@ Three ports are in play, all defined in `shared/constants.ts`:
 - **`SERVER_PORT`** (17334) — the app's own HTTP/WS server: state sync,
   triggers, and (in a packaged build) the static renderer bundle the Android
   client loads. Binds on all interfaces and is advertised over mDNS.
-- **`MCP_SERVER_PORT`** (17335) — the MCP server, loopback-only
-  (127.0.0.1) and bearer-token gated, deliberately separate from
-  `SERVER_PORT` since an AI agent driving live dashboard edits is a more
-  powerful surface than anything else the app exposes on the LAN.
+- **`MCP_SERVER_PORT`** (17335) — the MCP server, off by default, binds on
+  all interfaces (so an agent on another machine can connect) and is gated
+  by its own bearer token. Deliberately separate from `SERVER_PORT` since an
+  AI agent driving live dashboard edits is a more powerful surface than
+  anything else the app exposes on the LAN.
 - **Vite's dev server** (5173) — only exists in `npm run dev`; the editor
   window still loads through `SERVER_PORT` (which proxies to Vite), but the
   Android client gets pointed straight at 5173 via mDNS TXT records so it

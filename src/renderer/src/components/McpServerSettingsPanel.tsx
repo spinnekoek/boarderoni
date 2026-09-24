@@ -33,8 +33,8 @@ export function McpServerSettingsPanel(): React.JSX.Element {
     <div className="settings-modal__sources">
       <p className="properties__hint">
         Lets an MCP client (an AI agent) read and edit this app's live decks directly — create/patch widgets, read/set
-        variables, trigger actions, manage event sources. Loopback-only (never reachable from the network) and gated
-        by the bearer token below; enabling this grants whatever holds that token full write access to every deck.
+        variables, trigger actions, manage event sources. Reachable from other machines on your network too, so the
+        bearer token below is what protects it: whatever holds that token gets full write access to every deck.
       </p>
 
       {!settings.listening && (
@@ -60,7 +60,8 @@ export function McpServerSettingsPanel(): React.JSX.Element {
       <div className="dcsbios-settings__field">
         <span>Endpoint</span>
         <p className="properties__hint-inline">
-          {url} (header: Authorization: Bearer &lt;token&gt;)
+          {url} (header: Authorization: Bearer &lt;token&gt;). From another machine, use this computer's LAN address
+          instead of 127.0.0.1.
         </p>
       </div>
     </div>

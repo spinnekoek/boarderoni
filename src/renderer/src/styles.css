@@ -4706,6 +4706,13 @@ button.deck-morph-cell:focus-visible {
 	filter: brightness(1.1);
 }
 
+/* The release URL's only natural break point is the hyphen in
+   "boarderoni-latest.apk", so its first line alone is wider than the modal
+   and caused a horizontal scrollbar. Let it wrap anywhere instead. */
+.mobile-app-modal__url {
+	overflow-wrap: anywhere;
+}
+
 .mobile-app-modal__link-row {
 	display: flex;
 	align-items: stretch;

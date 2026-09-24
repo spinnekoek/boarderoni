@@ -4,6 +4,8 @@ Design button/macro dashboards on desktop, drive them from a mobile WebView
 client over your local network. Built for simpit/HOTAS panels, stream-deck
 style macro boards, and DCS World cockpit exports.
 
+![Device settings modal](docs/images/Boarderoni_a3Z4zlHLry.png)
+
 See [docs/USER_MANUAL.md](docs/USER_MANUAL.md) for how to use the app, or
 [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for the codebase layout and
 plugin-authoring walkthrough.
@@ -54,16 +56,16 @@ development:
   [`android/`](android/)) that pairs with the desktop over your local
   network (mDNS auto-discovery, per-device approval), no cloud/account
   required. Not on the Play Store — build it yourself with the Gradle
-  wrapper in `android/`.
+  wrapper in `android/` or download it from the [Releases](../../releases) page.
 - **Plugins** (event sources + actions):
-  - **DCS-BIOS** — read/write DCS World cockpit state over its UDP export.
-  - **DCS Viewports** — multi-monitor MFCD/cockpit display export.
-  - **Windows Audio** — device and per-application volume/mute, on a
-    dedicated worker thread so it never blocks the UI.
-  - **Screen Capture + OCR** — stream or poll a screen region, optionally
-    recognizing text/numbers from it.
-  - **REST Data Sources** — poll or receive from any HTTP API.
-  - **Date & Time** — clock/calendar values for labels and expressions.
+    - **DCS-BIOS** — read/write DCS World cockpit state over its UDP export.
+    - **DCS Viewports** — multi-monitor MFCD/cockpit display export.
+    - **Windows Audio** — device and per-application volume/mute, on a
+      dedicated worker thread so it never blocks the UI.
+    - **Screen Capture + OCR** — stream or poll a screen region, optionally
+      recognizing text/numbers from it.
+    - **REST Data Sources** — poll or receive from any HTTP API.
+    - **Date & Time** — clock/calendar values for labels and expressions.
 
 ## License
 
@@ -76,7 +78,6 @@ copyright holder.
 
 If Boarderoni's useful to you, consider supporting development:
 
-- **[GitHub Sponsors](https://github.com/sponsors/spinnekoek)**
 - **Crypto**:
-  - BTC: `34SkUhyuGPFKDYu95UAVwegnTFQcV39wfs`
-  - ETH: `0x18D19d8cD012b02068F4580849f6873C1EB8360C`
+    - BTC: `34SkUhyuGPFKDYu95UAVwegnTFQcV39wfs`
+    - ETH: `0x18D19d8cD012b02068F4580849f6873C1EB8360C`

@@ -3062,10 +3062,9 @@ export type ServerToClient =
   // Reply to mcp-server:get/regenerate-token — `listening`/`listenError`
   // mirror rest-sources:list's own fields (the MCP HTTP listener only binds
   // at all once the 'mcp' kind is enabled in app-settings, same gating
-  // syncRestIncomingServers uses for REST), `lanAddress` is unused here
-  // (deliberately loopback-only — see MCP_SERVER_PORT's own comment in
-  // shared/constants.ts) but `port` is included so the settings panel can
-  // show the full loopback URL without hardcoding the constant twice.
+  // syncRestIncomingServers uses for REST). No `lanAddress`: the panel just
+  // shows the local 127.0.0.1 URL and says other machines use this one's LAN
+  // address; `port` is included so it needn't hardcode the constant twice.
   | { type: 'mcp-server:settings'; bearerToken: string; port: number; listening: boolean; listenError?: string }
   // Reply to rest-webhook-targets:get/create/update/delete — no listening
   // status to report (a target has no listener, see RestWebhookTarget's own
