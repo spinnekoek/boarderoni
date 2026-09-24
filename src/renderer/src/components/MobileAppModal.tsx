@@ -44,6 +44,29 @@ function LinkRow({ url }: { url: string }): React.JSX.Element {
   )
 }
 
+// The APK download URL is a long GitHub release link with no natural break
+// points — shown in a read-only textbox (scrolls inside itself) instead of
+// as text, so it can't widen the modal into a horizontal scrollbar.
+function UrlField({ url }: { url: string }): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+
+  function handleCopy(): void {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  return (
+    <div className="mobile-app-modal__link-row">
+      <input readOnly className="mobile-app-modal__url" value={url} onFocus={(e) => e.currentTarget.select()} />
+      <button type="button" className="mobile-app-modal__copy" onClick={handleCopy}>
+        {copied ? 'Copied!' : 'Copy'}
+      </button>
+    </div>
+  )
+}
+
 export function MobileAppModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   useEscapeToClose(onClose)
   const [info, setInfo] = useState<ApkInfo | null>(null)
@@ -89,7 +112,7 @@ export function MobileAppModal({ onClose }: { onClose: () => void }): React.JSX.
                   <img src={qrDataUrl} alt="QR code linking to the Boarderoni APK download" width={240} height={240} />
                 </div>
               )}
-              <p className="properties__hint-inline mobile-app-modal__url">{info.url}</p>
+              <UrlField url={info.url} />
             </>
           )}
 

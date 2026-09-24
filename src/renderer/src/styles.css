@@ -4710,7 +4710,14 @@ button.deck-morph-cell:focus-visible {
    "boarderoni-latest.apk", so its first line alone is wider than the modal
    and caused a horizontal scrollbar. Let it wrap anywhere instead. */
 .mobile-app-modal__url {
-	overflow-wrap: anywhere;
+	flex: 1;
+	min-width: 0;
+	padding: 8px 10px;
+	border-radius: 6px;
+	font-size: 12px;
+	color: #e8e8ea;
+	background: #14161b;
+	border: 1px solid #3a3f4a;
 }
 
 .mobile-app-modal__link-row {
