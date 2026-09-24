@@ -64,6 +64,8 @@ export function DcsViewportWidgetContent({
     borderStyle: 'solid',
     borderWidth: widget.borderWidth ?? 2,
     borderColor,
+    // .deck-screen-capture's overflow:hidden clips the <img> to this too.
+    ...(widget.borderRadius !== undefined && { borderRadius: widget.borderRadius }),
     ...(widget.zIndex !== undefined && { zIndex: widget.zIndex })
   }
 

@@ -7904,6 +7904,19 @@ export function PropertiesPanel(): React.JSX.Element {
               onBlur={(e) => patchDcsViewport({ borderWidth: Math.max(0, Number(e.target.value)) })}
             />
           </label>
+          <label className="properties__field">
+            <span>Border radius</span>
+            <input
+              type="number"
+              min={0}
+              value={dv.borderRadius ?? 0}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (!Number.isNaN(n)) patchDcsViewport({ borderRadius: n })
+              }}
+              onBlur={(e) => patchDcsViewport({ borderRadius: Math.max(0, Number(e.target.value)) })}
+            />
+          </label>
         </PropertiesSection>
 
         <PropertiesSection title="Layout">

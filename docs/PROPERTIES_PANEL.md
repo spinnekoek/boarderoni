@@ -504,6 +504,7 @@ together inside one "Switch positions editor" wrapper.
 - **Border**
   - Border color
   - Border width
+  - Border radius
 - **Layout**
   - X, Y, W, H
   - Z-index

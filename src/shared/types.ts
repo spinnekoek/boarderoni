@@ -2256,6 +2256,8 @@ export interface DcsViewportWidget extends WidgetVisibility {
   borderColorExpr?: string
   borderOpacity?: number
   borderWidth?: number
+  /** Corner radius in px, applied to the border and clipping the stream image inside it. Unset = 0 (square). */
+  borderRadius?: number
   zIndex?: number
 }
 

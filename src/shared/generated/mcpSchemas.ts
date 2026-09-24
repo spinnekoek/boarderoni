@@ -3374,6 +3374,10 @@ export const MCP_SCHEMAS = {
           "borderWidth": {
             "type": "number"
           },
+          "borderRadius": {
+            "type": "number",
+            "description": "Corner radius in px, applied to the border and clipping the stream image inside it. Unset = 0 (square)."
+          },
           "zIndex": {
             "type": "number"
           }
