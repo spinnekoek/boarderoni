@@ -6,7 +6,9 @@ style macro boards, and DCS World cockpit exports.
 
 ![Device settings modal](docs/images/Boarderoni_a3Z4zlHLry.png)
 
-See [docs/USER_MANUAL.md](docs/USER_MANUAL.md) for how to use the app, or
+See [docs/USER_MANUAL.md](docs/USER_MANUAL.md) for how to use the app,
+[docs/FAQ.md](docs/FAQ.md) for common questions,
+[docs/EXAMPLES.md](docs/EXAMPLES.md) for example decks to import, or
 [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for the codebase layout and
 plugin-authoring walkthrough.
 
@@ -57,6 +59,11 @@ development:
   network (mDNS auto-discovery, per-device approval), no cloud/account
   required. Not on the Play Store — build it yourself with the Gradle
   wrapper in `android/` or download it from the [Releases](../../releases) page.
+- **AI agents (MCP)** — a built-in, token-protected MCP server lets an AI
+  agent build and drive your decks for you. As a side effect it's also a
+  DCS-BIOS MCP server: an agent can read live cockpit state and flip
+  switches in DCS World. See the
+  [manual](docs/USER_MANUAL.md#16-ai-agents-mcp).
 - **Plugins** (event sources + actions):
     - **DCS-BIOS** — read/write DCS World cockpit state over its UDP export.
     - **DCS Viewports** — multi-monitor MFCD/cockpit display export.

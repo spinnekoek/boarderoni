@@ -4,10 +4,9 @@ This is the end-user guide — how to build and use dashboards. If you're
 looking for the codebase layout or how to write a plugin, see
 [CONTRIBUTING.md](CONTRIBUTING.md) instead. For a field-by-field reference
 of every widget's properties panel, see
-[PROPERTIES_PANEL.md](PROPERTIES_PANEL.md).
-
-Screenshots below are placeholders (temporary stock images) until real ones
-are captured from the app.
+[PROPERTIES_PANEL.md](PROPERTIES_PANEL.md). Common questions are in the
+[FAQ](FAQ.md), and example decks to import are in
+[EXAMPLES.md](EXAMPLES.md).
 
 ## Table of contents
 
@@ -24,9 +23,10 @@ are captured from the app.
 11. [Settings](#11-settings)
 12. [REST webhook targets (optional/advanced)](#12-rest-webhook-targets-optionaladvanced)
 13. [DCS-BIOS setup (optional/advanced)](#13-dcs-bios-setup-optionaladvanced)
-14. [Global actions](#14-global-actions)
-15. [AI agents (MCP)](#15-ai-agents-mcp)
-16. [Troubleshooting / FAQ](#16-troubleshooting--faq)
+14. [DCS Viewports setup (optional/advanced)](#14-dcs-viewports-setup-optionaladvanced)
+15. [Global actions](#15-global-actions)
+16. [AI agents (MCP)](#16-ai-agents-mcp)
+17. [Troubleshooting](#17-troubleshooting)
 
 ---
 
@@ -140,7 +140,8 @@ Boarderoni ships 15 widget types:
 - **Screen Capture** — streams or polls a region of the desktop's own
   screen.
 - **DCS Viewport** — routes a DCS World cockpit display (an MFCD, for
-  example) to this widget.
+  example) to this widget (see
+  [DCS Viewports setup](#14-dcs-viewports-setup-optionaladvanced)).
 - **Label** — static or expression-driven text.
 - **Line** — a plain divider/decoration.
 
@@ -232,7 +233,9 @@ enabled, add an instance of it from the deck's **Event Sources** panel.
 - **Screen Capture (+ OCR)** — stream or poll a screen region, optionally
   reading text/numbers out of it.
 - **DCS Viewports** — exports DCS cockpit displays (MFCDs, etc.) to their
-  own monitor/window, for a Boarderoni DCS Viewport widget to show.
+  own monitor/window, for a Boarderoni DCS Viewport widget to show. Needs
+  some one-time setup; see
+  [DCS Viewports setup](#14-dcs-viewports-setup-optionaladvanced).
 
 Each plugin instance's own field(s) get mapped into named variables from
 its Event Sources entry — the same "field → variable" mapping shape every
@@ -307,7 +310,137 @@ it:
    one (flip a switch, push a button, etc.) — both pick from the same
    per-aircraft catalog, searchable by name.
 
-## 14. Global actions
+## 14. DCS Viewports setup (optional/advanced)
+
+_Skip this section unless you want live DCS World cockpit displays on a
+deck._
+
+The **DCS Viewport** widget streams one of the aircraft's own cockpit
+displays, live, onto your deck. Currently that's the F/A-18C Hornet's left
+DDI, right DDI and AMPCD. It doesn't need DCS-BIOS; the two are separate
+and you can use either one without the other.
+
+How it works: Boarderoni adds an extra, invisible monitor to Windows, and
+writes a DCS monitor profile that tells DCS to draw those displays onto
+it. Boarderoni then captures each display from there and streams it to
+the widget. You never need to look at that monitor yourself.
+
+![DDIs and AMPCD streaming on a tablet](images/Boarderoni_p93kbQMtwW.png)
+
+### 1. Install the Virtual Display Driver
+
+Download and install the
+[Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver/releases)
+(free and open source). This is what creates the extra monitor. Note the
+folder you install it to; Boarderoni looks in `C:\VirtualDisplayDriver` by
+default.
+
+Once it's installed, Windows' **Settings → System → Display** should show
+an extra monitor. Leave it enabled. You don't need to set its resolution
+or position; Boarderoni sets its resolution itself.
+
+![Windows Display settings showing the extra virtual monitor](images/Boarderoni_fjPJEtILmL.png)
+
+### 2. Turn on DCS Viewports in Boarderoni
+
+Open **Settings → Plugins**, enable **DCS Viewports**, and fill in its
+settings:
+
+- **Virtual Display Driver install folder** — where you installed it in
+  step 1.
+- **DCS install folder** — the folder containing `DCS.exe`. Use
+  **Browse…**; it says "Found DCS.exe" when it's right.
+- **DCS Saved Games folder** — usually `%USERPROFILE%\Saved Games\DCS`
+  (or `%USERPROFILE%\Saved Games\DCS.openbeta`). Boarderoni tries to find
+  it on its own.
+- **Main / gaming monitor** — leave this on **Auto** unless the monitor
+  you play DCS on isn't the one Windows calls your main display.
+- **Active aircraft** — which aircraft's displays the widget offers.
+
+Click **Save DCS Viewports settings**. The top of the panel should then
+say the virtual display is ready at 1920×1080, and that `Boarderoni.lua`
+was written to
+`%USERPROFILE%\Saved Games\DCS\Config\MonitorSetup` (or the same under
+`DCS.openbeta`). That file is
+the monitor profile DCS picks up in the next step. If a Windows permission
+(UAC) prompt appears the first time, accept it: Boarderoni occasionally
+needs it to add the resolution it uses to the driver.
+
+![DCS Viewports settings with the virtual display ready](images/Boarderoni_GcexnUpLZZ.png)
+
+### 3. Select the Boarderoni profile in DCS
+
+In DCS, open **Options → System**:
+
+- **Monitors** → select **Boarderoni**.
+- **Resolution** → the exact size the DCS Viewports settings panel tells
+  you (under "Then Options → System → Resolution"), with **Fullscreen**.
+
+That resolution is deliberately bigger than your monitor: DCS draws one
+picture covering every monitor you have connected, the virtual one
+included, and cuts the displays out of it by position. So the number
+depends on your whole monitor layout. If you add, remove or move a
+monitor in Windows, open the settings panel again and use the new number.
+While DCS is running, any other monitors can end up covered by DCS as a
+side effect of that.
+
+For example, my own setup has two physical monitors plus the virtual one,
+placed side by side in a single row in Windows' Display settings:
+
+| Monitor            | Size      | Position |
+| ------------------ | --------- | -------- |
+| 27" second screen  | 1920×1080 | left     |
+| Ultrawide (gaming) | 3440×1440 | middle   |
+| Virtual display    | 1920×1080 | right    |
+
+DCS has to cover all three, so the width is 1920 + 3440 + 1920 = **7280**,
+and the height is the tallest of them, **1440**. That's why my DCS
+resolution is 7280×1440, even though I only play on the 3440×1440
+ultrawide. The 3D view still only goes on the ultrawide; the 27" isn't
+used by DCS at all, it just has to be included in the total.
+
+The side-by-side arrangement is only why my number adds up the way it
+does. DCS Viewports works with any arrangement; you don't need to move
+anything. It's just that DCS covers the smallest rectangle that fits
+around all the monitors, so the arrangement changes the resolution you
+enter: side by side, the widths add up and the height is the tallest
+monitor; stacked one above another, the heights add up instead; staggered,
+the rectangle grows to fit the offset. The settings panel works this out
+from your actual layout, so just use the number it shows.
+
+Your main 3D view stays on your gaming monitor as normal.
+
+![DCS Options → System with the Boarderoni monitor profile selected](images/dcs-monitors-boarderoni.png)
+
+### 4. Add DCS Viewport widgets
+
+In the editor, add a **DCS Viewport** widget and pick its **Component**
+under **Source** (Left DDI, Right DDI or AMPCD). Jump into the Hornet in
+DCS and the display shows up in the widget. The widget also has stream
+settings (frame rate, quality) and image adjustments (brightness,
+contrast, sharpen), since exported displays often look darker than they do
+in the cockpit. See [PROPERTIES_PANEL.md](PROPERTIES_PANEL.md) for every
+field. The [F/A-18C example deck](EXAMPLES.md#fa-18c-hornet) has all three
+set up, surrounded by their bezel buttons.
+
+![A DCS Viewport widget and its Source settings](images/Boarderoni_tbAhP94LVc.png)
+
+### If something's not working
+
+- **The panel says the driver isn't detected** — check the install
+  folder setting matches where the driver actually went.
+- **Driver detected, but the virtual display isn't ready** — make sure
+  the extra monitor is enabled in Windows' Display settings.
+- **The widget stays blank** — check DCS has **Boarderoni** selected
+  under Monitors and the resolution matches what the panel says, and that
+  you're actually in the Hornet's cockpit.
+- **You already use your own DCS monitor profile** (for example to export
+  displays to a real second screen) — `Boarderoni.lua` is a complete
+  profile of its own, and Boarderoni overwrites it whenever you save the
+  settings. To combine the two, copy its display entries into your own
+  profile by hand.
+
+## 15. Global actions
 
 Every action covered so far hangs off a widget — someone presses a button,
 turns a knob, flips a switch. **Global actions** are the deck-wide version:
@@ -350,31 +483,77 @@ If the condition reads a variable that isn't in the watch list, the modal
 flags it with an **Add it** button — the rule would otherwise look correct
 and silently never fire, which is a miserable thing to debug.
 
-## 15. Troubleshooting / FAQ
+## 16. AI agents (MCP)
 
-- **I see a lot of DCS World references — is this only for DCS?** — No.
-  Boarderoni is a general-purpose dashboard/control-panel tool: widgets,
-  variables, event sources, REST/webhook actions, and everything else work
-  the same regardless of what's driving them. DCS-BIOS and DCS Viewports are
-  just one plugin (and one export flow) among several — see
-  [Plugins & event sources](#9-plugins--event-sources) for the full list.
-  The docs lean on DCS examples mainly because that's what the examples were
-  built and tested against, not because of any hard dependency.
-- **Will updating Boarderoni break my saved decks?** — The dashboard file
-  format can still change between versions, since the app is pre-1.0. A
-  migration path is kept for existing saves, but always back up a deck you
-  care about before updating, just in case.
-- **Does Boarderoni send any data outside my network, or need an account?**
-  — No. Everything runs locally over your own network — no cloud service,
-  no account, no external server involved. The desktop app and any
-  connected devices (phone, tablet, second PC) talk to each other directly
-  over your LAN.
-- **What's the difference between the "editor" and the "client"?** —
-  The editor is where you design a deck — drag/drop/resize widgets, edit
-  properties, and so on. The client is the live, full-screen,
-  pressable rendering of that same deck, as opposed to the design surface.
-  The desktop app itself can show either; any other connected device only
-  ever sees the client.
+Boarderoni has a built-in [MCP](https://modelcontextprotocol.io) server, so
+an AI agent (Claude Code, or any other MCP client) can build and drive your
+dashboards for you: describe the dashboard you want and let it create the
+widgets, variables and event sources.
+
+[![An AI agent building a home automation dashboard in Boarderoni (sped up — click for the full video)](images/mcp-demo-timelapse.gif)](images/mcp-demo.mp4)
+
+_Sped up. Click it for the full video._
+
+### Turning it on
+
+1. Open **Settings → Plugins** and enable **MCP Server**. It's off by
+   default.
+2. The MCP Server settings then show a **bearer token** (with Copy and
+   Regenerate buttons) and the **endpoint**,
+   `http://127.0.0.1:17335/mcp`.
+3. Point your MCP client at that endpoint with the header
+   `Authorization: Bearer <token>`. For Claude Code, for example:
+
+    ```
+    claude mcp add --transport http boarderoni http://127.0.0.1:17335/mcp --header "Authorization: Bearer <token>"
+    ```
+
+The server is reachable from other machines on your network too — from
+another computer, use this computer's LAN address instead of `127.0.0.1`.
+That makes the token the only thing protecting it, and **whoever has the
+token gets full write access to every deck**. Treat it like a password;
+**Regenerate** it if it leaks, which disconnects anything still using the
+old one.
+
+### What an agent can do
+
+- **Decks and widgets** — list, create and rename decks; read a whole
+  dashboard; create, update and delete any widget.
+- **Variables and actions** — read and set variables, evaluate expressions,
+  trigger a widget's actions, or send an action directly (a keypress, a
+  DCS-BIOS command, a REST call) without any widget.
+- **Global actions and event sources** — create and edit rules and event
+  sources, and turn plugins on or off.
+- **Look things up** — DCS-BIOS aircraft, fields and commands, displays,
+  Windows audio devices, REST data sources and webhook targets.
+- **See the result** — screenshot the dashboard or a single widget. This
+  needs the editor window visible, so the agent can also show or hide it.
+
+### Accidentally, a DCS-BIOS MCP server
+
+Put those tools together and Boarderoni also works as an MCP server for
+DCS World itself, no dashboard required. With a deck that has a
+[DCS-BIOS](#13-dcs-bios-setup-optionaladvanced) event source, an agent can:
+
+- **Look up** any aircraft's DCS-BIOS fields and commands, with their
+  descriptions, instead of guessing control names.
+- **Read the cockpit** — every DCS-BIOS field mapped into the deck's
+  variables, with live values (switch positions, displays, lights, ...).
+- **Fly the switches** — send any DCS-BIOS command directly, including a
+  press-and-release with a real pause in between for spring-loaded
+  switches.
+
+So you can ask it things like "what's COMM 1 set to?" or "turn the
+exterior lights on" while you fly. It only sees the fields the deck's
+event source maps, so map the ones you want it to read, or just map
+everything under F18 and CommonData like I did (see the
+[F/A-18C example deck](EXAMPLES.md#fa-18c-hornet)).
+
+## 17. Troubleshooting
+
+For general questions (is this only for DCS? does it need an account?), see
+the [FAQ](FAQ.md).
+
 - **Why did starting a second Boarderoni window/instance fail?** — Only one
   instance can run at a time — a second one shows "Boarderoni is already
   running" and exits, since both would otherwise try to bind the same
@@ -382,6 +561,14 @@ and silently never fire, which is a miserable thing to debug.
   first instance before starting another.
 - **A device won't connect** — check it's on the same local network as the
   desktop, and that it's been approved (see [Devices & approval](#10-devices--approval)).
+  If it still can't reach the desktop, Windows Defender Firewall is the
+  usual cause: the first time Boarderoni runs, Windows may ask whether to
+  allow it on private/public networks, and dismissing that (or allowing
+  only the wrong network type) silently blocks every other device. Open
+  **Windows Security → Firewall & network protection → Allow an app
+  through firewall**, and make sure **Boarderoni** is ticked for the
+  network type your PC is on (usually **Private**). The ports it needs are
+  listed in the [FAQ](FAQ.md).
 - **An action silently does nothing** — check the debug console at the
   bottom of the editor; most action failures (a disabled plugin, a deleted
   REST target, a bad expression) show up there as a toast and a logged
