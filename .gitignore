@@ -5,3 +5,4 @@ docs/TODO.md
 *.tsbuildinfo
 .DS_Store
 dist/
+CLAUDE.local.md

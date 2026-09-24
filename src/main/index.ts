@@ -470,11 +470,10 @@ const devServerUrl = process.env['ELECTRON_RENDERER_URL']
 const rendererDist = join(__dirname, '../renderer')
 
 // Same fixed name every rebuild, so the desktop always has a stable path to
-// serve regardless of which debug/versioned .apk most recently landed here —
-// see android/README (or the build step) for what copies the latest build in.
-// Kept around for build-android.sh's local-testing loop (a debug build
-// dropped here doesn't require cutting a real release to try) — no longer
-// what the QR/link in MobileAppModal.tsx points at, see APK_DOWNLOAD_URL.
+// serve regardless of which debug/versioned .apk most recently landed here.
+// Kept around for a local testing loop — a debug build copied in here can be
+// tried without cutting a real release. No longer what the QR/link in
+// MobileAppModal.tsx points at, see APK_DOWNLOAD_URL.
 const APK_PATH = join(__dirname, '../../dist/boarderoni-latest.apk')
 
 // GitHub's "always resolves to whatever release is currently latest"
@@ -1005,8 +1004,7 @@ function serveScreenCaptureStream(res: ServerResponse, deckId: string, widgetId:
 // *downloaded* file shouldn't be, or a phone's download manager just
 // silently overwrites the previous one with no way to tell them apart.
 // Built from the file's own mtime rather than tracked separately — always
-// correct after any rebuild (manual or via build-android.sh) with nothing
-// extra to keep in sync.
+// correct after any rebuild with nothing extra to keep in sync.
 function apkVersionedFilename(): string {
   const mtime = statSync(APK_PATH).mtime
   const pad = (n: number): string => String(n).padStart(2, '0')

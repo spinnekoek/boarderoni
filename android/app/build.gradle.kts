@@ -33,6 +33,13 @@ android {
     }
 
     buildTypes {
+        // Separate package id so a debug build (signed with the build
+        // machine's debug key) installs side by side with the release-signed
+        // app instead of Android refusing it as a signature conflict. Its
+        // launcher label comes from src/debug/res.
+        debug {
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = false
             if (keystorePath != null) {
