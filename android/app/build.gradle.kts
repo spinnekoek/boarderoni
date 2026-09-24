@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.boarderoni.mobile"
-    // Matches the SDK actually installed on the build machine:
+    // Matches the SDK installed on the build machine:
     // platforms android-34/35, build-tools 34.0.0.
     compileSdk = 34
 
