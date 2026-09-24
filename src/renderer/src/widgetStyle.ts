@@ -291,6 +291,29 @@ function extractScreenCaptureStyle(widget: Extract<Widget, { type: 'screen-captu
   return pick(widget, ['fit', 'brightness', 'contrast', 'saturation', 'sharpen', 'borderColor', 'borderColorExpr', 'borderOpacity'] as const)
 }
 
+// Same look fields as a screen capture plus its border width/radius. Crop
+// (tuned per component's bezel) and the streaming knobs (streamMode/fps/
+// quality/tapToStream) are behavior, not style, so they stay put.
+function extractDcsViewportStyle(widget: Extract<Widget, { type: 'dcs-viewport' }>) {
+  return pick(widget, [
+    'fit',
+    'brightness',
+    'contrast',
+    'saturation',
+    'sharpen',
+    'borderColor',
+    'borderColorExpr',
+    'borderOpacity',
+    'borderWidth',
+    'borderRadius'
+  ] as const)
+}
+
+// Rotation is geometry (like x/y/w/h), not style, so it isn't carried.
+function extractLineStyle(widget: Extract<Widget, { type: 'line' }>) {
+  return pick(widget, ['color', 'colorExpr', 'lineWidth'] as const)
+}
+
 function extractLabelStyle(widget: Extract<Widget, { type: 'label' }>) {
   return { label: pick(widget.label, LABEL_STYLE_KEYS) }
 }
@@ -325,6 +348,10 @@ export function extractWidgetStyle(widget: Widget): StyleClipboardEntry {
       return { widgetType: widget.type, data: extractDropdownStyle(widget) }
     case 'screen-capture':
       return { widgetType: widget.type, data: extractScreenCaptureStyle(widget) }
+    case 'dcs-viewport':
+      return { widgetType: widget.type, data: extractDcsViewportStyle(widget) }
+    case 'line':
+      return { widgetType: widget.type, data: extractLineStyle(widget) }
     case 'label':
       return { widgetType: widget.type, data: extractLabelStyle(widget) }
   }
@@ -389,6 +416,14 @@ export function applyWidgetStyle(widget: Widget, entry: StyleClipboardEntry): Wi
     }
     case 'screen-capture': {
       const rest = entry.data as ReturnType<typeof extractScreenCaptureStyle>
+      return { ...widget, ...rest }
+    }
+    case 'dcs-viewport': {
+      const rest = entry.data as ReturnType<typeof extractDcsViewportStyle>
+      return { ...widget, ...rest }
+    }
+    case 'line': {
+      const rest = entry.data as ReturnType<typeof extractLineStyle>
       return { ...widget, ...rest }
     }
     case 'label': {
