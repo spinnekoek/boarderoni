@@ -11,7 +11,7 @@ import { contentAuthParams } from './id'
 //
 // The desktop editor window is loaded from SERVER_PORT in both dev and
 // packaged builds (see createEditorWindow), so a same-origin relative URL
-// would usually work — but a deployed view client on a phone is on that same
+// would usually work — but a client on a phone is on that same
 // origin too, and DevTools/file:// edge cases aren't worth the ambiguity, so
 // the host is resolved explicitly the same way DeckPicker's own apiUrl does.
 // /sounds/ is device-gated like fonts — see id.ts's contentAuthParams.
@@ -55,7 +55,7 @@ export function playSound(sound: CustomSound, volume: number, startAtMs: number)
     // Rejects when the browser blocks autoplay. The desktop window sets
     // autoplayPolicy: 'no-user-gesture-required' (see createEditorWindow) so
     // a sound fired by a rule, with nobody touching the machine, still
-    // plays; a view client in a real browser has usually had a tap by the
+    // plays; a client in a real browser has usually had a tap by the
     // time any action fires. Logged rather than thrown — a silent failure
     // here should never take down whatever else the sequence was doing.
     void audio.play().catch((err) => {

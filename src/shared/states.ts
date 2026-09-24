@@ -18,7 +18,7 @@ export function deriveClickedState(base: WidgetState, id: string): WidgetState {
 // evaluated fresh on every call so it tracks live variable values. Any
 // failure mode (expression unset, throws, returns a non-string, or names a
 // state that doesn't exist) falls back to states[0] rather than surfacing an
-// error on the view client — the expression only ever narrows which state is
+// error on the client — the expression only ever narrows which state is
 // active, it never breaks rendering.
 function resolveBaseState(widget: StatefulWidget, variables: VariableMap): WidgetState {
   const fallback = widget.states[0]

@@ -50,7 +50,7 @@ export function stepTitle(step: SequenceStep): string {
 }
 
 // Short human-readable summary of everything a widget's events will do, used
-// as the deployed button's hover/long-press title. An event with an empty
+// as the button's hover/long-press title on a client. An event with an empty
 // sequence is omitted entirely.
 export function actionTitle(widget: EventfulWidget): string {
   const parts = eventKindsFor(widget)

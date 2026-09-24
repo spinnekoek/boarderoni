@@ -218,7 +218,7 @@ export const MorphCanvasWidget = memo(function MorphCanvasWidget({
   const edgeSpots = computeEdgeSpots(widget.blocks)
   // See CanvasWidget's own comment on the same call — dims rather than
   // hides, so the widget stays selectable/editable, and evaluates the same
-  // expression the deployed view does so a visibleExpr's console.log
+  // expression the client does so a visibleExpr's console.log
   // reaches the debug panel while editing.
   const visible = resolveWidgetVisible(widget, variables)
 
@@ -238,8 +238,8 @@ export const MorphCanvasWidget = memo(function MorphCanvasWidget({
         interactive={false}
         variables={variables}
         // Static (no drag hook here — this is the non-interactive editor
-        // preview) rest position, same fallback-to-0 as MorphView's live
-        // version in ViewCanvas.tsx.
+        // preview) rest position, same fallback-to-0 as ClientMorphButton's live
+        // version in ClientCanvas.tsx.
         sliderFraction={widget.valueExpr ? (resolveNumericExpr(widget.valueExpr, variables) ?? 0) / 100 : 0}
         selectedBlockId={isSoleSelection ? selectedBlockId : null}
         onCellPointerDown={handlePointerDown}

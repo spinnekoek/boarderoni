@@ -234,8 +234,8 @@ export function Canvas(): React.JSX.Element {
           <div
             className="canvas-device-bounds"
             // Stable hook for main/mcp/screenshot.ts's screenshot_dashboard
-            // tool — this is the actual designed area (matches the deployed
-            // view's own dimensions), not the whole pannable/zoomable
+            // tool — this is the actual designed area (matches the client's
+            // own dimensions), not the whole pannable/zoomable
             // canvas-viewport which can show empty space around it
             // depending on the current camera position.
             data-canvas-device-bounds

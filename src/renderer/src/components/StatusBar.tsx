@@ -123,11 +123,11 @@ export function StatusBar(): React.JSX.Element {
 
   return (
     <div className="status-bar">
-      <span className="status-bar__label" data-tooltip="Approved view devices (tablets/phones) currently connected to this deck">
+      <span className="status-bar__label" data-tooltip="Approved clients (tablets/phones) currently connected to this deck">
         Devices
       </span>
       {connectedDevices.length === 0 ? (
-        <span className="status-bar__empty" data-tooltip="No approved view device currently has a live connection to this deck">
+        <span className="status-bar__empty" data-tooltip="No approved client currently has a live connection to this deck">
           No devices connected
         </span>
       ) : (
@@ -176,7 +176,7 @@ function DeviceRow({ device }: { device: DeviceInfo }): React.JSX.Element {
         className="status-bar__dot"
         data-tooltip="Green: healthy. Yellow/red: lag or buffered send data has crossed a threshold — see this device's own lag/buf tooltips"
       />
-      <span className="status-bar__name" data-tooltip="This device's name, set in its own Device Settings (5-finger tap on the view client)">
+      <span className="status-bar__name" data-tooltip="This device's name, set in its own Device Settings (5-finger tap on the client)">
         {displayDeviceName(device)}
       </span>
       <span

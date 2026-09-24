@@ -33,7 +33,7 @@ interface EditorSettings {
   // alignment box, red-outlined — see .deck-toggle-switch__label / .debug-mode
   // in styles.css) that are otherwise invisible, to make align/anchor
   // settings' actual effect easier to reason about. Never affects the
-  // deployed view client, only the editor canvas.
+  // client, only the editor canvas.
   debugMode: boolean
   // Canvas pan/zoom — not persisted (see partialize below): reopening the
   // app centered on wherever the camera last was would be a surprise, not a

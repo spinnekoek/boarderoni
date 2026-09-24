@@ -16,7 +16,7 @@ const PENDING_CONFIRM_TIMEOUT_MS = 1500
 
 // Which position a switch (or dropdown — same positions/activePositionExpr
 // shape, see DropdownWidget's own comment) widget shows on THIS client, for
-// the deployed view client only (see CanvasWidget's own simpler inline
+// the client only (see CanvasWidget's own simpler inline
 // resolve for the editor's static preview, which has no tap/hold gesture to
 // track). widget.activePositionExpr (when set and resolvable) always wins
 // once `pending` (below) isn't overriding it; with no expr, this remembers

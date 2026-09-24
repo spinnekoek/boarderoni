@@ -29,8 +29,8 @@ export function angleForPosition(widget: DialSwitchWidget, index: number): numbe
 }
 
 // Shared between the editor preview (CanvasWidget, interactive=false, no
-// onSelect/pointer props) and the deployed view client (ViewCanvas,
-// interactive=true — see DialSwitchView in ViewCanvas.tsx, which wires
+// onSelect/pointer props) and the client (ClientCanvas,
+// interactive=true — see ClientDialSwitch in ClientCanvas.tsx, which wires
 // EITHER onSelect (tap mode, useSwitchPosition's select directly) OR the
 // pointer props (drag mode, useDialSwitchDrag) depending on
 // widget.interactionMode, never both). `activeIndex` is resolved by the

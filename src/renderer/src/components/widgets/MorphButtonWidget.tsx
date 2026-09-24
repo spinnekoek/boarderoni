@@ -35,7 +35,7 @@ export function MorphButtonWidgetContent({
   error?: string
   variables: VariableMap
   // onPress/onRelease double as the real server triggers (see
-  // ViewCanvas.tsx's TriggerableViewWidget) — the per-block onClick below
+  // ClientCanvas.tsx's TriggerableClientWidget) — the per-block onClick below
   // fires both back to back only for keyboard/assistive-tech activation
   // (e.detail === 0, a synthetic click with no pointer events), matching
   // ButtonWidget.tsx's own onKeyboardActivate reasoning.
@@ -60,7 +60,7 @@ export function MorphButtonWidgetContent({
   // AdjusterWidgetContent uses (see useAdjusterDrag.ts/useMorphSliderDrag.ts)
   // — 0..1 handle position along the slider path. Undefined (no slider, or
   // isMorphSliderActive is false) simply skips rendering it. The three
-  // pointer handlers are interactive-only (deployed view, via
+  // pointer handlers are interactive-only (client, via
   // useMorphSliderDrag) — the editor preview passes sliderFraction alone,
   // with no drag handlers, to show a static rest position.
   sliderFraction?: number

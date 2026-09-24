@@ -802,7 +802,7 @@ function buildTools(): ToolDef[] {
       tool: {
         name: 'hide_editor_window',
         description:
-          "Minimize the desktop editor window to the system tray — the same thing clicking the window's own close (X) button does. The server and any connected deployed views keep running; this only hides the desktop UI. Screenshot tools will fail until show_editor_window is called again.",
+          "Minimize the desktop editor window to the system tray — the same thing clicking the window's own close (X) button does. The server and any connected clients keep running; this only hides the desktop UI. Screenshot tools will fail until show_editor_window is called again.",
         inputSchema: objectSchema({}, [])
       },
       handler: (deps) => {

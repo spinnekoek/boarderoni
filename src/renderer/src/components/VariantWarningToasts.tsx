@@ -38,7 +38,7 @@ function WarningToast({ warning, onDismiss }: { warning: VariantWarning; onDismi
   )
 }
 
-// Editor-only counterpart to ToastStack (that one's deployed-view-only, see
+// Editor-only counterpart to ToastStack (that one's client-only, see
 // its own comment) — mounted in App.tsx's editor branch. Only ever fires
 // from Palette.tsx placing a widget variant that references variables not
 // yet configured in this dashboard. Top-anchored (toast-stack--top) rather

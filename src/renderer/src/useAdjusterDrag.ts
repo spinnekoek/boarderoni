@@ -138,8 +138,8 @@ function knobDeltaFraction(
   return { fraction: Math.min(1, Math.max(0, virtualFraction)), virtualFraction }
 }
 
-// Drag-to-value interaction for an AdjusterWidget on the deployed view
-// client — pointer capture + rAF-throttled `triggerWidget` calls, mirroring
+// Drag-to-value interaction for an AdjusterWidget on the client
+// — pointer capture + rAF-throttled `triggerWidget` calls, mirroring
 // the setPointerCapture pattern already used by CanvasWidget's resize handle
 // and useWidgetDrag.ts. Fires the widget's own `action` (any WidgetAction
 // kind, same editor as a button) with the live value exposed as

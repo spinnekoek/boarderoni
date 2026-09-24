@@ -21,10 +21,10 @@ const MULTI_PRESS_WINDOW_MS = 350
 // resolves after exactly 2 taps if that pair's window lapses without a
 // third.
 //
-// Its own file (not living alongside TriggerableViewWidget in
-// ViewCanvas.tsx, its original home) specifically so useAdjusterDrag.ts can
-// import it too without a circular import back into ViewCanvas.tsx, which
-// already imports useAdjusterDrag for AdjusterView's own rendering.
+// Its own file (not living alongside TriggerableClientWidget in
+// ClientCanvas.tsx, its original home) specifically so useAdjusterDrag.ts can
+// import it too without a circular import back into ClientCanvas.tsx, which
+// already imports useAdjusterDrag for ClientAdjuster's own rendering.
 export function useMultiPressArbiter(
   widgetId: string,
   hasDoublePress: boolean,

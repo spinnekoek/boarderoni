@@ -1,7 +1,7 @@
 import { useDashboardStore } from '../store'
 import { displayDeviceName } from '@shared/deviceName'
 
-// Mounted in both edit mode and view mode (see App.tsx) — any trusted
+// Mounted in both edit mode and client mode (see App.tsx) — any trusted
 // device, not just the desktop, can approve/deny a new one (see
 // isTrustedSocket in main/index.ts). Renders nothing when empty, same
 // always-mounted approach ToastStack uses.

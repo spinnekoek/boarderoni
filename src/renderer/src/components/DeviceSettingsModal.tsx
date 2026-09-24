@@ -16,7 +16,7 @@ export function DeviceSettingsModal({
   hasDeck
 }: {
   onClose: () => void
-  // False from DeckPicker's view-mode branch (gesture opened this from the
+  // False from DeckPicker's client mode branch (gesture opened this from the
   // deck list itself, before any deck is loaded) — "Change deck" would just
   // disconnect() a connection that was never made, so it's hidden there.
   hasDeck: boolean

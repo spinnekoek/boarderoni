@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
-import { ScreenWidgetsLayer } from './ViewCanvas'
+import { ScreenWidgetsLayer } from './ClientCanvas'
 import type { VariableMap } from '@shared/expr'
 import type { BackgroundAnchor, BackgroundFit, OverlayEdge, OverlaySizeUnit, SubDeck } from '@shared/types'
 
@@ -48,7 +48,7 @@ export function OverlayPanel({
   size: number
   sizeUnit: OverlaySizeUnit
   // The main canvas's own current letterbox scale-to-fit factor (see
-  // ViewCanvas's mainScale) — applied to the panel's own px-based edge size
+  // ClientCanvas's mainScale) — applied to the panel's own px-based edge size
   // below (a raw device-pixel sizeCss would be a completely different
   // proportion of the screen on a phone than on the design resolution it
   // was authored against; 'percent' is already a fraction of the real

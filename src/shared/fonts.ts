@@ -69,7 +69,7 @@ export function customFontToOption(font: CustomFont): FontOption {
 
 // Module-level, not React state — resolveFont (below) is a plain function
 // called from labels.tsx's render path all over the widget tree, on both the
-// editor and the Android view client, with no store/props access of its own
+// editor and the Android client, with no store/props access of its own
 // (see resolveFont's own comment). Kept in sync by registerCustomFonts,
 // called from store.ts's fonts:list handler — the same "side effect outside
 // the render tree, driven by that one message" shape
@@ -158,7 +158,7 @@ export const DEFAULT_LABEL_LINE_HEIGHT = 0.9;
 // A custom font's id is self-describing (see customFontCssFamily above) —
 // resolving one never needs the actual CustomFont list, so this stays a pure
 // function of `id` alone, safe to call from labels.tsx's render path on
-// both the editor and the Android view client without either needing the
+// both the editor and the Android client without either needing the
 // list in scope.
 export function resolveFont(id: string | undefined): FontOption {
 	if (isCustomFontId(id)) {

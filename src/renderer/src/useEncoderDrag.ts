@@ -23,7 +23,7 @@ function angleFromEvent(e: React.PointerEvent, rect: DOMRect): number {
   return (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI + 90
 }
 
-// Rotary drag for an EncoderWidget on the deployed view client — accumulates
+// Rotary drag for an EncoderWidget on the client — accumulates
 // angular delta since the last fired step and fires 'increment'/'decrement'
 // once per widget.stepDegrees crossed, carrying over the remainder so a fast
 // spin can fire several steps off one pointermove and a slow one still

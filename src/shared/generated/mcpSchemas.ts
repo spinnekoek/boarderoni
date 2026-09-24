@@ -123,7 +123,7 @@ export const MCP_SCHEMAS = {
               "triplePress"
             ],
             "additionalProperties": false,
-            "description": "Interaction moments a button can fire a sequence from — press (pointerdown) and release (pointerup/cancel/leave) always fire immediately, zero added latency. doublePress/triplePress are optIN by being non-empty: whenever EITHER has any steps, a tap is held back for a short window (see useMultiPressArbiter in ViewCanvas.tsx) to see if a second/third tap follows, and exactly one of press/doublePress/ triplePress fires once that's decided — never press AND doublePress for the same physical double-tap. With both empty (the common case, and every dashboard saved before these existed), that window never opens at all — press fires the instant it's pressed, same as always. See SequenceStep; any of the four can be empty (no steps configured)."
+            "description": "Interaction moments a button can fire a sequence from — press (pointerdown) and release (pointerup/cancel/leave) always fire immediately, zero added latency. doublePress/triplePress are optIN by being non-empty: whenever EITHER has any steps, a tap is held back for a short window (see useMultiPressArbiter in ClientCanvas.tsx) to see if a second/third tap follows, and exactly one of press/doublePress/ triplePress fires once that's decided — never press AND doublePress for the same physical double-tap. With both empty (the common case, and every dashboard saved before these existed), that window never opens at all — press fires the instant it's pressed, same as always. See SequenceStep; any of the four can be empty (no steps configured)."
           },
           "statesEnabled": {
             "type": "boolean",
@@ -137,7 +137,7 @@ export const MCP_SCHEMAS = {
           },
           "activeStateExpr": {
             "type": "string",
-            "description": "Optional JS expression (see shared/expr.ts) returning the exact `name` of the state that should be the \"base\" state on the view client — e.g. `return variables.BATTERY_SW === 0 ? 'Default' : 'Active';`. Only meaningful when statesEnabled is on; falls back to states[0] if unset, throws, or names a state that doesn't exist. Independent of isClicked — the resolved state still gets swapped for the Clicked one while pressed."
+            "description": "Optional JS expression (see shared/expr.ts) returning the exact `name` of the state that should be the \"base\" state on the client — e.g. `return variables.BATTERY_SW === 0 ? 'Default' : 'Active';`. Only meaningful when statesEnabled is on; falls back to states[0] if unset, throws, or names a state that doesn't exist. Independent of isClicked — the resolved state still gets swapped for the Clicked one while pressed."
           },
           "rotateAngle": {
             "type": "number",
@@ -700,7 +700,7 @@ export const MCP_SCHEMAS = {
           },
           "isClicked": {
             "type": "boolean",
-            "description": "Marks the one state that plays while the button is held on the view client (see getEffectiveStates in shared/states.ts) — a structural flag, not derived from `name`, so renaming some other state to \"Clicked\" doesn't make it activate on tap. Set only on the state created by enabling states the first time, or by \"Reset states\"; never on a manually-added state."
+            "description": "Marks the one state that plays while the button is held on a client (see getEffectiveStates in shared/states.ts) — a structural flag, not derived from `name`, so renaming some other state to \"Clicked\" doesn't make it activate on tap. Set only on the state created by enabling states the first time, or by \"Reset states\"; never on a manually-added state."
           },
           "glowColor": {
             "type": "string",
@@ -719,7 +719,7 @@ export const MCP_SCHEMAS = {
           "labels"
         ],
         "additionalProperties": false,
-        "description": "A named, independently-styled visual variant of a widget. \"Default\" (the first entry, always present) is the idle look; \"Clicked\" (conventionally the second entry) is shown while the button is held on the view client. Anything past those two is inert for now — no runtime mechanism switches to them yet, that's future state-machine work — but they're fully editable so design work can get ahead of it."
+        "description": "A named, independently-styled visual variant of a widget. \"Default\" (the first entry, always present) is the idle look; \"Clicked\" (conventionally the second entry) is shown while the button is held on the client. Anything past those two is inert for now — no runtime mechanism switches to them yet, that's future state-machine work — but they're fully editable so design work can get ahead of it."
       },
       "WidgetLabel": {
         "type": "object",
@@ -1382,7 +1382,7 @@ export const MCP_SCHEMAS = {
           "id"
         ],
         "additionalProperties": false,
-        "description": "Passive value display — a filled bar or arc showing valueExpr's result against min/max. No action: nothing to trigger, so it's never clickable on the view client. One ring of evenly-spaced tick marks around an arc-style GaugeWidget's sweep, each optionally labeled with its own auto-computed value — e.g. a speedometer's major (numbered) and minor (unnumbered) ticks, each its own independent GaugeTickSet so they can be sized/colored/spaced completely differently. Multiple sets are addable/removable in the properties panel (see GaugeWidget.tickSets), same list convention as SwitchPosition arrays elsewhere. Rendered the same way DialSwitchWidget's own 'tick' detent shape is (a small rect, rotated to point radially — see DETENT_SIZE in DialShapeGraphic.tsx), so a tick set's color/border/size read the same as everywhere else a \"tick\" appears in this app."
+        "description": "Passive value display — a filled bar or arc showing valueExpr's result against min/max. No action: nothing to trigger, so it's never clickable on the client. One ring of evenly-spaced tick marks around an arc-style GaugeWidget's sweep, each optionally labeled with its own auto-computed value — e.g. a speedometer's major (numbered) and minor (unnumbered) ticks, each its own independent GaugeTickSet so they can be sized/colored/spaced completely differently. Multiple sets are addable/removable in the properties panel (see GaugeWidget.tickSets), same list convention as SwitchPosition arrays elsewhere. Rendered the same way DialSwitchWidget's own 'tick' detent shape is (a small rect, rotated to point radially — see DETENT_SIZE in DialShapeGraphic.tsx), so a tick set's color/border/size read the same as everywhere else a \"tick\" appears in this app."
       },
       "AdjusterSliderWidget": {
         "type": "object",
@@ -2302,7 +2302,7 @@ export const MCP_SCHEMAS = {
           },
           "settleToInactive": {
             "type": "boolean",
-            "description": "Off (default): matches every other switch widget — the deployed view client defaults to position 0 active until something's actually tapped, then keeps whichever position was last tapped highlighted (see useSwitchPosition.ts). On: there's no default-active position at all (nothing highlighted until a tap, or activePositionExpr resolves one), AND a tap's own highlight doesn't stick — it reverts to nothing active right after, like a self-centering/momentary rocker with no resting \"on\" look. Either way, tapping a position always fires its onSelect — this only ever affects which segment (if any) LOOKS active, never whether a tap triggers."
+            "description": "Off (default): matches every other switch widget — the client defaults to position 0 active until something's actually tapped, then keeps whichever position was last tapped highlighted (see useSwitchPosition.ts). On: there's no default-active position at all (nothing highlighted until a tap, or activePositionExpr resolves one), AND a tap's own highlight doesn't stick — it reverts to nothing active right after, like a self-centering/momentary rocker with no resting \"on\" look. Either way, tapping a position always fires its onSelect — this only ever affects which segment (if any) LOOKS active, never whether a tap triggers."
           },
           "onInactive": {
             "type": "array",
@@ -2416,7 +2416,7 @@ export const MCP_SCHEMAS = {
           },
           "momentary": {
             "type": "boolean",
-            "description": "ToggleSwitchWidget only — Rocker/Dial/Dropdown leave this unused, same as they leave DetentStyle's dial-only fields unused elsewhere. Only meaningful on a toggle's first/last position (never its middle one, which has no momentary config at all — see the properties panel's own gating): pressing/dragging to a momentary position selects it (fires onSelect) only while held, springing back (firing ITS own onSelect too) the instant you release — to the middle position on a 3-position switch, or to whichever of Top/Bottom ISN'T the momentary one on a 2-position switch (there's no middle there to catch it). The properties panel enforces at most one momentary position at a time on a 2-position switch, so that \"other one\" is always unambiguous — a 3-position switch's two ends stay independent of each other since they both spring back to the same middle regardless. See ToggleSwitchView in ViewCanvas.tsx and useToggleSwitchDrag.ts (both via momentarySpringBackIndex in ToggleSwitchWidget.tsx)."
+            "description": "ToggleSwitchWidget only — Rocker/Dial/Dropdown leave this unused, same as they leave DetentStyle's dial-only fields unused elsewhere. Only meaningful on a toggle's first/last position (never its middle one, which has no momentary config at all — see the properties panel's own gating): pressing/dragging to a momentary position selects it (fires onSelect) only while held, springing back (firing ITS own onSelect too) the instant you release — to the middle position on a 3-position switch, or to whichever of Top/Bottom ISN'T the momentary one on a 2-position switch (there's no middle there to catch it). The properties panel enforces at most one momentary position at a time on a 2-position switch, so that \"other one\" is always unambiguous — a 3-position switch's two ends stay independent of each other since they both spring back to the same middle regardless. See ClientToggleSwitch in ClientCanvas.tsx and useToggleSwitchDrag.ts (both via momentarySpringBackIndex in ToggleSwitchWidget.tsx)."
           }
         },
         "required": [
@@ -2814,7 +2814,7 @@ export const MCP_SCHEMAS = {
               "guardToggle"
             ],
             "additionalProperties": false,
-            "description": "Root-level, alongside (not instead of) each position's own onSelect — see RockerSwitchWidget.events' own comment for the full reasoning (same convention here). guardToggle (guardEnabled only — see its own comment below) is this widget's one addition beyond what every other switch type carries: fires whenever the guard is tapped, whether that open/closes it locally or the tap is actually overridden by guardOpenExpr — the only way to hang a real side effect (a DCS-BIOS command, an update-state) off pressing the cover itself, since guardOpenExpr only ever reads a variable, never writes one back. variables.$value (see TriggerValue) is 1 if this tap is opening the guard, 0 if closing it — see ToggleSwitchView in ViewCanvas.tsx."
+            "description": "Root-level, alongside (not instead of) each position's own onSelect — see RockerSwitchWidget.events' own comment for the full reasoning (same convention here). guardToggle (guardEnabled only — see its own comment below) is this widget's one addition beyond what every other switch type carries: fires whenever the guard is tapped, whether that open/closes it locally or the tap is actually overridden by guardOpenExpr — the only way to hang a real side effect (a DCS-BIOS command, an update-state) off pressing the cover itself, since guardOpenExpr only ever reads a variable, never writes one back. variables.$value (see TriggerValue) is 1 if this tap is opening the guard, 0 if closing it — see ClientToggleSwitch in ClientCanvas.tsx."
           },
           "orientation": {
             "type": "string",
@@ -2960,7 +2960,7 @@ export const MCP_SCHEMAS = {
           },
           "guardEnabled": {
             "type": "boolean",
-            "description": "Optional flip-up safety cover, drawn on top of everything else in ToggleSwitchWidget.tsx (bezel, lever, both label sets) — off (default/ unset) draws no guard at all, identical to every dashboard saved before this existed. Closed (the local per-client default — see ToggleSwitchView in ViewCanvas.tsx), it's an opaque colored box that catches the tap itself instead of the switch beneath it; tapping it flips open, at which point it's rendered pointer-events:none so taps fall straight through to the switch's own zones underneath — same click-through technique MorphButtonWidget's own wrapper uses (see .view-canvas__widget--morph in styles.css). guard's own borderColor/borderColorExpr/borderOpacity (it's a ColorAppearance, same as track/fill above) cover its border color; guardBorderWidth is the one border knob ColorAppearance doesn't carry."
+            "description": "Optional flip-up safety cover, drawn on top of everything else in ToggleSwitchWidget.tsx (bezel, lever, both label sets) — off (default/ unset) draws no guard at all, identical to every dashboard saved before this existed. Closed (the local per-client default — see ClientToggleSwitch in ClientCanvas.tsx), it's an opaque colored box that catches the tap itself instead of the switch beneath it; tapping it flips open, at which point it's rendered pointer-events:none so taps fall straight through to the switch's own zones underneath — same click-through technique MorphButtonWidget's own wrapper uses (see .client-canvas__widget--morph in styles.css). guard's own borderColor/borderColorExpr/borderOpacity (it's a ColorAppearance, same as track/fill above) cover its border color; guardBorderWidth is the one border knob ColorAppearance doesn't carry."
           },
           "guard": {
             "$ref": "#/definitions/ColorAppearance"
@@ -3245,7 +3245,7 @@ export const MCP_SCHEMAS = {
           "h"
         ],
         "additionalProperties": false,
-        "description": "A live view of a region of the desktop's own screen, streamed to every connected client — passive, like GaugeWidget: nothing to trigger, so it's never clickable on the view client. `region` is unset until \"Pick region\" (see ScreenCaptureWidget's own properties-panel section) has been used at least once; the widget renders a placeholder until then."
+        "description": "A live view of a region of the desktop's own screen, streamed to every connected client — passive, like GaugeWidget: nothing to trigger, so it's never clickable on the client. `region` is unset until \"Pick region\" (see ScreenCaptureWidget's own properties-panel section) has been used at least once; the widget renders a placeholder until then."
       },
       "ScreenRegion": {
         "type": "object",

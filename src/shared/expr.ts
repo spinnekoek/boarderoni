@@ -16,7 +16,7 @@ export type ExpressionResult = { ok: true; value: unknown } | { ok: false; error
 // depending on any renderer-only store — the host just calls
 // setExpressionConsoleSink once, e.g. wiring it up (or tearing it down) as
 // its own debug panel opens/closes. Unset (the default, and always the case
-// in the main process and the deployed view client, neither of which has a
+// in the main process and the client, neither of which has a
 // panel to show it in) makes every call below a no-op.
 export type ExpressionConsoleSink = (args: unknown[]) => void
 let consoleSink: ExpressionConsoleSink | null = null
@@ -64,7 +64,7 @@ export function stringifyExpressionLogArgs(args: unknown[]): string {
 // (and `console`, see exprConsole above) in scope. Plain `new Function` — no
 // Node/Electron/DOM APIs assumed by the mechanism itself — so this behaves
 // identically wherever it runs: the main process (evaluating an update-state
-// action) and every renderer (desktop editor preview + deployed Android
+// action) and every renderer (desktop editor preview + web/Android client
 // WebView) resolving a colorExpr/textExpr binding. A thrown error (syntax
 // error, bad reference, whatever the code does) is caught here rather than
 // left to crash whatever's evaluating it.
@@ -147,8 +147,8 @@ export function resolveBooleanExpr(expr: string, variables: VariableMap): boolea
 
 // Same convention as resolveBooleanExpr above — visibleExpr (see
 // WidgetVisibility in shared/types.ts) overrides the plain flag when set.
-// Shared by every place a widget actually gets drawn: the deployed view
-// (ViewCanvas.tsx) hides it outright, the editor's own live preview
+// Shared by every place a widget actually gets drawn: the client
+// (ClientCanvas.tsx) hides it outright, the editor's own live preview
 // (CanvasWidget.tsx / MorphCanvasWidget.tsx) dims it instead so it stays
 // selectable/editable — but both evaluate the exact same expression the
 // same way, so a visibleExpr's console.log reaches the debug panel while
@@ -240,7 +240,7 @@ export function resolveTextColor(
 // unusual case fails safe (always re-renders) instead of silently missing a
 // real dependency.
 //
-// Shared between ViewCanvas.tsx (the deployed view) and Canvas.tsx/
+// Shared between ClientCanvas.tsx (the client) and Canvas.tsx/
 // CanvasWidget.tsx/MorphCanvasWidget.tsx (the editor) — both back a per-
 // widget memo() comparator with this so a widget only re-renders on a
 // variables tick when a variable it actually references changed, not just
@@ -274,8 +274,8 @@ export function widgetVariableDependencies(widget: Widget): Set<string> | null {
 // it can't skip zoom-driven re-renders selectively — zoom changes are a
 // discrete, infrequent user gesture, unlike a steady variables tick, so
 // comparing it normally is an acceptable cost). variables uses
-// widgetVariableDependencies' per-widget scoping, same as ViewCanvas.tsx's
-// viewWidgetPropsEqual. Deliberately does NOT take an onContextMenu prop
+// widgetVariableDependencies' per-widget scoping, same as ClientCanvas.tsx's
+// clientWidgetPropsEqual. Deliberately does NOT take an onContextMenu prop
 // into account — see call sites, which build it as a fresh closure every
 // parent render regardless but functionally identical every time (closes
 // over the same widget.id), so comparing it would defeat memoization for no

@@ -41,7 +41,7 @@ const POLE_ANGLES: Record<'horizontal' | 'vertical', [number, number]> = {
 // real 3-way toggle's center throw doesn't lean either way (e.g. a BATT
 // switch's OFF), so it gets its own distinct "circle" look (see the render
 // below) rather than a lever drawn at some arbitrary angle. Exported so
-// useToggleSwitchDrag.ts and ViewCanvas.tsx's ToggleSwitchView can find the
+// useToggleSwitchDrag.ts and ClientCanvas.tsx's ClientToggleSwitch can find the
 // middle position a momentary throw springs back to, without duplicating
 // this same odd/even math.
 export function isMiddlePosition(index: number, count: number): boolean {
@@ -60,7 +60,7 @@ export function isMiddlePosition(index: number, count: number): boolean {
 // unexpected count (toggle switches are always 2 or 3 positions in practice
 // — see Palette.tsx's own hint — but this stays total instead of assuming
 // that's enforced everywhere upstream). Exported for useToggleSwitchDrag.ts's
-// own drag-mode spring-back and ViewCanvas.tsx's tap-mode spring-back, same
+// own drag-mode spring-back and ClientCanvas.tsx's tap-mode spring-back, same
 // reason isMiddlePosition above is exported for both.
 export function momentarySpringBackIndex(momentaryIndex: number, count: number): number {
   if (count % 2 === 1) return (count - 1) / 2
@@ -217,8 +217,8 @@ export function angleForIndex(index: number, count: number, orientation: 'horizo
 }
 
 // Shared between the editor preview (CanvasWidget, interactive=false, no
-// zone/drag handlers at all) and the deployed view client (ViewCanvas,
-// interactive=true — see ToggleSwitchView in ViewCanvas.tsx, which wires
+// zone/drag handlers at all) and the client (ClientCanvas,
+// interactive=true — see ClientToggleSwitch in ClientCanvas.tsx, which wires
 // EITHER onZonePointerDown/onZonePointerUp (tap mode) OR
 // onPointerDown/onPointerMove/onPointerUp (drag mode) depending on
 // widget.interactionMode, never both — same split DialSwitchWidgetContent's
@@ -255,7 +255,7 @@ export function ToggleSwitchWidgetContent({
   // these, so the guard always renders closed there.
   guardOpen?: boolean
   onGuardToggle?: () => void
-  // Tap mode only (see ToggleSwitchView) — pressing a zone always selects it
+  // Tap mode only (see ClientToggleSwitch) — pressing a zone always selects it
   // immediately (even a momentary one, which springs back on release — see
   // SwitchPosition.momentary); releasing anywhere on that same zone (pointer
   // capture keeps the events targeted here regardless of where the pointer
@@ -507,7 +507,7 @@ export function ToggleSwitchWidgetContent({
           pointer-events juggling on one element, just two differently-sized
           ones. Either one has to swallow the pointer gesture itself (not
           just decide the resulting click) — otherwise it'd still bubble up
-          to ToggleSwitchView's own root press/release wrapper AND (in drag
+          to ClientToggleSwitch's own root press/release wrapper AND (in drag
           mode) this same element's ancestor .deck-toggle-switch, which owns
           the drag handlers — either would let a tap on the guard leak
           straight through to the switch it's supposed to be gating. */}

@@ -12,8 +12,8 @@ import { renderWidgetLabels } from './labels'
 const OPEN_Z_INDEX = 9999
 
 // Shared between the editor preview (CanvasWidget, interactive=false, always
-// collapsed — there's no hold gesture to simulate there) and the deployed
-// view client (ViewCanvas, interactive=true — see DropdownView, which wires
+// collapsed — there's no hold gesture to simulate there) and the
+// client (ClientCanvas, interactive=true — see ClientDropdown, which wires
 // useDropdownDrag's held/dragIndex/pointer handlers). Collapsed (either
 // mode) shows only the active position, filling the widget's own x/y/w/h.
 // Held shows every position, at a list-order slot per widget.expandMode:

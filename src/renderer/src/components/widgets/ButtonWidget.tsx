@@ -20,7 +20,7 @@ export function ButtonWidgetContent({
   interactive: boolean
   error?: string
   variables: VariableMap
-  // The real trigger fires on pointerdown/pointerup (see ViewCanvas.tsx's
+  // The real trigger fires on pointerdown/pointerup (see ClientCanvas.tsx's
   // press()/release()), not this onClick — this only covers keyboard/
   // assistive-tech activation, which dispatches a synthetic click with no
   // pointer events at all. Guarded by e.detail === 0 (see the onClick
@@ -32,7 +32,7 @@ export function ButtonWidgetContent({
   // widget (see LineWidgetContent's identical applyRotation for the original
   // version of this), so it passes false here and applies the identical
   // angle up there itself, rather than this component rotating AGAIN inside
-  // an already-rotated wrapper. The deployed view (ViewCanvas.tsx) has no
+  // an already-rotated wrapper. The client (ClientCanvas.tsx) has no
   // such box to keep in sync, so it leaves this at the default.
   applyRotation?: boolean
 }): React.JSX.Element {

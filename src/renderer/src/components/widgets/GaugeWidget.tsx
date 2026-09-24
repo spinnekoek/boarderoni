@@ -194,8 +194,8 @@ function GaugeArc({
 
 // Passive — no pointer handlers, no `events` field at all (see EventfulWidget
 // in shared/types.ts, which deliberately excludes both gauge types). Shared
-// as-is between the editor preview (CanvasWidget) and the deployed view
-// client (ViewCanvas).
+// as-is between the editor preview (CanvasWidget) and the client
+// (ClientCanvas).
 export function BarGaugeWidgetContent({ widget, variables }: { widget: BarGaugeWidget; variables: VariableMap }): React.JSX.Element {
   const debugMode = useEditorSettings((s) => s.debugMode)
   const raw = resolveNumericExpr(widget.valueExpr, variables) ?? widget.min

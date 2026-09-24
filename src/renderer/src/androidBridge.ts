@@ -39,7 +39,7 @@ export function changeServer(): void {
 // Drops back to the native searching/found-connect screen the same way
 // changeServer() does, but WITHOUT forgetting the remembered server — the
 // idea is "give up on this frozen session and let the user see what's
-// happening," not "I want a different desktop." Called from ViewCanvas.tsx
+// happening," not "I want a different desktop." Called from ClientCanvas.tsx
 // after the WebSocket has stayed disconnected for a while (see its own
 // comment on the exact grace period) — a brief drop is expected to just
 // reconnect on its own via store.ts's normal retry loop; this is only for

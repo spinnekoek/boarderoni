@@ -37,11 +37,11 @@ function Toast({ toast, onDismiss }: { toast: ActionErrorToast; onDismiss: () =>
   )
 }
 
-// Always mounted in ViewCanvas — renders an empty (harmless) wrapper when
+// Always mounted in ClientCanvas — renders an empty (harmless) wrapper when
 // there's nothing to show, same "let the parent stay simple" approach the
 // rest of this codebase uses rather than conditionally mounting/unmounting.
 // Deliberately not rendered anywhere in the editor — action failures are a
-// deployed-view-client concern (see store.ts's action:error handler, which
+// client concern (see store.ts's action:error handler, which
 // still also keeps the existing small per-widget `errors` indicator).
 export function ToastStack(): React.JSX.Element {
   const toasts = useDashboardStore((s) => s.toasts)

@@ -1123,7 +1123,7 @@ did. */
 /* Editor-only feedback for a widget currently resolving Visible to false
    (see WidgetVisibility in shared/types.ts) — dimmed rather than actually
    hidden, so it stays clickable/selectable/editable here even though the
-   deployed view (ViewCanvas.tsx) skips rendering it outright. */
+   client (ClientCanvas.tsx) skips rendering it outright. */
 .canvas-widget--hidden {
 	opacity: 0.35;
 }
@@ -1271,7 +1271,7 @@ did. */
 	filter: brightness(1.1);
 }
 
-.view-canvas {
+.client-canvas {
 	position: relative;
 	width: 100vw;
 	height: 100vh;
@@ -1286,22 +1286,22 @@ did. */
      it does nothing for a desktop-browser mouse-drag turning one into a
      text selection (e.g. dragging a dial/rocker switch in Chrome). Same
      fix .app already uses for the editor, mirrored here for the deployed
-     view client. */
+     client. */
 	user-select: none;
 }
 
-.view-canvas input,
-.view-canvas textarea {
+.client-canvas input,
+.client-canvas textarea {
 	user-select: text;
 }
 
-.view-canvas__widget {
+.client-canvas__widget {
 	position: absolute;
 }
 
 /* See .canvas-widget--morph — same reasoning, so a widget placed inside a
    morph shape's notch is still tappable on the deployed client. */
-.view-canvas__widget--morph {
+.client-canvas__widget--morph {
 	pointer-events: none;
 }
 
@@ -3381,7 +3381,7 @@ button.deck-morph-cell:focus-visible {
 	justify-content: center;
 	/* Above .toast-stack's z-index: 1000 (action-error toasts) — this modal
 	   (5-finger gesture → device settings, or the APK-install QR one) should
-	   stay on top of a deployed-view action-error toast firing underneath
+	   stay on top of a client action-error toast firing underneath
 	   it, not get buried by one. */
 	z-index: 1100;
 }
@@ -4624,7 +4624,7 @@ button.deck-morph-cell:focus-visible {
 	filter: brightness(1.1);
 }
 
-.view-status-screen {
+.client-status-screen {
 	width: 100vw;
 	height: 100vh;
 	display: flex;

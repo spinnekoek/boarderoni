@@ -1094,7 +1094,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadMobileLink(host: String, port: Int) {
         dlog("loadMobileLink: host=$host port=$port")
-        webView.loadUrl("http://$host:$port/?mode=view")
+        webView.loadUrl("http://$host:$port/")
     }
 
     private fun showSearching(message: String? = null) {
@@ -1263,7 +1263,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Called from ViewCanvas.tsx (androidBridge.ts's connectionLost) once
+        // Called from ClientCanvas.tsx (androidBridge.ts's connectionLost) once
         // the web app's own WebSocket has stayed disconnected for a while —
         // see its own comment for the exact grace period and reasoning. Same
         // "drop back to searching + restart discovery" effect as

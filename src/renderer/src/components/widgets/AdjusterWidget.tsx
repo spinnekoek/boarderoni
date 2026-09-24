@@ -177,7 +177,7 @@ function AdjusterKnob({
 }
 
 // Shared between the editor preview (CanvasWidget, interactive=false, no
-// pointer props) and the deployed view client (ViewCanvas, interactive=true,
+// pointer props) and the client (ClientCanvas, interactive=true,
 // pointer props wired to useAdjusterDrag's handlers). dragFraction — when
 // provided by the drag hook — overrides the resolved rest position so the
 // handle tracks the pointer immediately, without waiting on a round trip.

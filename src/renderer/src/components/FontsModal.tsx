@@ -45,7 +45,7 @@ export function FontsModal({ onClose }: { onClose: () => void }): React.JSX.Elem
         <div className="variables-modal__body">
           <p className="properties__hint">
             Uploaded fonts appear in every label's Font picker, app-wide — not scoped to one deck. Bytes are stored
-            locally and served only to your own connected clients (desktop editor and any approved view devices),
+            locally and served only to your own connected clients (desktop editor and any approved clients),
             never uploaded anywhere else.
           </p>
           <p className="properties__hint">

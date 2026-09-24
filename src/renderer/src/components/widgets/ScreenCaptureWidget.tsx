@@ -20,8 +20,8 @@ const OBJECT_FIT: Record<NonNullable<ScreenCaptureWidget['fit']>, React.CSSPrope
 }
 
 // Passive — no pointer handlers, nothing to trigger, same as GaugeWidget.
-// Shared as-is between the editor preview (CanvasWidget) and the deployed
-// view client (ViewCanvas), so picking a region shows a live preview in the
+// Shared as-is between the editor preview (CanvasWidget) and the
+// client (ClientCanvas), so picking a region shows a live preview in the
 // editor too, without needing the phone. `deckId` (unlike every other
 // widget content component) is needed here because the frame/stream itself
 // is fetched over plain HTTP scoped to a deck, not carried in `widget`.

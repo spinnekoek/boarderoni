@@ -66,7 +66,7 @@ const CONNECTION_LOST_GRACE_MS = 30000
 // Owns the drag hook — kept separate from the dispatcher below so the hook
 // only ever mounts for an actual AdjusterWidget, not conditionally within a
 // component that also handles other widget types.
-function AdjusterView({
+function ClientAdjuster({
   widget,
   variables
 }: {
@@ -87,9 +87,9 @@ function AdjusterView({
   )
 }
 
-// Owns the drag hook — same split reasoning as AdjusterView above, so
+// Owns the drag hook — same split reasoning as ClientAdjuster above, so
 // useEncoderDrag only ever mounts for an actual EncoderWidget.
-function EncoderView({ widget, variables }: { widget: EncoderWidget; variables: VariableMap }): React.JSX.Element {
+function ClientEncoder({ widget, variables }: { widget: EncoderWidget; variables: VariableMap }): React.JSX.Element {
   const { dragSpinDegrees, handlePointerDown, handlePointerMove, handlePointerUp } = useEncoderDrag(widget, variables)
   return (
     <EncoderWidgetContent
@@ -111,8 +111,8 @@ function EncoderView({ widget, variables }: { widget: EncoderWidget; variables: 
 // SwitchWidgetBase's own comment in shared/types.ts for why a switch's
 // position is deliberately NOT synced dashboard state. RockerSwitchWidget
 // only ever works this way; DialSwitchWidget can also use a drag gesture
-// instead — see DialSwitchView below.
-function RockerSwitchView({ widget, variables }: { widget: RockerSwitchWidget; variables: VariableMap }): React.JSX.Element {
+// instead — see ClientDialSwitch below.
+function ClientRockerSwitch({ widget, variables }: { widget: RockerSwitchWidget; variables: VariableMap }): React.JSX.Element {
   const { activeIndex, select, settleInactive } = useSwitchPosition(widget, variables)
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   // Root-level press/release (see RockerSwitchWidget.events' own doc
@@ -141,7 +141,7 @@ function RockerSwitchView({ widget, variables }: { widget: RockerSwitchWidget; v
   )
 }
 
-// Same two-interaction-mode split as DialSwitchView below, plus momentary
+// Same two-interaction-mode split as ClientDialSwitch below, plus momentary
 // handling (see SwitchPosition.momentary) in both: a momentary position
 // (only ever the first/last, never the middle) selects immediately on
 // press, and springs back — to the middle on a 3-position switch, or
@@ -150,7 +150,7 @@ function RockerSwitchView({ widget, variables }: { widget: RockerSwitchWidget; v
 // that itself here (onZonePointerDown/onZonePointerUp); drag mode's own
 // spring-back lives inside useToggleSwitchDrag.ts, since it also has to fire
 // mid-drag, not just on release.
-function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; variables: VariableMap }): React.JSX.Element {
+function ClientToggleSwitch({ widget, variables }: { widget: ToggleSwitchWidget; variables: VariableMap }): React.JSX.Element {
   // ToggleSwitchWidget has no settleToInactive of its own (RockerSwitchWidget
   // only — see useSwitchPosition.ts) so this is never actually null; the `?? 0`
   // just satisfies the hook's shared, nullable-for-Rocker return type.
@@ -223,7 +223,7 @@ function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; v
 
   // Root-level press/release (see ToggleSwitchWidget.events' own doc
   // comment) — layered on top of, not replacing, the tap/drag handling
-  // above (same overlay-wrapper approach as RockerSwitchView).
+  // above (same overlay-wrapper approach as ClientRockerSwitch).
   return (
     <div
       style={{ position: 'absolute', inset: 0 }}
@@ -238,11 +238,11 @@ function ToggleSwitchView({ widget, variables }: { widget: ToggleSwitchWidget; v
 
 // Two interaction modes (see widget.interactionMode) share the same
 // useSwitchPosition: 'tap' wires its select straight to onSelect, identical
-// to RockerSwitchView above. 'drag' hands that same select to
+// to ClientRockerSwitch above. 'drag' hands that same select to
 // useDialSwitchDrag instead, which only calls it once on release, after the
 // drag has resolved to a position — see useDialSwitchDrag.ts. Both hooks are
 // always called (rules of hooks); only one drives what's actually rendered.
-function DialSwitchView({ widget, variables }: { widget: DialSwitchWidget; variables: VariableMap }): React.JSX.Element {
+function ClientDialSwitch({ widget, variables }: { widget: DialSwitchWidget; variables: VariableMap }): React.JSX.Element {
   // DialSwitchWidget has no settleToInactive of its own (RockerSwitchWidget
   // only — see useSwitchPosition.ts) so this is never actually null; the `?? 0`
   // just satisfies the hook's shared, nullable-for-Rocker return type.
@@ -275,7 +275,7 @@ function DialSwitchView({ widget, variables }: { widget: DialSwitchWidget; varia
 
   // Root-level press/release (see DialSwitchWidget.events' own doc comment)
   // — layered on top of, not replacing, the tap/drag handling above (same
-  // overlay-wrapper approach as RockerSwitchView).
+  // overlay-wrapper approach as ClientRockerSwitch).
   return (
     <div
       style={{ position: 'absolute', inset: 0 }}
@@ -293,7 +293,7 @@ function DialSwitchView({ widget, variables }: { widget: DialSwitchWidget; varia
 // switch type uses, and same local "remember what this device last picked"
 // behavior) only fires when useDropdownDrag resolves the release to a real
 // position, not a drag-off-the-end miss — see its own comment.
-function DropdownView({ widget, variables }: { widget: DropdownWidget; variables: VariableMap }): React.JSX.Element {
+function ClientDropdown({ widget, variables }: { widget: DropdownWidget; variables: VariableMap }): React.JSX.Element {
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   // DropdownWidget has no settleToInactive of its own (RockerSwitchWidget
   // only — see useSwitchPosition.ts) so this is never actually null; the `?? 0`
@@ -325,11 +325,11 @@ function DropdownView({ widget, variables }: { widget: DropdownWidget; variables
 // press()/release() double as the real server triggers (events.press/
 // events.release), not just the visual "Clicked" state they drove before —
 // see EventfulWidget/SequenceStep in shared/types.ts. Shared by
-// TriggerableViewWidget (plain buttons) and MorphView below — both need the
-// exact same press/release bookkeeping, but MorphView also needs its own
+// TriggerableClientWidget (plain buttons) and ClientMorphButton below — both need the
+// exact same press/release bookkeeping, but ClientMorphButton also needs its own
 // unconditionally-called useMorphSliderDrag, which is why morph got split
-// into its own top-level dispatch (mirroring AdjusterView/EncoderView)
-// instead of living inside TriggerableViewWidget as a conditional branch:
+// into its own top-level dispatch (mirroring ClientAdjuster/ClientEncoder)
+// instead of living inside TriggerableClientWidget as a conditional branch:
 // React's rules of hooks don't allow useMorphSliderDrag to be called from
 // inside an `if (widget.type === 'morph')` block in a component that's also
 // rendered for plain buttons.
@@ -433,11 +433,11 @@ function useTriggerableState(
 }
 
 // Today's plain-button interactive rendering — press/release + tap-to-
-// trigger. Typed StatefulWidget narrowed to ButtonWidget by ViewWidget's own
-// dispatch below (morph now goes through MorphView instead) — kept as
+// trigger. Typed StatefulWidget narrowed to ButtonWidget by ClientWidget's own
+// dispatch below (morph now goes through ClientMorphButton instead) — kept as
 // StatefulWidget rather than ButtonWidget only because getEffectiveStates
 // takes the shared type.
-function TriggerableViewWidget({
+function TriggerableClientWidget({
   widget,
   variables,
   error
@@ -506,14 +506,14 @@ function TriggerableViewWidget({
 // Owns both the shared press/release bookkeeping (see usePressRelease above
 // — a morph button fires the exact same press/release events a plain
 // button does) and useMorphSliderDrag, unconditionally, same as
-// AdjusterView/EncoderView own their own drag hook — safe to call
+// ClientAdjuster/ClientEncoder own their own drag hook — safe to call
 // unconditionally here because this component is only ever mounted for an
-// actual MorphButtonWidget (see ViewWidget's dispatch), never for a plain
+// actual MorphButtonWidget (see ClientWidget's dispatch), never for a plain
 // button. useMorphSliderDrag itself is cheap to run even when
 // isMorphSliderActive(widget) is false (its handlers just never get wired
 // to any DOM element, since MorphButtonWidgetContent only renders the
 // handle when active).
-function MorphView({ widget, variables, error }: { widget: MorphButtonWidget; variables: VariableMap; error?: string }): React.JSX.Element {
+function ClientMorphButton({ widget, variables, error }: { widget: MorphButtonWidget; variables: VariableMap; error?: string }): React.JSX.Element {
   const { press, release, state } = useTriggerableState(widget, variables)
   const { dragFraction, handlePointerDown, handlePointerMove, handlePointerUp } = useMorphSliderDrag(widget, variables)
   const sliderFraction = dragFraction ?? (widget.valueExpr ? (resolveNumericExpr(widget.valueExpr, variables) ?? 0) / 100 : 0)
@@ -540,14 +540,14 @@ function MorphView({ widget, variables, error }: { widget: MorphButtonWidget; va
   )
 }
 
-interface ViewWidgetProps {
+interface ClientWidgetProps {
   widget: Widget
   variables: VariableMap
   deckId: string | null
   error?: string
   // Not read by any widget content component — purely a memo-invalidation
   // signal (the store's `customFonts` array reference, see
-  // viewWidgetPropsEqual's own comment on why it's compared below). Threaded
+  // clientWidgetPropsEqual's own comment on why it's compared below). Threaded
   // through as a prop rather than read from the store here so this stays a
   // plain function with no store subscription of its own, same as every
   // other widget content component.
@@ -579,7 +579,7 @@ interface ViewWidgetProps {
 // here forces exactly the one corrective re-render every widget needs
 // whenever that list actually changes, without giving up fine-grained
 // memoization the rest of the time.
-function viewWidgetPropsEqual(prev: ViewWidgetProps, next: ViewWidgetProps): boolean {
+function clientWidgetPropsEqual(prev: ClientWidgetProps, next: ClientWidgetProps): boolean {
   if (prev.widget !== next.widget || prev.deckId !== next.deckId || prev.error !== next.error) return false
   if (prev.customFonts !== next.customFonts) return false
   if (prev.variables === next.variables) return true
@@ -593,10 +593,10 @@ function viewWidgetPropsEqual(prev: ViewWidgetProps, next: ViewWidgetProps): boo
 
 // Dispatches on widget.type before any type-specific hooks run — Gauge is
 // passive (no action, no pointer handling at all), and Adjuster/Encoder/Morph
-// each own their own drag hook (AdjusterView/EncoderView/MorphView above),
-// none of which fits TriggerableViewWidget's plain press/release +
+// each own their own drag hook (ClientAdjuster/ClientEncoder/ClientMorphButton above),
+// none of which fits TriggerableClientWidget's plain press/release +
 // getEffectiveStates model on their own.
-// memo'd (with a custom comparator, viewWidgetPropsEqual above, not the
+// memo'd (with a custom comparator, clientWidgetPropsEqual above, not the
 // default shallow-props one) because every widget on a screen otherwise
 // re-renders on every single dashboard:sync OR variables:sync, even one
 // caused by someone else dragging a single unrelated widget, or a single
@@ -604,35 +604,35 @@ function viewWidgetPropsEqual(prev: ViewWidgetProps, next: ViewWidgetProps): boo
 // reconcileDashboard's own comment in shared/subDecks.ts, which is what
 // makes the widget-identity half of this effective (`widget` keeps its old
 // reference across a sync whenever THIS widget's own content didn't
-// change); viewWidgetPropsEqual's per-widget variable-dependency scoping is
+// change); clientWidgetPropsEqual's per-widget variable-dependency scoping is
 // what makes the variables half of it effective too.
-const ViewWidget = memo(function ViewWidget({
+const ClientWidget = memo(function ClientWidget({
   widget,
   variables,
   deckId,
   error
-}: ViewWidgetProps): React.JSX.Element {
-  // customFonts itself isn't used here — see ViewWidgetProps' own comment,
-  // it's only present so viewWidgetPropsEqual can see it change.
+}: ClientWidgetProps): React.JSX.Element {
+  // customFonts itself isn't used here — see ClientWidgetProps' own comment,
+  // it's only present so clientWidgetPropsEqual can see it change.
   if (widget.type === 'gauge-bar') return <BarGaugeWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'gauge-arc') return <ArcGaugeWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'label') return <LabelWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'line') return <LineWidgetContent widget={widget} variables={variables} />
   if (widget.type === 'screen-capture') return <ScreenCaptureWidgetContent widget={widget} variables={variables} deckId={deckId} />
   if (widget.type === 'dcs-viewport') return <DcsViewportWidgetContent widget={widget} variables={variables} deckId={deckId} />
-  if (widget.type === 'adjuster-slider' || widget.type === 'adjuster-knob') return <AdjusterView widget={widget} variables={variables} />
-  if (widget.type === 'encoder') return <EncoderView widget={widget} variables={variables} />
-  if (widget.type === 'morph') return <MorphView widget={widget} variables={variables} error={error} />
-  if (widget.type === 'switch-rocker') return <RockerSwitchView widget={widget} variables={variables} />
-  if (widget.type === 'switch-dial') return <DialSwitchView widget={widget} variables={variables} />
-  if (widget.type === 'switch-toggle') return <ToggleSwitchView widget={widget} variables={variables} />
-  if (widget.type === 'dropdown') return <DropdownView widget={widget} variables={variables} />
-  return <TriggerableViewWidget widget={widget} variables={variables} error={error} />
-}, viewWidgetPropsEqual)
+  if (widget.type === 'adjuster-slider' || widget.type === 'adjuster-knob') return <ClientAdjuster widget={widget} variables={variables} />
+  if (widget.type === 'encoder') return <ClientEncoder widget={widget} variables={variables} />
+  if (widget.type === 'morph') return <ClientMorphButton widget={widget} variables={variables} error={error} />
+  if (widget.type === 'switch-rocker') return <ClientRockerSwitch widget={widget} variables={variables} />
+  if (widget.type === 'switch-dial') return <ClientDialSwitch widget={widget} variables={variables} />
+  if (widget.type === 'switch-toggle') return <ClientToggleSwitch widget={widget} variables={variables} />
+  if (widget.type === 'dropdown') return <ClientDropdown widget={widget} variables={variables} />
+  return <TriggerableClientWidget widget={widget} variables={variables} error={error} />
+}, clientWidgetPropsEqual)
 
 // Wraps one widget's visibility check + position box + content behind ONE
-// memo boundary (viewWidgetPropsEqual — the same per-widget variable-
-// dependency scoping ViewWidget itself uses, see its own comment). Previously
+// memo boundary (clientWidgetPropsEqual — the same per-widget variable-
+// dependency scoping ClientWidget itself uses, see its own comment). Previously
 // resolveWidgetVisible ran directly in ScreenWidgetsLayer's map body, OUTSIDE
 // any memo boundary — a visibleExpr (or any widget's, since this ran for
 // every widget regardless of visibility) means a fresh `new Function(...)`
@@ -645,18 +645,18 @@ const ViewWidget = memo(function ViewWidget({
 // traffic despite a small, infrequent message stream (buf staying at 0B
 // rules out the network/server side entirely — see StatusBar.tsx's own
 // device:lag-report tooltip for what buf actually measures).
-const ViewWidgetSlot = memo(function ViewWidgetSlot({ widget, variables, deckId, error, customFonts }: ViewWidgetProps): React.JSX.Element | null {
+const ClientWidgetSlot = memo(function ClientWidgetSlot({ widget, variables, deckId, error, customFonts }: ClientWidgetProps): React.JSX.Element | null {
   if (!resolveWidgetVisible(widget, variables)) return null
   const rendered = widget.type === 'morph' ? morphFootprint(widget) : widget
   return (
     <div
-      className={`view-canvas__widget${widget.type === 'morph' ? ' view-canvas__widget--morph' : ''}`}
+      className={`client-canvas__widget${widget.type === 'morph' ? ' client-canvas__widget--morph' : ''}`}
       style={{ left: rendered.x, top: rendered.y, width: rendered.w, height: rendered.h }}
     >
-      <ViewWidget widget={widget} variables={variables} deckId={deckId} error={error} customFonts={customFonts} />
+      <ClientWidget widget={widget} variables={variables} deckId={deckId} error={error} customFonts={customFonts} />
     </div>
   )
-}, viewWidgetPropsEqual)
+}, clientWidgetPropsEqual)
 
 // One deck view's worth of widgets, absolutely positioned within whatever
 // positioned box contains this — the fullscreen root canvas below, or an
@@ -678,13 +678,13 @@ export function ScreenWidgetsLayer({
   return (
     <>
       {widgets.map((widget) => (
-        <ViewWidgetSlot key={widget.id} widget={widget} variables={variables} deckId={deckId} error={errors[widget.id]} customFonts={customFonts} />
+        <ClientWidgetSlot key={widget.id} widget={widget} variables={variables} deckId={deckId} error={errors[widget.id]} customFonts={customFonts} />
       ))}
     </>
   )
 }
 
-export function ViewCanvas(): React.JSX.Element {
+export function ClientCanvas(): React.JSX.Element {
   // Selected separately from the whole `dashboard` (rather than one
   // `s.dashboard` selector destructured below) so this component doesn't
   // re-render on every variables:sync tick, which leaves widgets/subDecks
@@ -731,7 +731,7 @@ export function ViewCanvas(): React.JSX.Element {
   const backgroundFit = useDashboardStore((s) => s.dashboard.backgroundFit)
   const backgroundAnchor = useDashboardStore((s) => s.dashboard.backgroundAnchor)
   const errors = useDashboardStore((s) => s.errors)
-  // See ViewWidgetProps' own comment — purely a memo-invalidation signal
+  // See ClientWidgetProps' own comment — purely a memo-invalidation signal
   // threaded down to every widget, not read directly here.
   const customFonts = useDashboardStore((s) => s.customFonts)
   // The main canvas's own current scale-to-fit factor (see
@@ -783,7 +783,7 @@ export function ViewCanvas(): React.JSX.Element {
 
   return (
     <div
-      className="view-canvas"
+      className="client-canvas"
       style={{ backgroundColor: resolvedBackgroundColor }}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}

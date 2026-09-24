@@ -55,7 +55,7 @@ export function setSubDeckGridSize(dashboard: Dashboard, subDeckId: string | nul
 // Read/write-side pair for a view's own reference canvas size — same
 // "main deck vs. named sub-deck" split as getSubDeckGridSize/
 // setSubDeckGridSize above. Falls back to DEFAULT_CANVAS_WIDTH/HEIGHT, never
-// undefined, so ViewCanvas.tsx's letterboxing math can use the result
+// undefined, so ClientCanvas.tsx's letterboxing math can use the result
 // directly with no `??` of its own.
 export function getSubDeckCanvasSize(
   source: Pick<Dashboard, 'canvasWidth' | 'canvasHeight' | 'subDecks'>,
@@ -82,12 +82,12 @@ function widgetsEqual(a: Widget, b: Widget): boolean {
 // between syncs, rather than the brand-new object JSON.parse always hands
 // back — a drag tick only actually changes the widget(s) being dragged, but
 // naively taking the incoming array wholesale gives every OTHER widget on
-// the same screen a new reference too. That defeats ViewWidget/CanvasWidget's
-// own React.memo (see ViewCanvas.tsx), forcing every widget on screen to
+// the same screen a new reference too. That defeats ClientWidget/CanvasWidget's
+// own React.memo (see ClientCanvas.tsx), forcing every widget on screen to
 // re-render on every single tick of someone else's drag — the more widgets
 // on a screen, the worse. Falls back to the old array's own reference too
 // when literally nothing in it changed, so a caller's useMemo one level up
-// (e.g. ViewCanvas's `widgets`) can skip work as well.
+// (e.g. ClientCanvas's `widgets`) can skip work as well.
 function reconcileWidgetList(oldWidgets: Widget[], newWidgets: Widget[]): Widget[] {
   const oldById = new Map(oldWidgets.map((w) => [w.id, w]))
   let changed = oldWidgets.length !== newWidgets.length

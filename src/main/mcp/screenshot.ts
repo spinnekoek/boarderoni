@@ -15,7 +15,7 @@
 // than recomputing a scale/offset from the dashboard's own canvasWidth/
 // canvasHeight — an earlier version of this file assumed the editor's
 // canvas used the same fixed "contain" scale-to-fit LetterboxedCanvas.tsx
-// uses for the deployed view. It doesn't: the desktop editor's own
+// uses for the client. It doesn't: the desktop editor's own
 // Canvas.tsx has a free pan/zoom camera (see its own camera state in
 // settingsStore.ts) with no fixed relationship to canvasWidth/canvasHeight
 // at all. Querying the real widget/device-bounds element's own on-screen
@@ -141,7 +141,7 @@ async function captureRect(win: BrowserWindow, rect: ElementRect, maxWidth: numb
 }
 
 // [data-canvas-device-bounds] (Canvas.tsx) — the actual designed area
-// (matches the deployed view's own dimensions), not the whole pannable/
+// (matches the client's own dimensions), not the whole pannable/
 // zoomable canvas-viewport, which can show empty space around it depending
 // on the current camera position.
 export async function captureDashboardScreenshot(win: BrowserWindow): Promise<ImageResult> {

@@ -9,7 +9,7 @@ export function nextId(): string {
 const DEVICE_ID_KEY = 'boarderoni-device-id'
 
 // A stable identity for this browser/WebView, persisted in localStorage so a
-// view client reports the same id across reconnects and app relaunches
+// client reports the same id across reconnects and app relaunches
 // instead of minting a new one (and thus a new device entry) every time.
 export function getDeviceId(): string {
   const existing = localStorage.getItem(DEVICE_ID_KEY)
@@ -54,7 +54,7 @@ export function contentAuthParams(): string {
 const LAST_DECK_ID_KEY = 'boarderoni-last-deck-id'
 
 // Which deck this browser/WebView had open last — read once at launch (see
-// App.tsx) so both the desktop editor and the mobile view client skip
+// App.tsx) so both the desktop editor and the mobile client skip
 // straight back into it instead of always landing on the picker.
 export function getLastDeckId(): string | null {
   return localStorage.getItem(LAST_DECK_ID_KEY)

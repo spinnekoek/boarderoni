@@ -3,7 +3,7 @@ import { useDashboardStore } from './store'
 import { getLastDeckId } from './id'
 import { getEditorToken } from './electronBridge'
 import { Canvas } from './components/Canvas'
-import { ViewCanvas } from './components/ViewCanvas'
+import { ClientCanvas } from './components/ClientCanvas'
 import { Palette } from './components/Palette'
 import { PropertiesPanel } from './components/PropertiesPanel'
 import { Toolbar } from './components/Toolbar'
@@ -19,13 +19,13 @@ import { StatusBar } from './components/StatusBar'
 // token from its preload, so a plain browser tab (or the Android WebView)
 // at the same address always boots as a client. A stale ?mode=... in an old
 // bookmark is simply ignored.
-function readMode(): 'edit' | 'view' {
-  return getEditorToken() ? 'edit' : 'view'
+function readMode(): 'edit' | 'client' {
+  return getEditorToken() ? 'edit' : 'client'
 }
 
 // Passed by main/index.ts's createEditorWindow as a query param rather
 // than read from package.json directly —
-// the renderer bundle is also served as-is to Android view clients, which
+// the renderer bundle is also served as-is to Android clients, which
 // have no window title bar to show it in and no reason to know it.
 function readVersion(): string {
   const params = new URLSearchParams(window.location.search)
@@ -46,7 +46,7 @@ export function App(): React.JSX.Element {
   // instead of flashing the picker first. If the remembered id is stale
   // (deck since deleted), the server's 4004 close code falls back to the
   // picker anyway (see store.ts's close listener) and forgets it. Without a
-  // remembered deck, a view client still needs to clear approval before it
+  // remembered deck, a client still needs to clear approval before it
   // can even see the deck list — see connectLobby's comment; an edit client
   // never does (the desktop is always trusted) and just shows the picker's
   // own REST-fetched list instead. Deliberately mount-only: mode is stable
@@ -56,12 +56,12 @@ export function App(): React.JSX.Element {
     const lastDeckId = getLastDeckId()
     if (lastDeckId) {
       connect(mode, lastDeckId)
-    } else if (mode === 'view') {
+    } else if (mode === 'client') {
       connectLobby()
     }
   }, [])
 
-  // Editor-only (see readVersion above — a view client's WebView title bar
+  // Editor-only (see readVersion above — a client's WebView title bar
   // isn't visible anyway): reflects the loaded deck's own name in the OS
   // window title, in addition to the same name already shown in-app
   // (header, moved into Toolbar's "← Decks" button's neighborhood). Plain
@@ -73,14 +73,14 @@ export function App(): React.JSX.Element {
   }, [mode, deckId, dashboardName, version])
 
   // Applies whether or not a deck has been chosen yet — a pending/denied
-  // view device shouldn't see even the deck list, let alone a dashboard
-  // (see connectLobby/DeckPicker's view-mode branch, which is what this
+  // client shouldn't see even the deck list, let alone a dashboard
+  // (see connectLobby/DeckPicker's client mode branch, which is what this
   // otherwise sits in front of).
-  if (mode === 'view' && deviceDenied) {
-    return <div className="view-status-screen">This device was denied access. Ask someone with an approved device to let it in, then reopen the app.</div>
+  if (mode === 'client' && deviceDenied) {
+    return <div className="client-status-screen">This device was denied access. Ask someone with an approved device to let it in, then reopen the app.</div>
   }
-  if (mode === 'view' && devicePending) {
-    return <div className="view-status-screen">Waiting for approval on the desktop…</div>
+  if (mode === 'client' && devicePending) {
+    return <div className="client-status-screen">Waiting for approval on the desktop…</div>
   }
 
   // ConfirmModal is hoisted above the deckId branch below so it's reachable
@@ -95,13 +95,13 @@ export function App(): React.JSX.Element {
     )
   }
 
-  if (mode === 'view') {
+  if (mode === 'client') {
     // No chrome here on purpose: widget (x, y) must map 1:1 to page pixels
     // from the top-left corner, matching the device-bounds rectangle shown
     // in the editor. Any header/margin here would offset that mapping.
     return (
       <>
-        <ViewCanvas />
+        <ClientCanvas />
         <DeviceApprovalBanner />
       </>
     )

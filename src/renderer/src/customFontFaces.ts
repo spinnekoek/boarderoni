@@ -28,7 +28,7 @@ function styleElement(): HTMLStyleElement {
 // deleted font's stale @font-face can never linger. Called once per
 // fonts:list message (store.ts), which covers both the initial
 // sendInitialState push and any later upload/delete broadcast — every
-// connected client (editor and Android view alike) ends up with the same
+// connected client (editor and Android client alike) ends up with the same
 // rules, no matter which one triggered the change.
 export function syncCustomFontFaces(fonts: CustomFont[]): void {
   const css = fonts

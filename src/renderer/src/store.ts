@@ -43,7 +43,7 @@ import { useConfirmStore } from './confirmStore'
 import { pushRemoteDebugLog } from './debugConsoleStore'
 import { useHistoryStore } from './historyStore'
 
-// A slide-over sub-deck currently open on the view client — client-local,
+// A slide-over sub-deck currently open on the client — client-local,
 // never persisted/synced beyond the single subdeck:open-overlay message
 // that set it (see OpenOverlayAction's own comment in shared/types.ts).
 export interface ActiveOverlay {
@@ -53,8 +53,8 @@ export interface ActiveOverlay {
   sizeUnit: OverlaySizeUnit
 }
 
-// A widget action-sequence failure surfaced prominently on the deployed view
-// client (see ToastStack.tsx) — distinct from `errors` (below), which is
+// A widget action-sequence failure surfaced prominently on the client
+// (see ToastStack.tsx) — distinct from `errors` (below), which is
 // keyed only by widgetId and drives a small inline indicator on the widget
 // itself. `id` is client-generated and independent of `widgetId`, since one
 // widget can stack multiple toasts over time.
@@ -77,7 +77,7 @@ export type DcsBiosFieldCatalogState = 'loading' | { error: string } | DcsBiosFi
 // PropertiesPanel.tsx's SendDcsCommandActionEditor).
 export type DcsBiosCommandCatalogState = 'loading' | { error: string } | DcsBiosCommandCatalogEntry[]
 
-type Mode = 'edit' | 'view'
+type Mode = 'edit' | 'client'
 
 interface DashboardStore {
   // Null until a deck is chosen in the picker — the single source of truth
@@ -87,15 +87,15 @@ interface DashboardStore {
   // Edit mode only — which deck view the toolbar/canvas/properties panel is
   // currently designing. null = the deck's own main view; otherwise a
   // Dashboard.subDecks id. Distinct from activeSubDeckId/activeOverlay
-  // below, which are view-mode runtime state driven by server pushes, not
+  // below, which are client mode runtime state driven by server pushes, not
   // a toolbar choice.
   editingSubDeckId: string | null
-  // View mode only — which deck view is fullscreen right now, driven
+  // Client mode only — which deck view is fullscreen right now, driven
   // exclusively by incoming subdeck:navigate messages (see NavigateSubDeckAction's
   // own comment in shared/types.ts for why this is per-client, never set
   // locally in response to a click).
   activeSubDeckId: string | null
-  // View mode only — the currently-open slide-over panel, if any. Only one
+  // Client mode only — the currently-open slide-over panel, if any. Only one
   // at a time; a new subdeck:open-overlay message replaces whatever was
   // open. Cleared locally by closeOverlay() (tap-outside-to-dismiss, no
   // server round trip) as well as by an incoming subdeck:navigate/
@@ -120,18 +120,18 @@ interface DashboardStore {
   // properties panel tab) — reset to 0 (Default) on every selection change.
   activeStateIndex: number
   devices: DeviceInfo[]
-  // View mode only: true between sendHello and either a dashboard:sync
-  // (approved) or device:denied (denied) — see ViewCanvas's waiting screen.
+  // Client mode only: true between sendHello and either a dashboard:sync
+  // (approved) or device:denied (denied) — see ClientCanvas's waiting screen.
   devicePending: boolean
-  // View mode only: the desktop explicitly denied this device. Sticky —
+  // Client mode only: the desktop explicitly denied this device. Sticky —
   // unlike a normal disconnect, the socket close handler won't auto-retry
   // (see DECK_CLOSE_CODE_DENIED), so this stays true until the app restarts.
   deviceDenied: boolean
   // Devices whose first hello arrived unapproved, queued for any trusted
-  // client (edit or an already-approved view device) to approve/deny — see
-  // DeviceApprovalBanner.tsx, mounted in both edit and view mode.
+  // client (edit or an already-approved client) to approve/deny — see
+  // DeviceApprovalBanner.tsx, mounted in both edit and client mode.
   pendingApprovals: DeviceInfo[]
-  // View mode, no deck chosen yet: the lobby connection's deck list (see
+  // Client mode, no deck chosen yet: the lobby connection's deck list (see
   // connectLobby) — null until it arrives, distinct from an empty array
   // (no decks exist yet). Edit mode's DeckPicker still fetches its own copy
   // over REST instead, since it's always trusted regardless of this.
@@ -191,7 +191,7 @@ interface DashboardStore {
   customSounds: CustomSound[]
   // App-wide, user-saved widget-variant presets (see CustomVariant's own
   // comment in shared/types.ts) — empty until first synced. Editor-only
-  // (never sent to a 'view' client, unlike customFonts above — see
+  // (never sent to a client, unlike customFonts above — see
   // custom-variants:get's own comment), so it arrives unasked as part of
   // sendInitialState the same way, just gated server-side instead of here.
   customVariants: CustomVariant[]
@@ -263,7 +263,7 @@ interface DashboardStore {
   // dataUrl comes from a plain <input type="file"> + FileReader.readAsDataURL
   // (see FontsModal.tsx), same client-reads-the-file-itself shape as
   // uploadBackgroundImage below — necessary here for the same reason: an
-  // Android view client (no filesystem-picker main process to hand this to)
+  // Android client (no filesystem-picker main process to hand this to)
   // could eventually get a font-upload UI of its own without touching this
   // path at all.
   uploadCustomFont: (dataUrl: string, label: string, filename: string) => void
@@ -272,15 +272,15 @@ interface DashboardStore {
   // comment in shared/fonts.ts.
   updateCustomFontLineHeight: (fontId: string, lineHeight: number | null) => void
   connect: (mode: Mode, deckId: string) => void
-  // View mode, no deck chosen yet — establishes approval (and the deck
+  // Client mode, no deck chosen yet — establishes approval (and the deck
   // list, once approved) before any specific deck is even in the picture.
   // Separate from connect() rather than connect(mode, ''): deckId staying
   // null here is what keeps App.tsx showing the picker instead of
-  // ViewCanvas, and connect()'s reconnect/close handling is all built
+  // ClientCanvas, and connect()'s reconnect/close handling is all built
   // around dashboard-bearing state a lobby connection never has.
   connectLobby: () => void
   // Tears down the current connection and returns to the deck picker (the
-  // "← Decks" button in edit mode, "Change deck" in the view-mode device
+  // "← Decks" button in edit mode, "Change deck" in the client mode device
   // settings modal).
   disconnect: () => void
   requestApprovedDevices: () => void
@@ -315,8 +315,8 @@ interface DashboardStore {
   // state to keep in sync by hand.
   setGridSize: (value: number) => void
   // Same per-screen patching as setGridSize above, but for the reference
-  // canvas size used by the deployed view's letterboxing (see
-  // ViewCanvas.tsx and SubDeck.canvasWidth's own comment in shared/types.ts).
+  // canvas size used by the client's letterboxing (see
+  // ClientCanvas.tsx and SubDeck.canvasWidth's own comment in shared/types.ts).
   // Read the current value via useCanvasSize() below, same reasoning as
   // useGridSize().
   setCanvasSize: (width: number, height: number) => void
@@ -352,7 +352,7 @@ interface DashboardStore {
   // (debounced server-side save instead of a synchronous one); omit/true for
   // a press/release event or the drag's final commit on pointer-up.
   triggerWidget: (id: string, event: WidgetEventKind, value?: number, final?: boolean) => void
-  // View mode's tap-outside-the-scrim dismiss — pure client-local state
+  // Client mode's tap-outside-the-scrim dismiss — pure client-local state
   // change, distinct from the server-round-tripped CloseOverlayAction (see
   // its own comment in shared/types.ts) triggered by an in-panel widget.
   closeOverlay: () => void
@@ -463,7 +463,7 @@ function isTextInputElement(el: Element | null): boolean {
 }
 
 function sendHello(mode: Mode): void {
-  if (mode === 'view') {
+  if (mode === 'client') {
     send({
       type: 'hello',
       role: mode,
@@ -796,7 +796,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // next launch would just try to restore this same dead id again.
         clearLastDeckId()
         set(pickerResetState())
-        // A view client's picker reads the deck list from the lobby
+        // A client's picker reads the deck list from the lobby
         // connection (see connectLobby/DeckPicker), which App.tsx's mount
         // effect only opens when there's NO remembered deck to connect to
         // instead. Falling back here means that never happened this
@@ -805,12 +805,12 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // would take the connectLobby branch and actually fetch it). Edit
         // mode's picker doesn't need this: it fetches its own list over
         // REST on mount instead.
-        if (mode === 'view') get().connectLobby()
+        if (mode === 'client') get().connectLobby()
         return
       }
       if (event.code === DECK_CLOSE_CODE_DENIED) {
         // Unlike DECK_CLOSE_CODE_UNKNOWN, deliberately not pickerResetState —
-        // there's no dead deck id to forget here and, in view mode, no
+        // there's no dead deck id to forget here and, in client mode, no
         // picker to fall back to; App.tsx shows a denied screen instead
         // while deviceDenied stays true.
         set({ connected: false, devicePending: false, deviceDenied: true })
@@ -830,7 +830,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // reconcileDashboard (not the raw message.dashboard) preserves
         // widget object identity across syncs wherever content didn't
         // change — see its own comment in shared/subDecks.ts for why that
-        // matters: it's what lets ViewWidget/CanvasWidget's React.memo
+        // matters: it's what lets ClientWidget/CanvasWidget's React.memo
         // actually skip re-rendering widgets a drag tick didn't touch.
         set({ dashboard: reconcileDashboard(get().dashboard, message.dashboard), devicePending: false })
         reportLagFromServerTime(message.generatedAt)
@@ -991,7 +991,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
         // every client (editor and Android view) needs its @font-face rules
         // AND its resolveFont-visible lineHeight overrides current the
         // moment this arrives, not just whichever component happens to be
-        // mounted and reading customFonts right now (e.g. a ViewCanvas label
+        // mounted and reading customFonts right now (e.g. a ClientCanvas label
         // using a font the Settings modal, where uploads happen, isn't even
         // open to react to).
         syncCustomFontFaces(message.fonts)
@@ -1026,7 +1026,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       }
     })
 
-    if (mode === 'view') {
+    if (mode === 'client') {
       // Android shrinks window.innerHeight when the on-screen keyboard opens
       // (e.g. focusing the device settings modal's name field), which would
       // otherwise get reported as the device's real viewport and shrink its
@@ -1060,7 +1060,7 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
       ws.send(
         JSON.stringify({
           type: 'hello',
-          role: 'view',
+          role: 'client',
           viewport: { width: window.innerWidth, height: window.innerHeight },
           userAgent: navigator.userAgent,
           deviceId: getDeviceId(),
@@ -1118,13 +1118,13 @@ export const useDashboardStore = create<DashboardStore>((set, get) => ({
     set(pickerResetState())
     useHistoryStore.getState().clear()
     // Same reasoning as the DECK_CLOSE_CODE_UNKNOWN close handler above: a
-    // view client's picker only gets its deck list from the lobby
+    // client's picker only gets its deck list from the lobby
     // connection, which App.tsx's mount effect skips whenever a remembered
     // deck id sends it straight into connect() instead. Without this, an
     // explicit "Change deck" after that kind of launch leaves the picker on
     // "Loading decks…" forever, since no lobby connection ever existed this
     // session to send decks:list.
-    if (get().mode === 'view') get().connectLobby()
+    if (get().mode === 'client') get().connectLobby()
   },
 
   updateWidgets: (widgets, options) => {
@@ -1374,7 +1374,7 @@ export function useGridSize(): number {
 }
 
 // The currently-editing screen's own reference canvas size — same pattern as
-// useGridSize() above, for the deployed view's letterboxing (see
+// useGridSize() above, for the client's letterboxing (see
 // getSubDeckCanvasSize in shared/subDecks.ts).
 export function useCanvasSize(): { width: number; height: number } {
   const canvasWidth = useDashboardStore((s) => s.dashboard.canvasWidth)

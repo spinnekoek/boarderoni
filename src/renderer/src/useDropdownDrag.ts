@@ -29,8 +29,8 @@ function resolveIndex(widget: DropdownWidget, activeIndex: number, deltaX: numbe
   return index >= 0 && index < widget.positions.length ? index : null
 }
 
-// Press-hold-drag-release interaction for a DropdownWidget on the deployed
-// view client. Unlike Adjuster/Encoder's drag hooks (a continuous value) or
+// Press-hold-drag-release interaction for a DropdownWidget on the
+// client. Unlike Adjuster/Encoder's drag hooks (a continuous value) or
 // DialSwitchDrag (angular snapping around a fixed ring), this widget's
 // collapsed state IS the drag's anchor — positions only exist fanned out
 // while held (see DropdownWidgetContent). `onPress`/`onRelease` fire

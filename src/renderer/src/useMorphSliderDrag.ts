@@ -20,7 +20,7 @@ function fractionFromEvent(widget: MorphButtonWidget, e: React.PointerEvent, rec
 }
 
 // Drag-to-value interaction for a morph button's slider handle on the
-// deployed view client — structurally identical to useAdjusterDrag.ts
+// client — structurally identical to useAdjusterDrag.ts
 // (pointer capture, rAF-throttled in-flight triggerWidget ticks, a final
 // unthrottled move+release on pointer-up, and the same valueExpr
 // reconciliation dance), just with the path projection above standing in

@@ -53,8 +53,8 @@ function encoderTicks(tickSet: EncoderTickSet): React.ReactNode[] {
 }
 
 // Shared between the editor preview (CanvasWidget, interactive=false, no
-// pointer props, dragSpinDegrees always undefined) and the deployed view
-// client (ViewCanvas, interactive=true, pointer props wired to
+// pointer props, dragSpinDegrees always undefined) and the client
+// (ClientCanvas, interactive=true, pointer props wired to
 // useEncoderDrag's handlers). dragSpinDegrees — supplied by the drag hook
 // while dragging (and briefly after, until the server catches up, same
 // convention as AdjusterWidget's dragFraction) — overrides the resolved rest

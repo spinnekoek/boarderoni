@@ -30,7 +30,7 @@ interface ResizeState {
 }
 
 // memo'd (editorWidgetPropsEqual — see its own comment in shared/expr.ts)
-// for the same reason ViewCanvas.tsx's ViewWidget is: without this, every
+// for the same reason ClientCanvas.tsx's ClientWidget is: without this, every
 // widget on the editor canvas re-renders and re-evaluates its expressions
 // on every single variables:sync/delta tick, regardless of whether it
 // references the variable that actually changed.
@@ -74,7 +74,7 @@ export const CanvasWidget = memo(function CanvasWidget({
   // everywhere below rather than letting a stale/malformed deck blank the
   // whole app (see ErrorBoundary's own comment for what happens without this).
   // Not the sole preview target: falls back through getEffectiveStates (same
-  // activeStateExpr resolution ViewCanvas.tsx uses for the deployed view)
+  // activeStateExpr resolution ClientCanvas.tsx uses for the client)
   // rather than always states[0], so a live-switching state expression shows
   // its effect here too instead of only once deployed.
   const previewState =
@@ -115,7 +115,7 @@ export const CanvasWidget = memo(function CanvasWidget({
   // (see WidgetVisibility in shared/types.ts) — hiding it here would make
   // it unselectable/uneditable the moment it's toggled off. Dimming it
   // instead gives the same live feedback (and, since this evaluates the
-  // exact same expression the deployed view does, the same console.log
+  // exact same expression the client does, the same console.log
   // reaching the debug panel that every other expression field already
   // gets here).
   const visible = resolveWidgetVisible(widget, variables)

@@ -32,7 +32,7 @@ body:
       label: Where did this happen?
       options:
         - Desktop editor
-        - Mobile (Android) view client
+        - Mobile (Android) client
         - Both
     validations:
       required: true

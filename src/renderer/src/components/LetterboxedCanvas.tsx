@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 // and centers it there. Every widget's x/y/w/h, and the background image's
 // own background-size:cover crop, are only correct at the reference
 // resolution a screen was designed at (see SubDeck.canvasWidth/Height's own
-// comment in shared/types.ts) — a deployed viewport that doesn't happen to
+// comment in shared/types.ts) — a client's viewport that doesn't happen to
 // match that 1:1 needs the whole thing scaled together and letterboxed,
 // rather than the background and the (otherwise still-unscaled) widgets
 // drifting apart independently.
@@ -18,7 +18,7 @@ export function LetterboxedCanvas({
   canvasWidth: number
   canvasHeight: number
   // Fires whenever the computed scale changes — lets a caller (OverlayPanel,
-  // via ViewCanvas) match its own px-based sizing to the same scale-to-fit
+  // via ClientCanvas) match its own px-based sizing to the same scale-to-fit
   // factor this canvas uses, rather than an overlay's edge size being a raw
   // device-pixel measurement that looks a completely different proportion
   // of the screen on a phone than it did on the design resolution.

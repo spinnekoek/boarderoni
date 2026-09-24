@@ -67,7 +67,7 @@ import { toVariableMap, setExpressionConsoleSink, stringifyExpressionLogArgs } f
 // tryEvaluateExpression/evaluateMappingExpression come from the sandboxed
 // main-process-only version, NOT shared/expr.ts's own — see
 // sandboxedExpr.ts's own top comment for why this specific process needs
-// the hardened one. Every renderer-facing use of these two (ViewCanvas.tsx,
+// the hardened one. Every renderer-facing use of these two (ClientCanvas.tsx,
 // states.ts, switchPosition.ts, ...) still imports the plain shared version
 // directly — unaffected by this swap.
 import { tryEvaluateExpression, evaluateMappingExpression } from './sandboxedExpr'
@@ -1110,13 +1110,13 @@ export interface DeckRoom {
 const rooms = new Map<string, DeckRoom>()
 
 interface SocketContext {
-  // '' means the lobby — a view client with no deck chosen yet (see
+  // '' means the lobby — a client with no deck chosen yet (see
   // connectLobby in store.ts and the deckParam handling in
   // wss.on('connection')). Never collides with a real deck id: isValidDeckId
   // rejects the empty string, so no room is ever registered under it.
   deckId: string
   deviceId?: string
-  // The token this socket presented on its own 'hello' (view role only) —
+  // The token this socket presented on its own 'hello' (client role only) —
   // re-verified against the live approved-devices store on every
   // isTrustedSocket check (not cached as a boolean), same "always check
   // current state, never cache trust" posture isDeviceApproved's old
@@ -1138,7 +1138,7 @@ interface SocketContext {
   // get a device:approval-requested broadcast and which get gated on
   // approval before receiving dashboard/deck-list content — see
   // isTrustedSocket.
-  role?: 'edit' | 'view'
+  role?: 'edit' | 'client'
 }
 
 // 127.0.0.1/::1 direct, plus the IPv4-mapped-IPv6 form Node's net module
@@ -1205,13 +1205,13 @@ function isAllowedWsOrigin(req: IncomingMessage): boolean {
 // Gates the subresource routes an <img src>/@font-face url()/Audio actually
 // loads (background-image, fonts/:id, sounds/:id, screen-capture/frame|stream) —
 // unlike /api/decks*, these ARE meant to be reachable by a real approved
-// view device (that's the whole point: this is the dashboard content
+// client (that's the whole point: this is the dashboard content
 // itself), so a loopback-only gate would be wrong here. Two valid ways in,
 // mirroring the WS protocol's own two trust paths: the desktop editor's own
 // window (loopback plus EDITOR_TOKEN, same as role: 'edit' — loopback alone
 // would let any browser tab on this machine in) supplies an `editor` query
 // param, since it's not "a device" in the approval sense; a genuinely
-// remote view client supplies `device`/`token` query params instead. Query
+// remote client supplies `device`/`token` query params instead. Query
 // params, not a header — none of these are fetch()ed, they're all
 // browser-loaded subresources (img/@font-face/Audio) with no way to attach
 // one. id.ts's contentAuthParams builds all three for every URL builder
@@ -1856,7 +1856,7 @@ const httpServer = createServer((req, res) => {
     // deck-picker dropdown) is editor-only UI, which only ever runs inside
     // the desktop's own Electron window — so this is gated exactly like the
     // WS role: 'edit' hello, loopback plus EDITOR_TOKEN (see
-    // isEditorRequest). A deployed 'view' device gets its deck list over the
+    // isEditorRequest). A client gets its deck list over the
     // WS protocol instead (decks:list), gated by device approval like
     // everything else it sees. Several of this route's actions (export/
     // import in particular) pop native Save/Open dialogs on the desktop's
@@ -1944,12 +1944,12 @@ function sendInitialState(ws: WebSocket, room: DeckRoom): void {
   // from, so the very first sound of a session would be silently skipped.
   ws.send(JSON.stringify({ type: 'sounds:list', sounds: getCustomSounds() } satisfies ServerToClient))
   // Editor-only (see custom-variants:get's own comment in shared/types.ts) —
-  // a deployed view client has no palette to spawn a variant from, so skip
+  // a client has no palette to spawn a variant from, so skip
   // sending state it'll never use, unlike fonts:list just above.
   if (socketContext.get(ws)?.role === 'edit') {
     ws.send(JSON.stringify({ type: 'custom-variants:list', variants: getCustomVariants() } satisfies ServerToClient))
   }
-  // Also unasked — a deployed view client never opens Settings/Plugins (the
+  // Also unasked — a client never opens Settings/Plugins (the
   // only places that otherwise request this), but still needs
   // enabledPlugins to render a disabled-plugin's widget (e.g. Screen
   // Capture) as inert instead of trying to load a feed the server would
@@ -1958,7 +1958,7 @@ function sendInitialState(ws: WebSocket, room: DeckRoom): void {
   ws.send(JSON.stringify({ type: 'dcsbios:status', ...getDcsBiosStatus() } satisfies ServerToClient))
   const stats = getDcsBiosWorkerStats()
   if (stats) ws.send(JSON.stringify({ type: 'dcsbios:stats', ...stats } satisfies ServerToClient))
-  // Same reasoning as app-settings just above — a deployed view device (the
+  // Same reasoning as app-settings just above — a client (the
   // Android app) never opens the DCS Viewports settings panel, the only
   // other place that requests this, so without this it'd only ever learn
   // the status from a future onDcsViewportsStatusChange broadcast, which by
@@ -1968,10 +1968,10 @@ function sendInitialState(ws: WebSocket, room: DeckRoom): void {
 
 // A socket earns the right to approve/deny other devices (and receive
 // device:approval-requested in the first place) the same way it earns
-// dashboard content: being 'edit', or an already-approved 'view' device. Any
+// dashboard content: being 'edit', or an already-approved client. Any
 // trusted device can vouch for a new one, not just the desktop.
 function isTrustedSocket(ctx: SocketContext): boolean {
-  return ctx.role === 'edit' || (ctx.role === 'view' && verifyDeviceToken(ctx.deviceId, ctx.deviceToken))
+  return ctx.role === 'edit' || (ctx.role === 'client' && verifyDeviceToken(ctx.deviceId, ctx.deviceToken))
 }
 
 // Pushes the current deck list to every client sitting on the picker, so a
@@ -2114,7 +2114,7 @@ function broadcastToRoom(room: DeckRoom, message: ServerToClient, exclude?: WebS
 
 // Same as broadcastToRoom, but only to this room's edit-role sockets (the
 // desktop editor(s) currently on this deck) — used for dashboard:external-
-// change, which is purely an editor concept a deployed 'view' device has no
+// change, which is purely an editor concept a client has no
 // use for and shouldn't be bothered with.
 function broadcastToEditClients(room: DeckRoom, message: ServerToClient): void {
   const payload = JSON.stringify(message)
@@ -2643,7 +2643,7 @@ function broadcastRestWebhookTargets(): void {
 
 // Role-gated same as broadcastRestSources, not broadcastCustomFonts below —
 // see custom-variants:get's own comment in shared/types.ts for why a
-// deployed view client never needs this.
+// client never needs this.
 function broadcastCustomVariants(): void {
   const payload = JSON.stringify({ type: 'custom-variants:list', variants: getCustomVariants() } satisfies ServerToClient)
   for (const [sock, sctx] of socketContext) {
@@ -2651,7 +2651,7 @@ function broadcastCustomVariants(): void {
   }
 }
 
-// Unlike broadcastRestSources, not role-gated — 'view' clients render
+// Unlike broadcastRestSources, not role-gated — clients render
 // labels too, and one might already be showing a dashboard that uses a
 // custom font uploaded (or removed) mid-session, not just the desktop
 // editor that manages the library. See fonts:list's own comment in
@@ -2663,7 +2663,7 @@ function broadcastCustomFonts(): void {
   }
 }
 
-// Same not-role-gated reasoning as broadcastCustomFonts above: a 'view'
+// Same not-role-gated reasoning as broadcastCustomFonts above: a 'client'
 // client is one of the things that actually plays a sound, so it needs the
 // library too, not just the editor that manages it.
 function broadcastCustomSounds(): void {
@@ -3354,7 +3354,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
 
   // Deliberately nothing sent here — dashboard/devices/DCS-BIOS state only
   // goes out once 'hello' identifies the socket as 'edit' (always trusted)
-  // or an approved 'view' device (see the 'hello' case below and
+  // or an approved client (see the 'hello' case below and
   // sendInitialState). An unapproved device gets device:pending instead.
 
   ws.on('close', () => {
@@ -3406,7 +3406,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
 
     // Whitelist, not blacklist: 'hello' is always allowed (that's how a
     // socket earns trust in the first place), everything else needs
-    // isTrustedSocket — covers both an unapproved view device and a
+    // isTrustedSocket — covers both an unapproved client and a
     // hand-crafted client that skipped hello entirely (ctx.role still
     // undefined at that point).
     if (message.type !== 'hello' && !isTrustedSocket(ctx)) {
@@ -3468,9 +3468,9 @@ wss.on('connection', (ws: TrackedSocket, req) => {
             ctx.role = 'edit'
             if (activeRoom) sendInitialState(ws, activeRoom)
           }
-        } else if (message.role === 'view' && message.viewport && message.deviceId) {
+        } else if (message.role === 'client' && message.viewport && message.deviceId) {
           const isFirstHello = ctx.deviceId === undefined
-          ctx.role = 'view'
+          ctx.role = 'client'
           ctx.deviceId = message.deviceId
           // `?? ctx.deviceToken`, not a plain overwrite: a resize-triggered
           // re-hello can race a just-issued device:token (see the
@@ -3600,7 +3600,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
         ws.send(JSON.stringify({ type: 'time:sync-reply', clientSentAt: message.clientSentAt, serverTime: Date.now() } satisfies ServerToClient))
         break
       case 'device:lag-report': {
-        // ctx.deviceId is only ever set for a 'view' socket (see the 'hello'
+        // ctx.deviceId is only ever set for a 'client' socket (see the 'hello'
         // handler below) — an edit socket (the desktop itself) has nothing
         // to report here since it renders its own edits locally, with
         // nothing round-tripping through the network to lag behind.
@@ -3928,7 +3928,7 @@ wss.on('connection', (ws: TrackedSocket, req) => {
       }
       case 'fonts:get': {
         // Unlike rest-sources:get, not role-gated — see broadcastCustomFonts's
-        // own comment for why 'view' needs this list too.
+        // own comment for why 'client' needs this list too.
         ws.send(JSON.stringify({ type: 'fonts:list', fonts: getCustomFonts() } satisfies ServerToClient))
         break
       }
@@ -4515,7 +4515,7 @@ function createEditorWindow(): void {
   win.on('move', scheduleSaveWindowState)
   win.on('close', (event) => {
     saveWindowState(win)
-    // The server (and any connected deployed views) should keep running
+    // The server (and any connected clients) should keep running
     // unattended after the editor window closes — only an explicit Quit
     // (tray menu / before-quit) should actually end the process.
     if (isQuitting) return
@@ -4536,7 +4536,7 @@ function createEditorWindow(): void {
   if (devServerUrl) {
     // Our own server, not Vite's, even in dev — it proxies through to Vite
     // (see proxyRequestToDevServer), so the editor window sits on the same
-    // origin as the API exactly as a deployed view client does.
+    // origin as the API exactly as a client does.
     // No mode param: edit mode comes from the preload bridge's editor token
     // (see App.tsx's readMode), which a plain browser tab can't have.
     win.loadURL(`http://localhost:${SERVER_PORT}/?version=${encodeURIComponent(app.getVersion())}`)
@@ -4569,7 +4569,7 @@ function createTray(): void {
         click: () => {
           // Tray Quit is the only path that actually ends the process (see
           // window-all-closed's own comment) — confirm since it stops the
-          // server and disconnects every deployed view, which is easy to
+          // server and disconnects every client, which is easy to
           // trigger by accident from a tray right-click.
           const result = dialog.showMessageBoxSync({
             type: 'question',
@@ -4578,7 +4578,7 @@ function createTray(): void {
             cancelId: 1,
             title: 'Quit Boarderoni?',
             message: 'Quit Boarderoni?',
-            detail: 'This stops the server — any connected deployed views will disconnect.'
+            detail: 'This stops the server — any connected clients will disconnect.'
           })
           if (result !== 0) return
           isQuitting = true

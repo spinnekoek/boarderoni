@@ -12,10 +12,10 @@ function apiUrl(path: string): string {
   return `http://${host}:${SERVER_PORT}${path}`
 }
 
-export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Element {
+export function DeckPicker({ mode }: { mode: 'edit' | 'client' }): React.JSX.Element {
   const connect = useDashboardStore((s) => s.connect)
   // Populated by the lobby connection (see connectLobby in store.ts) — a
-  // view client no longer fetches this over REST at all, so even the deck
+  // client no longer fetches this over REST at all, so even the deck
   // list itself goes through the same approval gate as dashboard content.
   // Edit mode ignores it entirely; the desktop is always trusted, so it
   // keeps using its own REST fetch below same as before this existed.
@@ -48,12 +48,12 @@ export function DeckPicker({ mode }: { mode: 'edit' | 'view' }): React.JSX.Eleme
   const canManage = mode === 'edit'
   const decks = canManage ? restDecks : lobbyDecks
 
-  // Same 5-finger/Ctrl+I gesture ViewCanvas uses to reach device settings
-  // while a deck is loaded — view-mode only, mirroring where
+  // Same 5-finger/Ctrl+I gesture ClientCanvas uses to reach device settings
+  // while a deck is loaded — client mode only, mirroring where
   // DeviceSettingsModal was already reachable from before this. There's no
   // deck connection to disconnect from here, so DeviceSettingsModal hides
   // its "Change deck" button (hasDeck={false}) in this branch.
-  const settingsGesture = useSettingsGesture(mode === 'view')
+  const settingsGesture = useSettingsGesture(mode === 'client')
 
   function load(): void {
     setError(null)

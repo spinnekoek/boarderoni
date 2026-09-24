@@ -45,9 +45,9 @@ deck, and it opens straight into the editor.
 
 ### Device settings & the 5-finger gesture
 
-Every connected device — including the desktop's own **deployed view**
-(the live, full-screen, pressable rendering of a deck, as opposed to the
-editor you design it in), and any phone/tablet — has its own small
+Every **client** (the live, full-screen, pressable rendering of a deck, as
+opposed to the editor you design it in) — a browser on the desktop itself
+or any phone/tablet — has its own small
 settings panel: rename the device, toggle
 "prevent screen timeout" on Android, force a refresh, or change which deck
 it's showing.
@@ -370,12 +370,12 @@ and silently never fire, which is a miserable thing to debug.
   no account, no external server involved. The desktop app and any
   connected devices (phone, tablet, second PC) talk to each other directly
   over your LAN.
-- **What's the difference between the "editor" and the "deployed view"?** —
+- **What's the difference between the "editor" and the "client"?** —
   The editor is where you design a deck — drag/drop/resize widgets, edit
-  properties, and so on. The deployed view is the live, full-screen,
+  properties, and so on. The client is the live, full-screen,
   pressable rendering of that same deck, as opposed to the design surface.
   The desktop app itself can show either; any other connected device only
-  ever sees the deployed view.
+  ever sees the client.
 - **Why did starting a second Boarderoni window/instance fail?** — Only one
   instance can run at a time — a second one shows "Boarderoni is already
   running" and exits, since both would otherwise try to bind the same

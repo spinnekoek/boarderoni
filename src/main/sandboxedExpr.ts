@@ -5,8 +5,8 @@
 // shared/expr.ts's own version runs in THREE places: the main process, the
 // desktop editor's own renderer (a plain Chromium page — contextIsolation +
 // nodeIntegration:false, see createEditorWindow in index.ts, means it has
-// no Node globals to reach regardless of eval mechanism), and the deployed
-// Android/browser view client (a plain WebView/browser, same story). In
+// no Node globals to reach regardless of eval mechanism), and the
+// Android/browser client (a plain WebView/browser, same story). In
 // those latter two, `new Function(code)` is exactly as safe as any other
 // page's own inline script — there's nothing Node-shaped for it to reach.
 // The main process is different: it's a CommonJS module (see out/main/
@@ -16,7 +16,7 @@
 // 2026-09-18 security review — is reachable from inside it. That's the ONE
 // runtime this module exists to harden; main/index.ts and mcp/tools.ts
 // import from here instead of shared/expr.ts for exactly that reason. Every
-// renderer/Android-facing call site (ViewCanvas.tsx, states.ts,
+// renderer/Android-facing call site (ClientCanvas.tsx, states.ts,
 // switchPosition.ts, ...) keeps using the shared, unmodified version — it
 // was never the vulnerable one.
 //

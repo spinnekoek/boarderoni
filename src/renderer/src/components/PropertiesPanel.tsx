@@ -2715,7 +2715,7 @@ function SwitchPositionsEditor({
     <>
       <PropertiesSection title="Positions" badge={positions.length}>
         <p className="properties__hint">
-          Each position is directly selectable (tap a segment/detent on the deployed switch) and fires its own action — see "Actions"
+          Each position is directly selectable (tap a segment/detent on the switch on a client) and fires its own action — see "Actions"
           below. Which one LOOKS active is normally just whichever this device last tapped; set "Active position" below to derive it
           from a shared variable instead.
         </p>
@@ -3131,7 +3131,7 @@ export function PropertiesPanel(): React.JSX.Element {
 
         <label
           className="properties__field"
-          title="The reference resolution this screen's widgets are positioned against. Deployed clients (Chrome, tablet) scale/letterbox to this size rather than stretching to their own actual viewport — its own value per screen, same as grid size."
+          title="The reference resolution this screen's widgets are positioned against. Clients (browser, tablet) scale/letterbox to this size rather than stretching to their own actual viewport — its own value per screen, same as grid size."
         >
           <span>Canvas size</span>
           <div className="color-picker-button__row">

@@ -14,7 +14,7 @@ export function LineWidgetContent({
   // line — badly mismatched for something this oblong (see its own comment)
   // — so it passes false here and applies the identical angle up there
   // itself, rather than this component rotating AGAIN inside an
-  // already-rotated wrapper. The deployed view (ViewCanvas.tsx) has no such
+  // already-rotated wrapper. The client (ClientCanvas.tsx) has no such
   // box to keep in sync, so it leaves this at the default.
   applyRotation?: boolean
 }): React.JSX.Element {

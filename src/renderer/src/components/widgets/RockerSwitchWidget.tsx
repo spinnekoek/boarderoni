@@ -6,9 +6,9 @@ import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
 
 // Shared between the editor preview (CanvasWidget, interactive=false, no
-// onSelect) and the deployed view client (ViewCanvas, interactive=true,
-// onSelect wired to useSwitchPosition's select — see RockerSwitchView in
-// ViewCanvas.tsx). `activeIndex` is resolved by the caller (either from
+// onSelect) and the client (ClientCanvas, interactive=true,
+// onSelect wired to useSwitchPosition's select — see ClientRockerSwitch in
+// ClientCanvas.tsx). `activeIndex` is resolved by the caller (either from
 // widget.activePositionExpr or a client-local tap, see useSwitchPosition.ts)
 // — this component just renders whichever index it's given.
 export function RockerSwitchWidgetContent({

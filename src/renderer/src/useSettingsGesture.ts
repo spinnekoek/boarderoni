@@ -3,12 +3,12 @@ import { useEffect, useRef, useState } from 'react'
 const SETTINGS_GESTURE_FINGER_COUNT = 5
 
 // The 5-finger touch gesture (plus its Ctrl/Cmd+I desktop-browser keyboard
-// equivalent) that opens DeviceSettingsModal — shared by ViewCanvas (gesture
-// during normal deck viewing) and DeckPicker's view-mode branch (gesture
+// equivalent) that opens DeviceSettingsModal — shared by ClientCanvas (gesture
+// during normal deck viewing) and DeckPicker's client mode branch (gesture
 // from the deck list, before any deck is loaded).
 //
 // `enabled` (default true) gates the keyboard listener too, not just the
-// touch handlers — DeckPicker passes `mode === 'view'` so its edit-mode
+// touch handlers — DeckPicker passes `mode === 'client'` so its edit-mode
 // branch (the desktop editor's own deck list) doesn't grow a hidden Ctrl+I
 // shortcut that flips state nothing ever renders.
 export function useSettingsGesture(enabled = true): {

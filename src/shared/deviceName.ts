@@ -1,6 +1,6 @@
 import type { DeviceInfo } from './types'
 
-// Whatever the user set via the view client's device settings modal, else
+// Whatever the user set via the client's device settings modal, else
 // the userAgent-derived guess. Use this wherever a device is displayed.
 export function displayDeviceName(device: Pick<DeviceInfo, 'customName' | 'userAgent'>): string {
   return device.customName?.trim() || friendlyDeviceName(device.userAgent)

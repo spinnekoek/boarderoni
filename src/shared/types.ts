@@ -371,7 +371,7 @@ export interface GlobalAction {
 // 'doublePress'/'triplePress' are ButtonWidget-only (see its own events
 // field) — a rapid double/triple tap fires ONE of press/doublePress/
 // triplePress, never more than one, decided client-side (see
-// useMultiPressArbiter in ViewCanvas.tsx) before the network trigger ever
+// useMultiPressArbiter in ClientCanvas.tsx) before the network trigger ever
 // goes out, not three separate 'press' events the server would have to
 // de-duplicate after the fact.
 export type WidgetEventKind =
@@ -545,7 +545,7 @@ export interface ColorAppearance {
 /**
  * A named, independently-styled visual variant of a widget. "Default" (the
  * first entry, always present) is the idle look; "Clicked" (conventionally
- * the second entry) is shown while the button is held on the view client.
+ * the second entry) is shown while the button is held on the client.
  * Anything past those two is inert for now — no runtime mechanism switches to
  * them yet, that's future state-machine work — but they're fully editable so
  * design work can get ahead of it.
@@ -563,7 +563,7 @@ export interface WidgetState extends BoxAppearance, ColorAppearance {
    */
   zIndex?: number
   /**
-   * Marks the one state that plays while the button is held on the view
+   * Marks the one state that plays while the button is held on a
    * client (see getEffectiveStates in shared/states.ts) — a structural flag,
    * not derived from `name`, so renaming some other state to "Clicked"
    * doesn't make it activate on tap. Set only on the state created by
@@ -585,7 +585,7 @@ export interface WidgetState extends BoxAppearance, ColorAppearance {
 }
 
 /**
- * Whether a widget renders at all on the deployed view (a phone, the
+ * Whether a widget renders at all on the client (a phone, the
  * desktop's own browser pointed at this server) — the editor itself always shows every
  * widget regardless, so it stays selectable/editable while hidden.
  * Undefined behaves as true (opt-in to hide, not opt-in to show), so an
@@ -624,7 +624,7 @@ export interface ButtonWidget extends WidgetVisibility {
    * (pointerdown) and release (pointerup/cancel/leave) always fire
    * immediately, zero added latency. doublePress/triplePress are optIN by
    * being non-empty: whenever EITHER has any steps, a tap is held back for a
-   * short window (see useMultiPressArbiter in ViewCanvas.tsx) to see if a
+   * short window (see useMultiPressArbiter in ClientCanvas.tsx) to see if a
    * second/third tap follows, and exactly one of press/doublePress/
    * triplePress fires once that's decided — never press AND doublePress for
    * the same physical double-tap. With both empty (the common case, and
@@ -642,7 +642,7 @@ export interface ButtonWidget extends WidgetVisibility {
   states: WidgetState[]
   /**
    * Optional JS expression (see shared/expr.ts) returning the exact `name`
-   * of the state that should be the "base" state on the view client — e.g.
+   * of the state that should be the "base" state on the client — e.g.
    * `return variables.BATTERY_SW === 0 ? 'Default' : 'Active';`. Only
    * meaningful when statesEnabled is on; falls back to states[0] if unset,
    * throws, or names a state that doesn't exist. Independent of isClicked —
@@ -756,7 +756,7 @@ export interface MorphButtonWidget extends WidgetVisibility {
 /**
  * Passive value display — a filled bar or arc showing valueExpr's result
  * against min/max. No action: nothing to trigger, so it's never clickable
- * on the view client.
+ * on the client.
  * One ring of evenly-spaced tick marks around an arc-style GaugeWidget's
  * sweep, each optionally labeled with its own auto-computed value — e.g. a
  * speedometer's major (numbered) and minor (unnumbered) ticks, each its own
@@ -1340,8 +1340,8 @@ export interface SwitchPosition extends ColorAppearance {
    * enforces at most one momentary position at a time on a 2-position
    * switch, so that "other one" is always unambiguous — a 3-position
    * switch's two ends stay independent of each other since they both spring
-   * back to the same middle regardless. See ToggleSwitchView in
-   * ViewCanvas.tsx and useToggleSwitchDrag.ts (both via
+   * back to the same middle regardless. See ClientToggleSwitch in
+   * ClientCanvas.tsx and useToggleSwitchDrag.ts (both via
    * momentarySpringBackIndex in ToggleSwitchWidget.tsx).
    */
   momentary?: boolean
@@ -1427,8 +1427,8 @@ export interface RockerSwitchWidget extends SwitchWidgetBase, WidgetVisibility {
    */
   rotateAngleExpr?: string
   /**
-   * Off (default): matches every other switch widget — the deployed view
-   * client defaults to position 0 active until something's actually tapped,
+   * Off (default): matches every other switch widget — the client
+   * defaults to position 0 active until something's actually tapped,
    * then keeps whichever position was last tapped highlighted (see
    * useSwitchPosition.ts). On: there's no default-active position at all
    * (nothing highlighted until a tap, or activePositionExpr resolves one),
@@ -1535,7 +1535,7 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase, WidgetVisibility {
    * command, an update-state) off pressing the cover itself, since
    * guardOpenExpr only ever reads a variable, never writes one back.
    * variables.$value (see TriggerValue) is 1 if this tap is opening the
-   * guard, 0 if closing it — see ToggleSwitchView in ViewCanvas.tsx.
+   * guard, 0 if closing it — see ClientToggleSwitch in ClientCanvas.tsx.
    */
   events: { press: SequenceStep[]; release: SequenceStep[]; positionChange: SequenceStep[]; guardToggle: SequenceStep[] }
   orientation?: 'horizontal' | 'vertical' // default 'vertical'
@@ -1708,12 +1708,12 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase, WidgetVisibility {
    * Optional flip-up safety cover, drawn on top of everything else in
    * ToggleSwitchWidget.tsx (bezel, lever, both label sets) — off (default/
    * unset) draws no guard at all, identical to every dashboard saved before
-   * this existed. Closed (the local per-client default — see ToggleSwitchView
-   * in ViewCanvas.tsx), it's an opaque colored box that catches the tap
+   * this existed. Closed (the local per-client default — see ClientToggleSwitch
+   * in ClientCanvas.tsx), it's an opaque colored box that catches the tap
    * itself instead of the switch beneath it; tapping it flips open, at which
    * point it's rendered pointer-events:none so taps fall straight through to
    * the switch's own zones underneath — same click-through technique
-   * MorphButtonWidget's own wrapper uses (see .view-canvas__widget--morph in
+   * MorphButtonWidget's own wrapper uses (see .client-canvas__widget--morph in
    * styles.css). guard's own borderColor/borderColorExpr/borderOpacity (it's
    * a ColorAppearance, same as track/fill above) cover its border color;
    * guardBorderWidth is the one border knob ColorAppearance doesn't carry.
@@ -2145,7 +2145,7 @@ export interface ScreenRegion {
 /**
  * A live view of a region of the desktop's own screen, streamed to every
  * connected client — passive, like GaugeWidget: nothing to trigger, so it's
- * never clickable on the view client. `region` is unset until "Pick
+ * never clickable on the client. `region` is unset until "Pick
  * region" (see ScreenCaptureWidget's own properties-panel section) has
  * been used at least once; the widget renders a placeholder until then.
  */
@@ -2636,7 +2636,7 @@ export interface SubDeck {
   id: string
   name: string
   widgets: Widget[]
-  // Editor-only (never read by the deployed view client — snapping/nudging
+  // Editor-only (never read by the client — snapping/nudging
   // is a design-time concern) and deliberately NOT inherited from the parent
   // Dashboard's own gridSize when a sub-deck is first created — each screen
   // is its own canvas, often at a different scale/widget density than the
@@ -2645,9 +2645,9 @@ export interface SubDeck {
   // DEFAULT_GRID_SIZE (shared/constants.ts), same as Dashboard.gridSize.
   gridSize?: number
   // The reference resolution this screen's widgets were positioned against —
-  // read by the deployed view client (see ViewCanvas.tsx), NOT the editor
+  // read by the client (see ClientCanvas.tsx), NOT the editor
   // (which uses its own live selectedDeviceId preview instead — see
-  // Canvas.tsx). Unlike gridSize, this DOES matter to the deployed client:
+  // Canvas.tsx). Unlike gridSize, this DOES matter to the client:
   // every widget's x/y/w/h is a literal, unscaled CSS pixel value, and the
   // background image's own background-size:cover crops to fill whatever
   // container it's actually shown in — so without a fixed reference size to
@@ -2712,14 +2712,14 @@ export interface Dashboard {
 }
 
 export interface DeviceInfo {
-  // Stable per-browser id the view client generates once and persists
+  // Stable per-browser id the client generates once and persists
   // locally (see id.ts's getDeviceId) — NOT tied to any one WebSocket
   // connection, so the same device is recognized across reconnects instead
   // of showing up as a brand new entry every time.
   id: string
   width: number
   height: number
-  // Raw navigator.userAgent from the view client — real device names aren't
+  // Raw navigator.userAgent from the client — real device names aren't
   // exposed to web content, so this is the only material to work with. See
   // friendlyDeviceName in shared/deviceName.ts for turning it into a label.
   userAgent?: string
@@ -2727,7 +2727,7 @@ export interface DeviceInfo {
   // removed) so a device picked in the editor's device dropdown stays picked
   // while it reconnects, instead of the selection silently jumping away.
   connected: boolean
-  // User-set name from the view client's device settings modal (5-finger
+  // User-set name from the client's device settings modal (5-finger
   // tap). Takes priority over the userAgent-derived friendly name wherever a
   // device is displayed — see displayDeviceName in shared/deviceName.ts.
   customName?: string
@@ -2769,14 +2769,14 @@ export interface ApprovedDeviceSummary {
 export type ClientToServer =
   | {
       type: 'hello'
-      role: 'edit' | 'view'
+      role: 'edit' | 'client'
       viewport?: { width: number; height: number }
       userAgent?: string
       deviceId?: string
       // The bearer credential minted by a prior device:approve (see
       // device:token below) and persisted client-side (id.ts's
       // getDeviceToken) — required, alongside deviceId, for the server to
-      // treat a 'view' hello as an already-approved device rather than a
+      // treat a 'client' hello as an already-approved device rather than a
       // brand-new one needing device:pending. Absent on a device's very
       // first-ever hello (nothing to send yet) or an old approval that
       // predates this field existing, both of which fall through to the
@@ -2798,7 +2798,7 @@ export type ClientToServer =
   | { type: 'dashboard:update'; dashboard: Dashboard; final?: boolean }
   // event selects which of the widget's events[...] sequences to run (see
   // getEventSteps in shared/widgetEvents.ts) — required, not optional: this
-  // app's editor/view clients and server always ship from the same build,
+  // app's editor/clients and server always ship from the same build,
   // so there's no legacy-client wire compatibility to preserve here.
   // value is set only while an AdjusterWidget is being dragged — the live
   // position, exposed as `variables.$value` when a sequence step is
@@ -2816,7 +2816,7 @@ export type ClientToServer =
   | { type: 'background-image:upload'; dataUrl: string }
   | { type: 'background-image:clear' }
   | { type: 'device:rename'; deviceId: string; name: string }
-  // Sent by any trusted client (edit, or an already-approved view device —
+  // Sent by any trusted client (edit, or an already-approved client —
   // see isTrustedSocket in main/index.ts), in response to a
   // device:approval-requested it received.
   | { type: 'device:approve'; deviceId: string }
@@ -2869,7 +2869,7 @@ export type ClientToServer =
   | { type: 'rest-webhook-targets:delete'; targetId: string }
   // App-wide, not per-deck (see main/customFonts.ts) — same "admin action,
   // edit-role only, full list broadcast back either way" shape as
-  // rest-sources:*, except the resulting fonts:list also goes to 'view'
+  // rest-sources:*, except the resulting fonts:list also goes to 'client'
   // clients (see broadcastCustomFonts in main/index.ts), since they render
   // labels that may use a custom font too, not just the desktop editor.
   | { type: 'fonts:get' }
@@ -2881,7 +2881,7 @@ export type ClientToServer =
   | { type: 'fonts:update'; fontId: string; lineHeight: number | null }
   // Exactly the fonts:* shape above, for the sound library (see
   // shared/sounds.ts) — app-wide, uploads/deletes edit-role only, and the
-  // resulting sounds:list goes to 'view' clients too, since a view client is
+  // resulting sounds:list goes to clients too, since a client is
   // one of the things that actually plays a sound.
   | { type: 'sounds:get' }
   | { type: 'sounds:upload'; dataUrl: string; label: string; filename: string }
@@ -2893,7 +2893,7 @@ export type ClientToServer =
   // App-wide, not per-deck (see CustomVariant's own comment) — same
   // edit-role-only, full-list-broadcast-back shape as fonts:*/rest-sources:*
   // above. Unlike fonts:list, custom-variants:list is editor-only (never
-  // pushed to a 'view' client — a deployed view has no palette to use a
+  // pushed to a client — a client has no palette to use a
   // variant from), so there's no equivalent of fonts:list's own
   // both-roles reasoning here.
   | { type: 'custom-variants:get' }
@@ -2941,7 +2941,7 @@ export type ClientToServer =
   // the network for it to lag behind). See DeviceInfo.lagMs.
   | { type: 'device:lag-report'; lagMs: number }
   // Clock-offset probe (see store.ts's syncClock) — dashboard:sync's
-  // generatedAt is stamped from the SERVER's own clock, but a view device's
+  // generatedAt is stamped from the SERVER's own clock, but a client's
   // clock (an Android tablet in particular — often no NTP sync, especially
   // offline/kiosk setups) can be off by anywhere from seconds to minutes.
   // Comparing generatedAt against the client's raw Date.now() with no
@@ -2955,7 +2955,7 @@ export type ServerToClient =
   // (see dashboardSyncMessage in main/index.ts, the single place that
   // constructs this) — the client compares it against its own Date.now() at
   // receipt to measure end-to-end lag (see DeviceInfo.lagMs/device:lag-report
-  // above). Assumes desktop and view-device clocks are reasonably close,
+  // above). Assumes desktop and client clocks are reasonably close,
   // which holds for a LAN setup without needing a separate clock-sync
   // handshake — good enough to answer "is this client falling behind and by
   // how much," not meant as a precise offset.
@@ -2994,12 +2994,12 @@ export type ServerToClient =
   // (see runUpdateState et al in main/index.ts), never the editor's own
   // renderer, so without this the desktop editor's debug panel could never
   // see it. Only ever sent to edit-role sockets (see broadcastToEditClients)
-  // — a deployed 'view' device has no debug panel to show it in. `message`
+  // — a client has no debug panel to show it in. `message`
   // is already formatted (see stringifyExpressionLogArgs) since raw args
   // wouldn't survive this JSON round-trip unchanged (e.g. an Error).
   | { type: 'action:log'; message: string }
   | { type: 'devices:sync'; devices: DeviceInfo[] }
-  // Sent to a 'view' client instead of dashboard:sync when its deviceId
+  // Sent to a client instead of dashboard:sync when its deviceId
   // hasn't been approved yet — the client shows a waiting screen and gets no
   // dashboard content until either this resolves into a dashboard:sync (approved)
   // or a device:denied arrives and the connection closes (see main/index.ts).
@@ -3016,14 +3016,14 @@ export type ServerToClient =
   // of a self-reported id. Never sent for role: 'edit'.
   | { type: 'device:token'; deviceId: string; token: string }
   // Sent to every currently-trusted client (edit, or an already-approved
-  // view device — any of them can approve/deny, not just the desktop) when
+  // client — any of them can approve/deny, not just the desktop) when
   // a not-yet-approved device's first hello arrives.
   | { type: 'device:approval-requested'; device: DeviceInfo }
   // Reply to device:list-approved / device:revoke — the full current list
   // either way, so the settings modal doesn't need to locally patch its
   // copy after a revoke.
   | { type: 'device:approved-list'; devices: ApprovedDeviceSummary[] }
-  // Pushed to a 'view' client with no deck chosen yet, once its hello
+  // Pushed to a client with no deck chosen yet, once its hello
   // resolves as approved (immediately if already-approved, or the moment a
   // pending one gets approved) — what the picker screen renders instead of
   // dashboard content, which doesn't apply pre-deck-selection. Server push,
