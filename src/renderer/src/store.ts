@@ -374,6 +374,15 @@ interface DashboardStore {
   denyDevice: (deviceId: string) => void
 }
 
+// Dev only: a hot update re-runs this module with fresh `socket`/
+// `lobbySocket` variables, so the app connects again while the previous
+// instance's sockets stay open with their own listeners — every message
+// then gets handled twice (e.g. a server-target sound plays doubled). A full
+// reload closes everything and reconnects once instead.
+if (import.meta.hot) {
+  import.meta.hot.accept(() => window.location.reload())
+}
+
 let socket: WebSocket | null = null
 // Set by disconnect() just before closing, so the close listener below knows
 // this was a deliberate "back to picker" close rather than a network drop —
