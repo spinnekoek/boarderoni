@@ -125,13 +125,6 @@ export function fontFormatHint(filename: string): string | undefined {
 export const FONT_OPTIONS: FontOption[] = [
 	{ id: "aldrich", label: "Aldrich", cssFamily: "Aldrich" },
 	{ id: "audiowide", label: "Audiowide", cssFamily: "Audiowide" },
-	{ id: "hornetDisplayBold", label: "Hornet Display Bold", cssFamily: '"HornetDisplay-Bold"', monospace: true },
-	{
-		id: "hornetDisplayRegular",
-		label: "Hornet Display Regular",
-		cssFamily: '"HornetDisplay-Regular"',
-		monospace: true,
-	},
 	{ id: "inter", label: "Inter", cssFamily: "Inter" },
 	{ id: "jetbrainsMono", label: "JetBrains Mono", cssFamily: '"JetBrains Mono"', monospace: true },
 	// Free/OFL-licensed stand-ins for the (proprietary, unlicensed-for-bundling)
