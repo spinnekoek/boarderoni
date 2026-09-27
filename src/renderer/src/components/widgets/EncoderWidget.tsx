@@ -1,5 +1,5 @@
 import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
-import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
+import { resolveBorderColor, resolveColor, resolveExprColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { EncoderTickSet, EncoderWidget } from '@shared/types'
 import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
@@ -92,7 +92,10 @@ export function EncoderWidgetContent({
   // Passed to SquareIndicatorOverlay below — see its own doc comment (in
   // DialShapeGraphic.tsx) for why a 'square' indicator renders as an HTML
   // div instead of joining DialShapeGraphic's own SVG output.
-  const shapeColor = (widget.dialShape ?? 'needle') === 'square' ? (widget.squareColor ?? fillColor) : (widget.circleColor ?? fillColor)
+  const shapeColor =
+    (widget.dialShape ?? 'needle') === 'square'
+      ? (resolveExprColor(widget.squareColor ?? fillColor, widget.squareColorExpr, variables).color ?? fillColor)
+      : (resolveExprColor(widget.circleColor ?? fillColor, widget.circleColorExpr, variables).color ?? fillColor)
 
   return (
     <div
@@ -120,9 +123,10 @@ export function EncoderWidgetContent({
           needleHalfWidth={3}
           needleTipLength={12}
           needleCenterRadius={5}
+          variables={variables}
         />
       </svg>
-      <SquareIndicatorOverlay style={widget} angle={spin} shapeColor={shapeColor} w={widget.w} h={widget.h} />
+      <SquareIndicatorOverlay style={widget} angle={spin} shapeColor={shapeColor} w={widget.w} h={widget.h} variables={variables} />
       {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
     </div>
   )

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { useDashboardStore } from './store'
 import { nextId } from './id'
-import type { Widget } from '@shared/types'
+import type { SubDeck, Widget } from '@shared/types'
 
 // Pixel offset applied per paste (compounding with paste count), so pasting
 // the same clipboard repeatedly fans copies out instead of stacking them
@@ -12,8 +12,22 @@ const PASTE_OFFSET = 24
 // every nested id (labels/positions/states) the same way a pasted widget
 // needs to is exactly what dropping a saved CustomVariant back onto the
 // canvas needs too, so it reuses this rather than duplicating the per-type
-// switch below.
-export function cloneWidget(widget: Widget, offset: number): Widget {
+// switch below. `findSourceSubDeck` resolves a window widget's own nested
+// SubDeck (see the 'window' case below) — defaults to looking it up in the
+// CURRENTLY OPEN dashboard, which is correct for same-deck use (a normal
+// paste, or a custom variant spawned in the deck it was saved from) but
+// would silently find nothing — and clone an empty window — if the widget
+// came from a DIFFERENT deck than the one open right now (its subDeckId
+// only ever existed in the original deck's own subDecks array). The
+// clipboard store below passes its own snapshot instead, taken at copy()
+// time rather than looked up live at paste() time, specifically so a
+// copy-in-deck-A-paste-into-deck-B round trip (switching decks in between)
+// still carries the window's real content instead of losing it.
+export function cloneWidget(
+  widget: Widget,
+  offset: number,
+  findSourceSubDeck: (subDeckId: string) => SubDeck | undefined = (id) => useDashboardStore.getState().dashboard.subDecks?.find((sd) => sd.id === id)
+): Widget {
   if (
     widget.type === 'gauge-bar' ||
     widget.type === 'gauge-arc' ||
@@ -69,6 +83,45 @@ export function cloneWidget(widget: Widget, offset: number): Widget {
     }
   }
 
+  // A window's own nested content is a real Dashboard.subDecks entry (see
+  // WindowWidget.subDeckId's own comment in shared/types.ts), not embedded
+  // on the widget itself — so cloning one has to mint and register an
+  // entirely new SubDeck too (deep-cloning its own widgets, recursively
+  // through this same function so THEIR nested labels/positions/states get
+  // fresh ids as well), or two "copies" of a window would silently share
+  // one subDeckId: editing either one's contents would edit both. The only
+  // place in this file that reaches into the dashboard store directly
+  // (every other branch above is a pure id-remap) — acceptable since this
+  // is already called from paste(), which touches the store right
+  // afterward anyway via pasteWidgets.
+  if (widget.type === 'window') {
+    // The SOURCE lookup goes through findSourceSubDeck (which may be a
+    // cross-deck snapshot — see its own comment above) — but the freshly
+    // minted subDeck is always registered into whichever dashboard is
+    // CURRENTLY OPEN (the paste/variant-drop destination), via the live
+    // store, regardless of where the source widget came from.
+    const sourceSubDeck = findSourceSubDeck(widget.subDeckId)
+    // Nested widgets keep their own relative position within the window's
+    // own content coordinate space — 0 offset, not the paste/duplicate
+    // offset the window widget itself gets below. No window can nest
+    // inside another window's content (see the one-level-deep comment on
+    // WindowWidget in shared/types.ts), so these never need their own
+    // findSourceSubDeck — the default (unreachable for this recursive call)
+    // is fine to leave implicit.
+    const clonedWidgets = (sourceSubDeck?.widgets ?? []).map((w) => cloneWidget(w, 0))
+    const newSubDeck: SubDeck = {
+      id: nextId(),
+      name: sourceSubDeck?.name ?? 'Window',
+      widgets: clonedWidgets,
+      gridSize: sourceSubDeck?.gridSize,
+      canvasWidth: sourceSubDeck?.canvasWidth,
+      canvasHeight: sourceSubDeck?.canvasHeight
+    }
+    const dashboard = useDashboardStore.getState().dashboard
+    useDashboardStore.getState().updateDashboardMeta({ subDecks: [...(dashboard.subDecks ?? []), newSubDeck] })
+    return { ...widget, id: nextId(), x: widget.x + offset, y: widget.y + offset, groupId: undefined, subDeckId: newSubDeck.id }
+  }
+
   // Tracks old state id -> new state id so a morph widget's blocks (below)
   // can rekey their perState overrides onto the states they actually get
   // cloned alongside, instead of pointing at ids that no longer exist.
@@ -102,6 +155,15 @@ export function cloneWidget(widget: Widget, offset: number): Widget {
 
 interface ClipboardStore {
   widgets: Widget[]
+  // Snapshot of every copied window widget's own nested SubDeck, taken at
+  // copy() time rather than looked up live at paste() time — see
+  // cloneWidget's own findSourceSubDeck comment above for why: this
+  // clipboard is a plain in-memory store that survives switching to a
+  // DIFFERENT open deck before pasting, but the live dashboard doesn't —
+  // its subDecks array is whatever deck is open right now, not the one the
+  // copy came from. Keyed by the ORIGINAL subDeckId (stable at copy time,
+  // before paste mints a new one).
+  subDecks: Record<string, SubDeck>
   pasteCount: number
   copy: (widgets: Widget[]) => void
   paste: () => void
@@ -112,16 +174,26 @@ interface ClipboardStore {
 // instead of each keeping their own copy of "what's copied."
 export const useClipboardStore = create<ClipboardStore>((set, get) => ({
   widgets: [],
+  subDecks: {},
   pasteCount: 0,
 
-  copy: (widgets) => set({ widgets, pasteCount: 0 }),
+  copy: (widgets) => {
+    const dashboard = useDashboardStore.getState().dashboard
+    const subDecks: Record<string, SubDeck> = {}
+    for (const w of widgets) {
+      if (w.type !== 'window') continue
+      const subDeck = dashboard.subDecks?.find((sd) => sd.id === w.subDeckId)
+      if (subDeck) subDecks[w.subDeckId] = subDeck
+    }
+    set({ widgets, subDecks, pasteCount: 0 })
+  },
 
   paste: () => {
-    const { widgets, pasteCount } = get()
+    const { widgets, subDecks, pasteCount } = get()
     if (widgets.length === 0) return
     const nextCount = pasteCount + 1
     const offset = PASTE_OFFSET * nextCount
     set({ pasteCount: nextCount })
-    useDashboardStore.getState().pasteWidgets(widgets.map((w) => cloneWidget(w, offset)))
+    useDashboardStore.getState().pasteWidgets(widgets.map((w) => cloneWidget(w, offset, (id) => subDecks[id])))
   }
 }))

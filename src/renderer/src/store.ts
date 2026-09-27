@@ -301,7 +301,20 @@ interface DashboardStore {
     fields: Partial<
       Pick<
         Dashboard,
-        'name' | 'backgroundColor' | 'backgroundColorExpr' | 'backgroundFit' | 'backgroundAnchor' | 'variables' | 'plugins' | 'globalActions'
+        | 'name'
+        | 'backgroundColor'
+        | 'backgroundColorExpr'
+        | 'backgroundFit'
+        | 'backgroundAnchor'
+        | 'variables'
+        | 'plugins'
+        | 'globalActions'
+        // A window widget's own nested sub-deck is minted directly into this
+        // flat array too (see WindowWidget.subDeckId in shared/types.ts) —
+        // Palette.tsx's handleAddWindow appends one here without navigating
+        // into it (unlike addSubDeck, which always does), so it needs a
+        // field this setter is allowed to touch.
+        | 'subDecks'
       >
     >
   ) => void
@@ -531,7 +544,14 @@ function widgetDisplayLabel(widget: Widget | undefined): string | undefined {
   if (widget.type === 'button' || widget.type === 'morph') return widget.states?.[0]?.labels?.[0]?.text
   if (widget.type === 'switch-rocker' || widget.type === 'switch-dial' || widget.type === 'switch-toggle' || widget.type === 'dropdown')
     return widget.positions?.[0]?.labels?.[0]?.text
-  if (widget.type === 'screen-capture') return undefined
+  // Window/Line have no labels concept of their own either (a window's
+  // nested content's own labels live inside a separate SubDeck, not on this
+  // widget) — same "no labels" treatment as screen-capture/dcs-viewport
+  // just above.
+  if (widget.type === 'screen-capture' || widget.type === 'dcs-viewport' || widget.type === 'window' || widget.type === 'line') return undefined
+  // A single label (not labels[]) — same "own field, not an array" shape as
+  // the button/morph case above, just one level shallower.
+  if (widget.type === 'label') return widget.label.text
   return widget.labels[0]?.text
 }
 

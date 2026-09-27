@@ -127,11 +127,15 @@ const DIAL_SHAPE_KEYS = [
   'squareBorderWidth',
   'squareBorderRadius',
   'squareColor',
+  'squareColorExpr',
   'squareBorderColor',
+  'squareBorderColorExpr',
   'circleSize',
   'circleBorderWidth',
   'circleColor',
+  'circleColorExpr',
   'circleBorderColor',
+  'circleBorderColorExpr',
   'circleIndentCount',
   'circleIndentSize',
   'circleIndentColor',
@@ -141,6 +145,7 @@ const DIAL_SHAPE_KEYS = [
   'indicatorShape',
   'indicatorStyle',
   'indicatorColor',
+  'indicatorColorExpr',
   'indicatorDistance',
   'indicatorSquareBorder'
 ] as const
@@ -165,14 +170,14 @@ function extractButtonStyle(widget: { states: WidgetState[] }) {
 
 function extractBarGaugeStyle(widget: Extract<Widget, { type: 'gauge-bar' }>) {
   return {
-    ...pick(widget, ['orientation', 'fill', 'track', ...BOX_BORDER_KEYS] as const),
+    ...pick(widget, ['orientation', 'fill', 'track', 'backgroundColor', 'backgroundColorExpr', 'backgroundOpacity', ...BOX_BORDER_KEYS] as const),
     labels: styleLabels(widget.labels)
   }
 }
 
 function extractArcGaugeStyle(widget: Extract<Widget, { type: 'gauge-arc' }>) {
   return {
-    ...pick(widget, ['startAngle', 'endAngle', 'fill', 'track'] as const),
+    ...pick(widget, ['startAngle', 'endAngle', 'fill', 'track', 'backgroundColor', 'backgroundColorExpr', 'backgroundOpacity'] as const),
     labels: styleLabels(widget.labels)
   }
 }
@@ -197,6 +202,7 @@ function extractAdjusterKnobStyle(widget: Extract<Widget, { type: 'adjuster-knob
       ...DIAL_SHAPE_KEYS,
       'bezelRadius',
       'bezelColor',
+      'bezelColorExpr',
       'bezelOpacity',
       'bezelBorderWidth',
       'innerBezelRadius',
@@ -257,6 +263,7 @@ function extractToggleStyle(widget: Extract<Widget, { type: 'switch-toggle' }>) 
       'bezelRotation',
       'leverLength',
       'leverBorderColor',
+      'leverBorderColorExpr',
       'leverBorderWidth',
       'leverTipRadius',
       'leverBaseRadius',
@@ -267,10 +274,14 @@ function extractToggleStyle(widget: Extract<Widget, { type: 'switch-toggle' }>) 
       'circleBorderWidth',
       'circleTopStyle',
       'innerBezelColor',
+      'innerBezelColorExpr',
       'innerBezelOpacity',
       'innerBezelRadius',
       'innerBezelBorderColor',
+      'innerBezelBorderColorExpr',
       'innerBezelBorderWidth',
+      'barBorderColor',
+      'barBorderColorExpr',
       'guard',
       'guardBorderWidth',
       'guardRadius'
@@ -311,11 +322,20 @@ function extractDcsViewportStyle(widget: Extract<Widget, { type: 'dcs-viewport' 
 
 // Rotation is geometry (like x/y/w/h), not style, so it isn't carried.
 function extractLineStyle(widget: Extract<Widget, { type: 'line' }>) {
-  return pick(widget, ['color', 'colorExpr', 'lineWidth'] as const)
+  return pick(widget, ['color', 'colorExpr', 'lineWidth', 'capStyle', 'capAngleStart', 'capAngleEnd'] as const)
 }
 
 function extractLabelStyle(widget: Extract<Widget, { type: 'label' }>) {
   return { label: pick(widget.label, LABEL_STYLE_KEYS) }
+}
+
+// Background/border look only — deliberately excludes subDeckId (that's the
+// widget's own nested content, not "the style") and the pan/scale fields
+// (contentOffsetX/Y, contentScaleX/Y — those are tuned per-placement against
+// that specific window's own content layout, not a look to carry to a
+// differently-sized/positioned window elsewhere).
+function extractWindowStyle(widget: Extract<Widget, { type: 'window' }>) {
+  return pick(widget, ['backgroundColor', 'backgroundColorExpr', 'backgroundOpacity', ...BOX_BORDER_KEYS] as const)
 }
 
 export interface StyleClipboardEntry {
@@ -354,6 +374,8 @@ export function extractWidgetStyle(widget: Widget): StyleClipboardEntry {
       return { widgetType: widget.type, data: extractLineStyle(widget) }
     case 'label':
       return { widgetType: widget.type, data: extractLabelStyle(widget) }
+    case 'window':
+      return { widgetType: widget.type, data: extractWindowStyle(widget) }
   }
 }
 
@@ -429,6 +451,10 @@ export function applyWidgetStyle(widget: Widget, entry: StyleClipboardEntry): Wi
     case 'label': {
       const { label } = entry.data as ReturnType<typeof extractLabelStyle>
       return { ...widget, label: { ...widget.label, ...label } }
+    }
+    case 'window': {
+      const rest = entry.data as ReturnType<typeof extractWindowStyle>
+      return { ...widget, ...rest }
     }
   }
 }

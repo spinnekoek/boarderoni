@@ -97,6 +97,7 @@ export function renderTickSet({
               text: value.toFixed(tickSet.labelDecimals ?? 0),
               textExpr: tickSet.labelTextExpr,
               textColor: tickSet.labelColor,
+              textColorExpr: tickSet.labelColorExpr,
               fontFamily: tickSet.labelFontFamily,
               fontSize: tickSet.labelFontSize,
               align: 'center',

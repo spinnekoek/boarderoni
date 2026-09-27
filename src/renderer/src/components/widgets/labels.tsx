@@ -2,7 +2,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { resolveFont, DEFAULT_LABEL_LINE_HEIGHT } from '@shared/fonts'
 import { withOpacity } from '@shared/color'
 import { DEFAULT_WIDGET_FONT_SIZE, DEFAULT_WIDGET_PADDING } from '@shared/constants'
-import { resolveLabelText, resolveTextColor, type VariableMap } from '@shared/expr'
+import { resolveLabelBackgroundColor, resolveLabelText, resolveTextColor, type VariableMap } from '@shared/expr'
 import { parseLabelContent } from '@shared/labelContent'
 import type { WidgetLabel } from '@shared/types'
 import { findIcon } from './faIcons'
@@ -47,7 +47,10 @@ export function renderWidgetLabel(
   debugMode: boolean = false
 ): React.JSX.Element {
   const resolvedTextColor = resolveTextColor(label, backgroundColor, variables)
-  const labelBackgroundColor = label.backgroundColor ? withOpacity(label.backgroundColor, label.backgroundOpacity ?? 1) : 'transparent'
+  const resolvedLabelBackgroundColor = resolveLabelBackgroundColor(label, variables)
+  const labelBackgroundColor = resolvedLabelBackgroundColor.color
+    ? withOpacity(resolvedLabelBackgroundColor.color, resolvedLabelBackgroundColor.opacity ?? label.backgroundOpacity ?? 1)
+    : 'transparent'
   const padding = label.padding ?? DEFAULT_WIDGET_PADDING
   const align = label.align ?? 'center'
   const verticalAlign = label.verticalAlign ?? 'center'

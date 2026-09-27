@@ -1,27 +1,13 @@
 /* See index.html's color-scheme meta tag — same opt-out of WebView
    auto-dark-theming, for engines that check the CSS property instead. */
 
-@font-face {
-	font-family: "HornetDisplay-Regular";
-	src: url("../fonts/HornetDisplay-Regular.ttf") format("truetype");
-	font-weight: normal;
-	font-style: normal;
-}
-
-@font-face {
-	font-family: "HornetDisplay-Bold";
-	src: url("../fonts/HornetDisplay-Bold.ttf") format("truetype");
-	font-weight: normal;
-	font-style: normal;
-}
-
 /* No @fontsource package (not on Google Fonts) — self-hosted straight from
-   its own OFL-licensed release, same as the HornetDisplay faces above. See
-   src/renderer/fonts/Librestile-OFL.txt for the license text. Only ships an
-   ExtraBold cut. */
+   its own OFL-licensed release. See
+   src/renderer/bundled-fonts/Librestile-OFL.txt for the license text. Only
+   ships an ExtraBold cut. */
 @font-face {
 	font-family: "Librestile";
-	src: url("../fonts/LibrestileExtBold.ttf") format("truetype");
+	src: url("../bundled-fonts/LibrestileExtBold.ttf") format("truetype");
 	font-weight: normal;
 	font-style: normal;
 }
@@ -1035,7 +1021,18 @@ did. */
 	position: absolute;
 	top: 0;
 	left: 0;
-	background-image: radial-gradient(circle, #23262e 1px, transparent 1px);
+	/* Translucent, not a solid hex — at a small grid size (e.g. 1px) the
+	   dots tile densely enough to fully cover the page, and a solid color
+	   there would replace the deck's own background instead of just
+	   marking grid lines on top of it. 0.25 lands between an earlier 0.4
+	   (visible, but read as an opaque dot rather than a translucent one —
+	   nothing behind a single small dot to visibly show through and prove
+	   it isn't) and 0.14 (too faint to see at all at normal grid spacing).
+	   Still lets the actual background color (and, while editing a window
+	   widget's own content, its own backgroundColorExpr — see Canvas.tsx)
+	   show through underneath even when the dots tile densely enough to
+	   fully cover the page. */
+	background-image: radial-gradient(circle, rgba(255, 255, 255, 0.25) 1px, transparent 1px);
 	box-shadow:
 		0 0 0 1px rgba(255, 255, 255, 0.08),
 		0 8px 40px rgba(0, 0, 0, 0.55);
@@ -1448,6 +1445,13 @@ button.deck-button:focus-visible {
 
 .deck-line {
 	position: absolute;
+}
+
+.deck-window {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	box-sizing: border-box;
 }
 
 /* The arc style's own viewBox is fit to the swept arc itself (see GaugeArc

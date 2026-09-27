@@ -15,6 +15,7 @@ import { ScreenCaptureWidgetContent } from './widgets/ScreenCaptureWidget'
 import { DcsViewportWidgetContent } from './widgets/DcsViewportWidget'
 import { LabelWidgetContent } from './widgets/LabelWidget'
 import { LineWidgetContent } from './widgets/LineWidget'
+import { WindowWidgetContent } from './widgets/WindowWidget'
 import { resolveActivePositionIndex } from '@shared/switchPosition'
 import { resolveNumericExpr, resolveWidgetVisible, editorWidgetPropsEqual, type VariableMap } from '@shared/expr'
 import { getEffectiveStates } from '@shared/states'
@@ -48,6 +49,7 @@ export const CanvasWidget = memo(function CanvasWidget({
   const { selected, selectionCount, handlePointerDown, handlePointerMove, handlePointerUp } = useWidgetDrag(widget, zoom)
   const deckId = useDashboardStore((s) => s.deckId)
   const updateWidgets = useDashboardStore((s) => s.updateWidgets)
+  const setEditingSubDeck = useDashboardStore((s) => s.setEditingSubDeck)
   const isSoleSelection = selected && selectionCount === 1
   // Follow whichever tab is active in the properties panel — but only while
   // this is the sole selected widget, so an unselected (or multi-selected)
@@ -241,6 +243,12 @@ export const CanvasWidget = memo(function CanvasWidget({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onContextMenu={onContextMenu}
+      // Same entry point ScreenSwitcher.tsx's own row click uses — jumps the
+      // whole editor (canvas/toolbar/properties panel) into designing this
+      // window's own nested sub-deck, same mechanism a full navigable screen
+      // uses to edit ITS OWN widgets. Double-click (not single) so it
+      // doesn't fight normal select/drag.
+      onDoubleClick={widget.type === 'window' ? () => setEditingSubDeck(widget.subDeckId) : undefined}
     >
       {widget.type === 'button' && previewState && (
         <ButtonWidgetContent widget={widget} state={previewState} interactive={false} variables={variables} applyRotation={false} />
@@ -255,6 +263,7 @@ export const CanvasWidget = memo(function CanvasWidget({
         <AdjusterWidgetContent widget={widget} variables={variables} interactive={false} applyRotation={false} />
       )}
       {widget.type === 'encoder' && <EncoderWidgetContent widget={widget} variables={variables} interactive={false} />}
+      {widget.type === 'window' && <WindowWidgetContent widget={widget} variables={variables} deckId={deckId} />}
       {widget.type === 'switch-rocker' && (
         <RockerSwitchWidgetContent
           widget={widget}

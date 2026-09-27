@@ -422,11 +422,20 @@ export interface WidgetLabel {
    * The label's own background fill, independent of whatever widget it sits
    * on top of. Unset (the default) is fully transparent — see
    * renderWidgetLabel in labels.tsx, which skips withOpacity entirely rather
-   * than resolving a literal 'transparent' through it. No colorExpr/auto
-   * mode, matching ColorPickerButton's own "plain background color field"
-   * precedent (no derived value to fall back to here).
+   * than resolving a literal 'transparent' through it. No auto mode
+   * (matching ColorPickerButton's own "plain background color field"
+   * precedent — no derived value to fall back to here), but see
+   * backgroundColorExpr below for the fx twin.
    */
   backgroundColor?: string
+  /**
+   * Same idea as ColorAppearance's colorExpr (see resolveLabelBackgroundColor
+   * in shared/expr.ts) — independent of textColorExpr, which drives this
+   * label's text color, not its own background fill. Falls back to
+   * backgroundColor (and, if that's unset too, fully transparent, same as
+   * the plain field) when unset or when the expression doesn't resolve.
+   */
+  backgroundColorExpr?: string
   backgroundOpacity?: number
   /**
    * Where this label's box sits within the widget it belongs to (or, for a
@@ -795,6 +804,14 @@ export interface GaugeTickSet {
   distance?: number
   showLabels?: boolean
   labelColor?: string
+  /**
+   * Same colorExpr convention as ColorAppearance.colorExpr — overrides
+   * labelColor when set, falling back to it when unset/unresolved. Wired
+   * through as this tick's own WidgetLabel.textColorExpr (see renderTickSet
+   * in widgets/tickSet.tsx), so it reuses that field's own resolution
+   * (resolveTextColor) rather than a separate mechanism.
+   */
+  labelColorExpr?: string
   labelFontFamily?: string
   labelFontSize?: number
   /**
@@ -862,6 +879,12 @@ export interface BarGaugeWidget extends WidgetVisibility {
    * backgroundColor in labels.tsx.
    */
   backgroundColor?: string
+  /**
+   * Same colorExpr convention as ColorAppearance.colorExpr — overrides
+   * backgroundColor when set, falling back to it (and ultimately to fully
+   * transparent) when unset/unresolved.
+   */
+  backgroundColorExpr?: string
   backgroundOpacity?: number
   /**
    * A rectangle has corners/sides to round/border, same as BoxAppearance's
@@ -909,6 +932,12 @@ export interface ArcGaugeWidget extends WidgetVisibility {
    * WidgetLabel.backgroundColor in labels.tsx.
    */
   backgroundColor?: string
+  /**
+   * Same colorExpr convention as ColorAppearance.colorExpr — overrides
+   * backgroundColor when set, falling back to it (and ultimately to fully
+   * transparent) when unset/unresolved.
+   */
+  backgroundColorExpr?: string
   backgroundOpacity?: number
   /**
    * When the sweep is less than a full circle, the arc's own bounding box
@@ -1149,6 +1178,12 @@ export interface AdjusterKnobWidget extends DialShapeStyle, WidgetVisibility {
    */
   bezelRadius?: number
   bezelColor?: string
+  /**
+   * Same colorExpr convention as ColorAppearance.colorExpr — overrides
+   * bezelColor when set, falling back to it (and ultimately to `track`'s own
+   * color) when unset/unresolved.
+   */
+  bezelColorExpr?: string
   bezelOpacity?: number
   bezelBorderWidth?: number
   /**
@@ -1612,9 +1647,14 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase, WidgetVisibility {
    * ToggleSwitchWidget.tsx.
    */
   innerBezelColor?: string
+  // Same colorExpr convention as ColorAppearance.colorExpr — overrides
+  // innerBezelColor/innerBezelBorderColor when set, falling back to the
+  // plain field when unset/unresolved.
+  innerBezelColorExpr?: string
   innerBezelOpacity?: number
   innerBezelRadius?: number
   innerBezelBorderColor?: string
+  innerBezelBorderColorExpr?: string
   innerBezelBorderWidth?: number
   /**
    * The lever's own length (from the pivot at the bezel's center out to its
@@ -1624,6 +1664,9 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase, WidgetVisibility {
    */
   leverLength?: number
   leverBorderColor?: string
+  // Same colorExpr convention as ColorAppearance.colorExpr — overrides
+  // leverBorderColor when set, falling back to it when unset/unresolved.
+  leverBorderColorExpr?: string
   leverBorderWidth?: number
   /**
    * The half-width of the lever's own tip — the wide, rounded end sticking
@@ -1702,6 +1745,9 @@ export interface ToggleSwitchWidget extends SwitchWidgetBase, WidgetVisibility {
   barColor?: string
   barOpacity?: number
   barBorderColor?: string
+  // Same colorExpr convention as ColorAppearance.colorExpr — overrides
+  // barBorderColor when set, falling back to it when unset/unresolved.
+  barBorderColorExpr?: string
   barBorderWidth?: number
   barBorderRadius?: number
   /**
@@ -1772,6 +1818,11 @@ export interface DetentStyle {
   height?: number
   borderWidth?: number
   borderColor?: string
+  // Same colorExpr convention as ColorAppearance.colorExpr — overrides
+  // borderColor when set, falling back to it when unset/unresolved. Shared
+  // by every DetentStyle user: a DialSwitchWidget's own ring detents AND
+  // DialShapeStyle.indicatorStyle's marker border.
+  borderColorExpr?: string
   borderRadius?: number
 }
 
@@ -1844,14 +1895,24 @@ export interface DialShapeStyle {
   squareBorderWidth?: number
   squareBorderRadius?: number
   squareColor?: string
+  // Same colorExpr convention as ColorAppearance.colorExpr — overrides
+  // squareColor/squareBorderColor when set, falling back to the plain field
+  // when unset/unresolved.
+  squareColorExpr?: string
   squareBorderColor?: string
+  squareBorderColorExpr?: string
   /**
    * 'circle' dialShape only.
    */
   circleSize?: number
   circleBorderWidth?: number
   circleColor?: string
+  // Same colorExpr convention as ColorAppearance.colorExpr — overrides
+  // circleColor/circleBorderColor when set, falling back to the plain field
+  // when unset/unresolved.
+  circleColorExpr?: string
   circleBorderColor?: string
+  circleBorderColorExpr?: string
   /**
    * 'circle' dialShape only — half-circle notches bitten into the knob's
    * rim, evenly spaced starting at the active indicator angle (so they
@@ -1903,6 +1964,11 @@ export interface DialShapeStyle {
   indicatorShape?: 'circle' | 'square' | 'tick' | 'triangle' | 'none'
   indicatorStyle?: DetentStyle
   indicatorColor?: string
+  // Same colorExpr convention as ColorAppearance.colorExpr — overrides
+  // indicatorColor when set, falling back to it when unset/unresolved. The
+  // indicator marker's border color is a DetentStyle field on indicatorStyle
+  // above rather than a sibling here — see DetentStyle.borderColorExpr.
+  indicatorColorExpr?: string
   /**
    * Distance from the dial's center to the indicator marker, in the same
    * 0-100 viewBox units as everything else here. Unset defaults to the
@@ -2306,9 +2372,42 @@ export interface LineWidget extends WidgetVisibility {
    * deliberately separate from h so h can stay a comfortably large
    * drag/click target (and rotation pivot box) while the visible line
    * itself is thin. Falls back to h (i.e. the bar fills its own box, same
-   * as before this field existed) when unset.
+   * as before this field existed) when unset. No longer clamped to h — a
+   * thickness bigger than h simply draws past the box's own top/bottom
+   * edges (h stays just the drag/click target and rotation pivot, not a
+   * ceiling on how thick the visible bar can be).
    */
   lineWidth?: number
+  /**
+   * How each end of the bar is drawn. 'butt' (default/unset): a plain
+   * rectangle, straight ends perpendicular to the bar — exactly today's
+   * look. 'round': both ends rounded into a semicircle (a CSS pill shape —
+   * border-radius half the drawn thickness), like a rounded-cap stroke.
+   * 'angled': each end cut at its own slant instead of square — see
+   * capAngleStart/capAngleEnd below — like a ribbon or a chevron-style
+   * divider.
+   */
+  capStyle?: 'butt' | 'round' | 'angled'
+  /**
+   * 'angled' capStyle only. Degrees the start (left, pre-rotation) end's cut
+   * leans away from a straight perpendicular cut — the bar's TOP edge
+   * (only) shifts toward the end (right) by this much at the start corner,
+   * the bottom edge stays put; 0 is the same as 'butt'. Unset defaults to
+   * 45. Clamped to -80..80 wherever it's wired up (±90 would make the cut
+   * run parallel to the bar itself, drawing nothing). Independent of
+   * capAngleEnd, but both shift the top edge in the SAME direction (not
+   * mirrored toward each other) — equal start/end values shear the whole
+   * bar into a true parallelogram (both cuts parallel, like a candy-stripe
+   * or chevron-style divider), differing values give each end its own
+   * independent slant instead.
+   */
+  capAngleStart?: number
+  /**
+   * Same idea as capAngleStart, for the end (right, pre-rotation) end's
+   * cut — its own top corner shifts further right (past the bar's own end)
+   * for positive values, or pulls back short of it for negative.
+   */
+  capAngleEnd?: number
   rotateAngle?: number
   /**
    * Overrides rotateAngle with a live expression (degrees, same convention)
@@ -2335,6 +2434,7 @@ export type Widget =
   | DcsViewportWidget
   | LabelWidget
   | LineWidget
+  | WindowWidget
 
 // A plain draggable/resizable x/y/w/h rectangle in the editor (unlike
 // MorphButtonWidget's cellW/cellH+blocks shape) — shared prop type for
@@ -2354,6 +2454,92 @@ export type BoxWidget =
   | DcsViewportWidget
   | LabelWidget
   | LineWidget
+  | WindowWidget
+
+/**
+ * A fixed-size, styled viewport (background/border, same fields as
+ * BarGaugeWidget's own box style) that clips and pans a much larger inner
+ * content area — the SubDeck (see below) named by subDeckId, positioned in
+ * its own canvasWidth/canvasHeight coordinate space and shifted by
+ * contentOffsetX/Y before being clipped to this widget's own w/h. Because
+ * the inner content is a real SubDeck's own Widget[] (rendered the same way
+ * any sub-deck's widgets are, not a flattened image), nested labels/gauges
+ * stay live and fx-driven — e.g. a compass tape: a long strip of tick
+ * Line/Label widgets panned horizontally by a heading variable via
+ * contentOffsetXExpr, with contentScaleX tuning how many pixels one degree
+ * of heading moves.
+ *
+ * Editing the nested content reuses the exact same mechanism a full,
+ * navigable sub-deck screen uses to edit ITS OWN widgets (setEditingSubDeck
+ * in renderer/src/store.ts) — this widget's subDeckId just names a normal
+ * Dashboard.subDecks entry, minted automatically when the widget is created
+ * (see Palette.tsx) and filtered out of ScreenSwitcher.tsx's own list (it's
+ * not a real navigable screen, just borrowing the same storage/editing
+ * machinery). This is why there's no separate WindowContent type here at
+ * all — SubDeck already is one.
+ *
+ * v1 scope note: nested content renders live (fx-driven visuals included)
+ * for every widget type, but interactive controls (button/switch/adjuster/
+ * encoder/dropdown) inside a window are NOT yet clickable/draggable there —
+ * only in a real (non-nested) placement. Wiring real interaction into a
+ * clipped+panned+scaled nested coordinate space is real additional work,
+ * deliberately deferred rather than half-built into this first pass.
+ */
+export interface WindowWidget extends WidgetVisibility {
+  id: string
+  type: 'window'
+  x: number
+  y: number
+  w: number
+  h: number
+  subDeckId: string
+  // Same shape/semantics as BarGaugeWidget's own backgroundColor/border
+  // fields — see that widget's own comments for each.
+  backgroundColor?: string
+  backgroundColorExpr?: string
+  backgroundOpacity?: number
+  radiusTopLeft?: number
+  radiusTopRight?: number
+  radiusBottomLeft?: number
+  radiusBottomRight?: number
+  borderWidthTop?: number
+  borderWidthRight?: number
+  borderWidthBottom?: number
+  borderWidthLeft?: number
+  borderColor?: string
+  borderColorExpr?: string
+  borderOpacity?: number
+  /**
+   * Pixel offset the inner content is shifted by (via CSS transform) before
+   * being clipped to this widget's own box — positive moves content LEFT
+   * (revealing more of what's further right), same sign convention as a
+   * plain CSS translateX. The expression's raw return value is multiplied
+   * by contentScaleX before use — see that field's own comment.
+   */
+  contentOffsetX?: number
+  /**
+   * Overrides contentOffsetX with a live expression when set, same
+   * override/fallback convention as every other *Expr field — e.g. a
+   * heading variable driving a compass tape's horizontal pan.
+   */
+  contentOffsetXExpr?: string
+  /** Same idea as contentOffsetX, vertically (positive moves content UP). */
+  contentOffsetY?: number
+  contentOffsetYExpr?: string
+  /**
+   * Multiplies contentOffsetX/contentOffsetXExpr's resolved value before
+   * it's applied as a CSS pixel offset — lets the expression stay in
+   * whatever domain units make sense (e.g. plain degrees of heading) while
+   * this one field tunes how many pixels represent one of those units,
+   * instead of baking a magic pixel-per-unit multiplier into the
+   * expression text itself. Unset defaults to 1 (the expression's own
+   * return value IS the pixel offset, unscaled).
+   */
+  contentScaleX?: number
+  /** Same idea as contentScaleX, vertically. */
+  contentScaleY?: number
+  zIndex?: number
+}
 
 // A user-saved, named preset (see Palette.tsx's own built-in
 // WidgetVariant<W> arrays, e.g. TOGGLE_SWITCH_VARIANTS, added 2026-09-10/11)

@@ -164,6 +164,18 @@ export function resolveColor(box: ColorAppearance, variables: VariableMap): Reso
   return { color: resolved.color ?? box.color, opacity: resolved.opacity }
 }
 
+// Same fallback shape as resolveColor/resolveBorderColor, but for a plain
+// (color, colorExpr) pair that isn't part of a ColorAppearance box — e.g.
+// AdjusterKnobWidget.bezelColor/bezelColorExpr, DialShapeStyle.squareColor/
+// squareColorExpr, ToggleSwitchWidget.innerBezelColor/innerBezelColorExpr —
+// every standalone color field this widget vocabulary has that doesn't come
+// from embedding ColorAppearance itself.
+export function resolveExprColor(color: string | undefined, colorExpr: string | undefined, variables: VariableMap): ResolvedColor {
+  if (!colorExpr) return { color }
+  const resolved = evaluateColorExpression(colorExpr, variables)
+  return { color: resolved.color ?? color, opacity: resolved.opacity }
+}
+
 // Same idea as resolveColor, but for the border — independent of colorExpr,
 // since a widget's fill and border can each be static or expression-driven
 // on their own.
@@ -222,6 +234,19 @@ export function resolveTextColor(
   if (!label.textColorExpr) return { color: fallback }
   const resolved = evaluateColorExpression(label.textColorExpr, variables)
   return { color: resolved.color ?? fallback, opacity: resolved.opacity }
+}
+
+// This label's own background fill (+ optional opacity override) —
+// independent of resolveTextColor above (textColorExpr drives the text
+// color, this drives the label's own background box). Same fallback shape
+// as resolveColor/resolveBorderColor: falls back to the plain
+// backgroundColor field (itself possibly undefined, meaning fully
+// transparent — see WidgetLabel.backgroundColor's own comment) when unset
+// or when the expression doesn't resolve to a color.
+export function resolveLabelBackgroundColor(label: WidgetLabel, variables: VariableMap): ResolvedColor {
+  if (!label.backgroundColorExpr) return { color: label.backgroundColor }
+  const resolved = evaluateColorExpression(label.backgroundColorExpr, variables)
+  return { color: resolved.color ?? label.backgroundColor, opacity: resolved.opacity }
 }
 
 // Which variable names a widget's own expr fields (colorExpr, textExpr,

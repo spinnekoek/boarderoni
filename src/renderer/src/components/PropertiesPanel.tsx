@@ -70,7 +70,8 @@ import type {
   Widget,
   WidgetAction,
   WidgetLabel,
-  WidgetState
+  WidgetState,
+  WindowWidget
 } from '@shared/types'
 import { extractAllPlaceholders } from '@shared/restPlaceholders'
 import { stepTitle } from '@shared/actionTitle'
@@ -101,7 +102,8 @@ const WIDGET_TYPE_LABELS: Record<Widget['type'], string> = {
   'screen-capture': 'Screen capture',
   'dcs-viewport': 'DCS viewport',
   label: 'Label',
-  line: 'Line'
+  line: 'Line',
+  window: 'Window'
 }
 
 // One 3x3 grid replaces the old separate horizontal/vertical button rows —
@@ -458,6 +460,7 @@ function LabelFields({
 }): React.JSX.Element {
   const isTextColorExpr = label.textColorExpr !== undefined
   const isAutoTextColor = label.textColor == null && !isTextColorExpr
+  const isBackgroundColorExpr = label.backgroundColorExpr !== undefined
   const isTextExpr = label.textExpr !== undefined
   // Remembers the last non-empty textExpr across a toggle-off-then-back-on
   // — without this, clicking × (which unconditionally clears to undefined)
@@ -618,7 +621,12 @@ function LabelFields({
         <ColorPickerButton
           key={`${label.id}-backgroundColor`}
           value={label.backgroundColor ?? DEFAULT_WIDGET_COLOR}
-          onChange={(color) => onChange({ backgroundColor: color })}
+          onChange={(color) => onChange({ backgroundColor: color, backgroundColorExpr: undefined })}
+          isExpr={isBackgroundColorExpr}
+          exprValue={label.backgroundColorExpr ?? ''}
+          onExprChange={(code) => onChange({ backgroundColorExpr: code })}
+          onEnterExpr={() => onChange({ backgroundColorExpr: label.backgroundColorExpr ?? '' })}
+          onClearExpr={() => onChange({ backgroundColorExpr: undefined })}
           opacity={label.backgroundOpacity ?? (label.backgroundColor === undefined ? 0 : 1)}
           onOpacityChange={(v) => onChange({ backgroundOpacity: v })}
         />
@@ -864,7 +872,15 @@ function DetentShapeEditor({
           />
           <div className="properties__field">
             <span>Border color</span>
-            <ColorPickerButton value={style?.borderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => onStyleChange({ ...style, borderColor: color })} />
+            <ColorPickerButton
+              value={style?.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => onStyleChange({ ...style, borderColor: color, borderColorExpr: undefined })}
+              isExpr={style?.borderColorExpr !== undefined}
+              exprValue={style?.borderColorExpr ?? ''}
+              onExprChange={(code) => onStyleChange({ ...style, borderColorExpr: code })}
+              onEnterExpr={() => onStyleChange({ ...style, borderColorExpr: style?.borderColorExpr ?? '' })}
+              onClearExpr={() => onStyleChange({ ...style, borderColorExpr: undefined })}
+            />
           </div>
         </>
       ) : (
@@ -901,7 +917,15 @@ function DetentShapeEditor({
           </div>
           <div className="properties__field">
             <span>Border color</span>
-            <ColorPickerButton value={style?.borderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => onStyleChange({ ...style, borderColor: color })} />
+            <ColorPickerButton
+              value={style?.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => onStyleChange({ ...style, borderColor: color, borderColorExpr: undefined })}
+              isExpr={style?.borderColorExpr !== undefined}
+              exprValue={style?.borderColorExpr ?? ''}
+              onExprChange={(code) => onStyleChange({ ...style, borderColorExpr: code })}
+              onEnterExpr={() => onStyleChange({ ...style, borderColorExpr: style?.borderColorExpr ?? '' })}
+              onClearExpr={() => onStyleChange({ ...style, borderColorExpr: undefined })}
+            />
           </div>
         </>
       )}
@@ -1038,14 +1062,27 @@ function DialShapeFields({
               <span>Square color</span>
               <ColorPickerButton
                 value={value.squareColor ?? fill.color ?? DEFAULT_WIDGET_COLOR}
-                onChange={(color) => onChange({ squareColor: color })}
+                onChange={(color) => onChange({ squareColor: color, squareColorExpr: undefined })}
                 auto={value.squareColor === undefined}
                 onAuto={() => onChange({ squareColor: undefined })}
+                isExpr={value.squareColorExpr !== undefined}
+                exprValue={value.squareColorExpr ?? ''}
+                onExprChange={(code) => onChange({ squareColorExpr: code })}
+                onEnterExpr={() => onChange({ squareColorExpr: value.squareColorExpr ?? '' })}
+                onClearExpr={() => onChange({ squareColorExpr: undefined })}
               />
             </div>
             <div className="properties__field">
               <span>Square border color</span>
-              <ColorPickerButton value={value.squareBorderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => onChange({ squareBorderColor: color })} />
+              <ColorPickerButton
+                value={value.squareBorderColor ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => onChange({ squareBorderColor: color, squareBorderColorExpr: undefined })}
+                isExpr={value.squareBorderColorExpr !== undefined}
+                exprValue={value.squareBorderColorExpr ?? ''}
+                onExprChange={(code) => onChange({ squareBorderColorExpr: code })}
+                onEnterExpr={() => onChange({ squareBorderColorExpr: value.squareBorderColorExpr ?? '' })}
+                onClearExpr={() => onChange({ squareBorderColorExpr: undefined })}
+              />
             </div>
           </>
         )}
@@ -1081,14 +1118,27 @@ function DialShapeFields({
               <span>Circle color</span>
               <ColorPickerButton
                 value={value.circleColor ?? fill.color ?? DEFAULT_WIDGET_COLOR}
-                onChange={(color) => onChange({ circleColor: color })}
+                onChange={(color) => onChange({ circleColor: color, circleColorExpr: undefined })}
                 auto={value.circleColor === undefined}
                 onAuto={() => onChange({ circleColor: undefined })}
+                isExpr={value.circleColorExpr !== undefined}
+                exprValue={value.circleColorExpr ?? ''}
+                onExprChange={(code) => onChange({ circleColorExpr: code })}
+                onEnterExpr={() => onChange({ circleColorExpr: value.circleColorExpr ?? '' })}
+                onClearExpr={() => onChange({ circleColorExpr: undefined })}
               />
             </div>
             <div className="properties__field">
               <span>Circle border color</span>
-              <ColorPickerButton value={value.circleBorderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => onChange({ circleBorderColor: color })} />
+              <ColorPickerButton
+                value={value.circleBorderColor ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => onChange({ circleBorderColor: color, circleBorderColorExpr: undefined })}
+                isExpr={value.circleBorderColorExpr !== undefined}
+                exprValue={value.circleBorderColorExpr ?? ''}
+                onExprChange={(code) => onChange({ circleBorderColorExpr: code })}
+                onEnterExpr={() => onChange({ circleBorderColorExpr: value.circleBorderColorExpr ?? '' })}
+                onClearExpr={() => onChange({ circleBorderColorExpr: undefined })}
+              />
             </div>
             <div className="properties__grid2">
               <label className="properties__field">
@@ -1176,9 +1226,14 @@ function DialShapeFields({
             <span>Indicator color</span>
             <ColorPickerButton
               value={value.indicatorColor ?? ((dialShape === 'square' ? value.squareColor : value.circleColor) ?? fill.color ?? DEFAULT_WIDGET_COLOR)}
-              onChange={(color) => onChange({ indicatorColor: color })}
+              onChange={(color) => onChange({ indicatorColor: color, indicatorColorExpr: undefined })}
               auto={value.indicatorColor === undefined}
               onAuto={() => onChange({ indicatorColor: undefined })}
+              isExpr={value.indicatorColorExpr !== undefined}
+              exprValue={value.indicatorColorExpr ?? ''}
+              onExprChange={(code) => onChange({ indicatorColorExpr: code })}
+              onEnterExpr={() => onChange({ indicatorColorExpr: value.indicatorColorExpr ?? '' })}
+              onClearExpr={() => onChange({ indicatorColorExpr: undefined })}
             />
           </div>
           <label className="properties__field">
@@ -2950,6 +3005,7 @@ export function PropertiesPanel(): React.JSX.Element {
   const removeWidget = useDashboardStore((s) => s.removeWidget)
   const removeWidgets = useDashboardStore((s) => s.removeWidgets)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
+  const setEditingSubDeck = useDashboardStore((s) => s.setEditingSubDeck)
   const selectedBlockId = useDashboardStore((s) => s.selectedBlockId)
   const selectBlock = useDashboardStore((s) => s.selectBlock)
   const activeStateIndex = useDashboardStore((s) => s.activeStateIndex)
@@ -3367,7 +3423,6 @@ export function PropertiesPanel(): React.JSX.Element {
             <input
               type="number"
               min={1}
-              max={line.h}
               value={line.lineWidth ?? line.h}
               onChange={(e) => {
                 const n = Number(e.target.value)
@@ -3377,9 +3432,52 @@ export function PropertiesPanel(): React.JSX.Element {
             />
           </label>
           <p className="properties__hint">
-            The actual drawn thickness, centered within the box's own H (Advanced section below) — keep H taller than this for a
-            roomier drag/click target on a thin line.
+            The actual drawn thickness, centered within the box's own H (Advanced section below) — no longer capped by H, so a
+            thicker line can draw past the box's top/bottom edges; H stays just the drag/click target.
           </p>
+          <label className="properties__field">
+            <span>Cap style</span>
+            <select
+              value={line.capStyle ?? 'butt'}
+              onChange={(e) => patchLine({ capStyle: e.target.value === 'butt' ? undefined : (e.target.value as LineWidget['capStyle']) })}
+            >
+              <option value="butt">Straight</option>
+              <option value="round">Rounded</option>
+              <option value="angled">Angled</option>
+            </select>
+          </label>
+          {line.capStyle === 'angled' && (
+            <div className="properties__grid2">
+              <label className="properties__field">
+                <span>Start cap angle</span>
+                <input
+                  type="number"
+                  min={-80}
+                  max={80}
+                  value={line.capAngleStart ?? 45}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) patchLine({ capAngleStart: n })
+                  }}
+                  onBlur={(e) => patchLine({ capAngleStart: Math.min(80, Math.max(-80, Number(e.target.value))) })}
+                />
+              </label>
+              <label className="properties__field">
+                <span>End cap angle</span>
+                <input
+                  type="number"
+                  min={-80}
+                  max={80}
+                  value={line.capAngleEnd ?? 45}
+                  onChange={(e) => {
+                    const n = Number(e.target.value)
+                    if (!Number.isNaN(n)) patchLine({ capAngleEnd: n })
+                  }}
+                  onBlur={(e) => patchLine({ capAngleEnd: Math.min(80, Math.max(-80, Number(e.target.value))) })}
+                />
+              </label>
+            </div>
+          )}
         </PropertiesSection>
 
         <PropertiesSection title="Rotation">
@@ -3484,6 +3582,260 @@ export function PropertiesPanel(): React.JSX.Element {
     )
   }
 
+  if (widget.type === 'window') {
+    const win = widget
+    const minSize = snapToGrid ? gridSize : 1
+    const isBorderExpr = win.borderColorExpr !== undefined
+    const nestedWidgetCount = dashboard.subDecks?.find((sd) => sd.id === win.subDeckId)?.widgets.length ?? 0
+
+    function patchWindow(fields: Partial<WindowWidget>): void {
+      updateWidgets(widgets.map((w) => (w.id === win.id ? ({ ...w, ...fields } as Widget) : w)))
+    }
+
+    async function handleDeleteWindow(): Promise<void> {
+      const ok = await confirm('Delete this widget? This cannot be undone.', { confirmLabel: 'Delete' })
+      if (ok) {
+        removeWidget(win.id)
+        selectWidget(null)
+      }
+    }
+
+    return (
+      <aside className="properties" style={{ width: propertiesWidth }}>
+        {resizeHandle}
+        <div className="properties__scroll">
+        <div className="properties__header">
+          <h2 className="properties__title">Properties</h2>
+          <div className="properties__header-actions">
+            <button type="button" className="properties__header-button" onClick={expandAllSections}>
+              Expand all
+            </button>
+            <button type="button" className="properties__header-button" onClick={collapseAllSections}>
+              Collapse all
+            </button>
+          </div>
+        </div>
+        <p className="properties__widget-type">{WIDGET_TYPE_LABELS[win.type]}</p>
+
+        <PropertiesSection title="Contents">
+          <button type="button" className="properties__header-button" onClick={() => setEditingSubDeck(win.subDeckId)}>
+            Edit window contents ({nestedWidgetCount} widget{nestedWidgetCount === 1 ? '' : 's'})
+          </button>
+          <p className="properties__hint">
+            Opens this window's own nested canvas — same editing tools as a normal screen, just clipped and panned instead of shown
+            full-size. Use the toolbar's canvas size there to make the content bigger than this window's own box so there's
+            something to pan.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Panning">
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Content offset X</span>
+              <div className="properties__file-row">
+                {win.contentOffsetXExpr !== undefined ? (
+                  <span className="properties__hint-inline">Using expression below</span>
+                ) : (
+                  <input type="number" value={win.contentOffsetX ?? 0} onChange={(e) => patchWindow({ contentOffsetX: Number(e.target.value) })} />
+                )}
+                {win.contentOffsetXExpr !== undefined ? (
+                  <button
+                    type="button"
+                    className="color-picker-button__clear"
+                    title="Use a fixed offset instead"
+                    onClick={() => patchWindow({ contentOffsetXExpr: undefined })}
+                  >
+                    ×
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="color-picker-button__fx"
+                    title="Compute the offset with an expression"
+                    onClick={() => patchWindow({ contentOffsetXExpr: '' })}
+                  >
+                    ƒx
+                  </button>
+                )}
+              </div>
+            </label>
+            <label className="properties__field">
+              <span>Content scale X</span>
+              <input type="number" value={win.contentScaleX ?? 1} onChange={(e) => patchWindow({ contentScaleX: Number(e.target.value) })} />
+            </label>
+          </div>
+          {win.contentOffsetXExpr !== undefined && (
+            <ExpressionField
+              label="X offset expression"
+              value={win.contentOffsetXExpr ?? ''}
+              onChange={(code) => patchWindow({ contentOffsetXExpr: code })}
+              placeholder="return variables.heading;"
+            />
+          )}
+
+          <div className="properties__divider" />
+
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Content offset Y</span>
+              <div className="properties__file-row">
+                {win.contentOffsetYExpr !== undefined ? (
+                  <span className="properties__hint-inline">Using expression below</span>
+                ) : (
+                  <input type="number" value={win.contentOffsetY ?? 0} onChange={(e) => patchWindow({ contentOffsetY: Number(e.target.value) })} />
+                )}
+                {win.contentOffsetYExpr !== undefined ? (
+                  <button
+                    type="button"
+                    className="color-picker-button__clear"
+                    title="Use a fixed offset instead"
+                    onClick={() => patchWindow({ contentOffsetYExpr: undefined })}
+                  >
+                    ×
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="color-picker-button__fx"
+                    title="Compute the offset with an expression"
+                    onClick={() => patchWindow({ contentOffsetYExpr: '' })}
+                  >
+                    ƒx
+                  </button>
+                )}
+              </div>
+            </label>
+            <label className="properties__field">
+              <span>Content scale Y</span>
+              <input type="number" value={win.contentScaleY ?? 1} onChange={(e) => patchWindow({ contentScaleY: Number(e.target.value) })} />
+            </label>
+          </div>
+          {win.contentOffsetYExpr !== undefined && (
+            <ExpressionField
+              label="Y offset expression"
+              value={win.contentOffsetYExpr ?? ''}
+              onChange={(code) => patchWindow({ contentOffsetYExpr: code })}
+              placeholder="return variables.pitch;"
+            />
+          )}
+          <p className="properties__hint">
+            The offset expression's return value is multiplied by its own Content scale before it moves the content — write the
+            expression in whatever domain units make sense (e.g. plain degrees), then tune Content scale to however many pixels
+            represent one of those units instead of baking that number into the expression itself.
+          </p>
+        </PropertiesSection>
+
+        <PropertiesSection title="Colors">
+          <div className="properties__field">
+            <span>Background color</span>
+            <ColorPickerButton
+              value={win.backgroundColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchWindow({ backgroundColor: color, backgroundColorExpr: undefined })}
+              isExpr={win.backgroundColorExpr !== undefined}
+              exprValue={win.backgroundColorExpr ?? ''}
+              onExprChange={(code) => patchWindow({ backgroundColorExpr: code })}
+              onEnterExpr={() => patchWindow({ backgroundColorExpr: win.backgroundColorExpr ?? '' })}
+              onClearExpr={() => patchWindow({ backgroundColorExpr: undefined })}
+              opacity={win.backgroundOpacity ?? (win.backgroundColor === undefined ? 0 : 1)}
+              onOpacityChange={(v) => patchWindow({ backgroundOpacity: v })}
+            />
+          </div>
+
+          <div className="properties__field">
+            <span>Border color</span>
+            <ColorPickerButton
+              value={win.borderColor ?? DEFAULT_WIDGET_COLOR}
+              onChange={(color) => patchWindow({ borderColor: color, borderColorExpr: undefined })}
+              isExpr={isBorderExpr}
+              exprValue={win.borderColorExpr ?? ''}
+              onExprChange={(code) => patchWindow({ borderColorExpr: code })}
+              onEnterExpr={() => patchWindow({ borderColorExpr: win.borderColorExpr ?? '' })}
+              onClearExpr={() => patchWindow({ borderColorExpr: undefined })}
+              opacity={win.borderOpacity ?? 1}
+              onOpacityChange={(v) => patchWindow({ borderOpacity: v })}
+            />
+          </div>
+        </PropertiesSection>
+
+        <PropertiesSection title="Border shape">
+          <span className="properties__section-label">Border radius</span>
+          <CornersInputGrid
+            topLeft={{ value: win.radiusTopLeft ?? 0, min: 0, onChange: (v) => patchWindow({ radiusTopLeft: v }) }}
+            topRight={{ value: win.radiusTopRight ?? 0, min: 0, onChange: (v) => patchWindow({ radiusTopRight: v }) }}
+            bottomLeft={{ value: win.radiusBottomLeft ?? 0, min: 0, onChange: (v) => patchWindow({ radiusBottomLeft: v }) }}
+            bottomRight={{ value: win.radiusBottomRight ?? 0, min: 0, onChange: (v) => patchWindow({ radiusBottomRight: v }) }}
+          />
+
+          <div className="properties__divider" />
+
+          <span className="properties__section-label">Border thickness</span>
+          <SidesInputGrid
+            top={{ value: win.borderWidthTop ?? 0, min: 0, onChange: (v) => patchWindow({ borderWidthTop: v }) }}
+            right={{ value: win.borderWidthRight ?? 0, min: 0, onChange: (v) => patchWindow({ borderWidthRight: v }) }}
+            bottom={{ value: win.borderWidthBottom ?? 0, min: 0, onChange: (v) => patchWindow({ borderWidthBottom: v }) }}
+            left={{ value: win.borderWidthLeft ?? 0, min: 0, onChange: (v) => patchWindow({ borderWidthLeft: v }) }}
+          />
+        </PropertiesSection>
+
+        <PropertiesSection title="Layout">
+          <span className="properties__section-label">Position & Size</span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X</span>
+              <input type="number" value={win.x} onChange={(e) => patchWindow({ x: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Y</span>
+              <input type="number" value={win.y} onChange={(e) => patchWindow({ y: Number(e.target.value) })} />
+            </label>
+            <label className="properties__field">
+              <span>Width (W)</span>
+              <input
+                type="number"
+                min={minSize}
+                value={win.w}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchWindow({ w: n })
+                }}
+                onBlur={(e) => patchWindow({ w: Math.max(minSize, Number(e.target.value)) })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Height (H)</span>
+              <input
+                type="number"
+                min={minSize}
+                value={win.h}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patchWindow({ h: n })
+                }}
+                onBlur={(e) => patchWindow({ h: Math.max(minSize, Number(e.target.value)) })}
+              />
+            </label>
+          </div>
+
+          <div className="properties__divider" />
+
+          <label className="properties__field">
+            <span>Z-index</span>
+            <input type="number" value={win.zIndex ?? 0} onChange={(e) => patchWindow({ zIndex: Math.round(Number(e.target.value)) })} />
+          </label>
+
+          <div className="properties__divider" />
+
+          <VisibilityField visible={win.visible} visibleExpr={win.visibleExpr} onChange={patchWindow} />
+        </PropertiesSection>
+
+        <button className="properties__delete" onClick={handleDeleteWindow}>
+          Delete widget
+        </button>
+        </div>
+      </aside>
+    )
+  }
+
   if (widget.type === 'gauge-bar') {
     // Captured into a const rather than relying on control-flow narrowing of
     // `widget` persisting into the nested closures below — same reasoning as
@@ -3574,7 +3926,12 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Background color</span>
             <ColorPickerButton
               value={gauge.backgroundColor ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchGauge({ backgroundColor: color })}
+              onChange={(color) => patchGauge({ backgroundColor: color, backgroundColorExpr: undefined })}
+              isExpr={gauge.backgroundColorExpr !== undefined}
+              exprValue={gauge.backgroundColorExpr ?? ''}
+              onExprChange={(code) => patchGauge({ backgroundColorExpr: code })}
+              onEnterExpr={() => patchGauge({ backgroundColorExpr: gauge.backgroundColorExpr ?? '' })}
+              onClearExpr={() => patchGauge({ backgroundColorExpr: undefined })}
               opacity={gauge.backgroundOpacity ?? (gauge.backgroundColor === undefined ? 0 : 1)}
               onOpacityChange={(v) => patchGauge({ backgroundOpacity: v })}
             />
@@ -3821,7 +4178,12 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Background color</span>
             <ColorPickerButton
               value={gauge.backgroundColor ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchGauge({ backgroundColor: color })}
+              onChange={(color) => patchGauge({ backgroundColor: color, backgroundColorExpr: undefined })}
+              isExpr={gauge.backgroundColorExpr !== undefined}
+              exprValue={gauge.backgroundColorExpr ?? ''}
+              onExprChange={(code) => patchGauge({ backgroundColorExpr: code })}
+              onEnterExpr={() => patchGauge({ backgroundColorExpr: gauge.backgroundColorExpr ?? '' })}
+              onClearExpr={() => patchGauge({ backgroundColorExpr: undefined })}
               opacity={gauge.backgroundOpacity ?? (gauge.backgroundColor === undefined ? 0 : 1)}
               onOpacityChange={(v) => patchGauge({ backgroundOpacity: v })}
             />
@@ -4023,7 +4385,12 @@ export function PropertiesPanel(): React.JSX.Element {
                         <span>Label color</span>
                         <ColorPickerButton
                           value={tickSet.labelColor ?? pickLegibleTextColor(gauge.track.color ?? ARC_DEFAULT_TRACK_COLOR)}
-                          onChange={(color) => patchTickSet(tickSet.id, { labelColor: color })}
+                          onChange={(color) => patchTickSet(tickSet.id, { labelColor: color, labelColorExpr: undefined })}
+                          isExpr={tickSet.labelColorExpr !== undefined}
+                          exprValue={tickSet.labelColorExpr ?? ''}
+                          onExprChange={(code) => patchTickSet(tickSet.id, { labelColorExpr: code })}
+                          onEnterExpr={() => patchTickSet(tickSet.id, { labelColorExpr: tickSet.labelColorExpr ?? '' })}
+                          onClearExpr={() => patchTickSet(tickSet.id, { labelColorExpr: undefined })}
                         />
                       </div>
                       <label className="properties__field">
@@ -4874,9 +5241,14 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Base circle color</span>
             <ColorPickerButton
               value={adjuster.bezelColor ?? adjuster.track.color ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchAdjuster({ bezelColor: color })}
+              onChange={(color) => patchAdjuster({ bezelColor: color, bezelColorExpr: undefined })}
               auto={adjuster.bezelColor === undefined}
               onAuto={() => patchAdjuster({ bezelColor: undefined })}
+              isExpr={adjuster.bezelColorExpr !== undefined}
+              exprValue={adjuster.bezelColorExpr ?? ''}
+              onExprChange={(code) => patchAdjuster({ bezelColorExpr: code })}
+              onEnterExpr={() => patchAdjuster({ bezelColorExpr: adjuster.bezelColorExpr ?? '' })}
+              onClearExpr={() => patchAdjuster({ bezelColorExpr: undefined })}
               opacity={adjuster.bezelOpacity ?? 1}
               onOpacityChange={(v) => patchAdjuster({ bezelOpacity: v })}
             />
@@ -5165,7 +5537,12 @@ export function PropertiesPanel(): React.JSX.Element {
                       <span>Label color</span>
                       <ColorPickerButton
                         value={tickSet.labelColor ?? pickLegibleTextColor(adjuster.track.color ?? DEFAULT_WIDGET_COLOR)}
-                        onChange={(color) => patchTickSet(tickSet.id, { labelColor: color })}
+                        onChange={(color) => patchTickSet(tickSet.id, { labelColor: color, labelColorExpr: undefined })}
+                        isExpr={tickSet.labelColorExpr !== undefined}
+                        exprValue={tickSet.labelColorExpr ?? ''}
+                        onExprChange={(code) => patchTickSet(tickSet.id, { labelColorExpr: code })}
+                        onEnterExpr={() => patchTickSet(tickSet.id, { labelColorExpr: tickSet.labelColorExpr ?? '' })}
+                        onClearExpr={() => patchTickSet(tickSet.id, { labelColorExpr: undefined })}
                       />
                     </div>
                     <label className="properties__field">
@@ -6172,9 +6549,14 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Inner circle color</span>
             <ColorPickerButton
               value={sw.innerBezelColor ?? sw.track.color ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchSwitch({ innerBezelColor: color })}
+              onChange={(color) => patchSwitch({ innerBezelColor: color, innerBezelColorExpr: undefined })}
               auto={sw.innerBezelColor === undefined}
               onAuto={() => patchSwitch({ innerBezelColor: undefined })}
+              isExpr={sw.innerBezelColorExpr !== undefined}
+              exprValue={sw.innerBezelColorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ innerBezelColorExpr: code })}
+              onEnterExpr={() => patchSwitch({ innerBezelColorExpr: sw.innerBezelColorExpr ?? '' })}
+              onClearExpr={() => patchSwitch({ innerBezelColorExpr: undefined })}
               opacity={sw.innerBezelOpacity ?? 1}
               onOpacityChange={(v) => patchSwitch({ innerBezelOpacity: v })}
             />
@@ -6196,7 +6578,12 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Inner circle border color</span>
             <ColorPickerButton
               value={sw.innerBezelBorderColor ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchSwitch({ innerBezelBorderColor: color })}
+              onChange={(color) => patchSwitch({ innerBezelBorderColor: color, innerBezelBorderColorExpr: undefined })}
+              isExpr={sw.innerBezelBorderColorExpr !== undefined}
+              exprValue={sw.innerBezelBorderColorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ innerBezelBorderColorExpr: code })}
+              onEnterExpr={() => patchSwitch({ innerBezelBorderColorExpr: sw.innerBezelBorderColorExpr ?? '' })}
+              onClearExpr={() => patchSwitch({ innerBezelBorderColorExpr: undefined })}
             />
           </div>
         </PropertiesSection>
@@ -6291,7 +6678,12 @@ export function PropertiesPanel(): React.JSX.Element {
             <span>Lever border color</span>
             <ColorPickerButton
               value={sw.leverBorderColor ?? DEFAULT_WIDGET_COLOR}
-              onChange={(color) => patchSwitch({ leverBorderColor: color })}
+              onChange={(color) => patchSwitch({ leverBorderColor: color, leverBorderColorExpr: undefined })}
+              isExpr={sw.leverBorderColorExpr !== undefined}
+              exprValue={sw.leverBorderColorExpr ?? ''}
+              onExprChange={(code) => patchSwitch({ leverBorderColorExpr: code })}
+              onEnterExpr={() => patchSwitch({ leverBorderColorExpr: sw.leverBorderColorExpr ?? '' })}
+              onClearExpr={() => patchSwitch({ leverBorderColorExpr: undefined })}
             />
           </div>
 
@@ -6369,7 +6761,15 @@ export function PropertiesPanel(): React.JSX.Element {
               </div>
               <div className="properties__field">
                 <span>Border color</span>
-                <ColorPickerButton value={sw.barBorderColor ?? DEFAULT_WIDGET_COLOR} onChange={(color) => patchSwitch({ barBorderColor: color })} />
+                <ColorPickerButton
+                  value={sw.barBorderColor ?? DEFAULT_WIDGET_COLOR}
+                  onChange={(color) => patchSwitch({ barBorderColor: color, barBorderColorExpr: undefined })}
+                  isExpr={sw.barBorderColorExpr !== undefined}
+                  exprValue={sw.barBorderColorExpr ?? ''}
+                  onExprChange={(code) => patchSwitch({ barBorderColorExpr: code })}
+                  onEnterExpr={() => patchSwitch({ barBorderColorExpr: sw.barBorderColorExpr ?? '' })}
+                  onClearExpr={() => patchSwitch({ barBorderColorExpr: undefined })}
+                />
               </div>
             </>
           )}

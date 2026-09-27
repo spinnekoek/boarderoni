@@ -53,6 +53,9 @@ export const MCP_SCHEMAS = {
           },
           {
             "$ref": "#/definitions/LineWidget"
+          },
+          {
+            "$ref": "#/definitions/WindowWidget"
           }
         ]
       },
@@ -752,7 +755,11 @@ export const MCP_SCHEMAS = {
           },
           "backgroundColor": {
             "type": "string",
-            "description": "The label's own background fill, independent of whatever widget it sits on top of. Unset (the default) is fully transparent — see renderWidgetLabel in labels.tsx, which skips withOpacity entirely rather than resolving a literal 'transparent' through it. No colorExpr/auto mode, matching ColorPickerButton's own \"plain background color field\" precedent (no derived value to fall back to here)."
+            "description": "The label's own background fill, independent of whatever widget it sits on top of. Unset (the default) is fully transparent — see renderWidgetLabel in labels.tsx, which skips withOpacity entirely rather than resolving a literal 'transparent' through it. No auto mode (matching ColorPickerButton's own \"plain background color field\" precedent — no derived value to fall back to here), but see backgroundColorExpr below for the fx twin."
+          },
+          "backgroundColorExpr": {
+            "type": "string",
+            "description": "Same idea as ColorAppearance's colorExpr (see resolveLabelBackgroundColor in shared/expr.ts) — independent of textColorExpr, which drives this label's text color, not its own background fill. Falls back to backgroundColor (and, if that's unset too, fully transparent, same as the plain field) when unset or when the expression doesn't resolve."
           },
           "backgroundOpacity": {
             "type": "number"
@@ -1090,6 +1097,10 @@ export const MCP_SCHEMAS = {
             "type": "string",
             "description": "The whole widget's own backing fill, behind track/fill alike. Unset (the default) is fully transparent, same \"skip withOpacity entirely rather than resolve a literal 'transparent'\" convention as WidgetLabel's own backgroundColor in labels.tsx."
           },
+          "backgroundColorExpr": {
+            "type": "string",
+            "description": "Same colorExpr convention as ColorAppearance.colorExpr — overrides backgroundColor when set, falling back to it (and ultimately to fully transparent) when unset/unresolved."
+          },
           "backgroundOpacity": {
             "type": "number"
           },
@@ -1238,6 +1249,10 @@ export const MCP_SCHEMAS = {
             "type": "string",
             "description": "The whole widget's own backing fill, behind track/fill/ticks/indicator alike. Unset (the default) is fully transparent, same \"skip withOpacity entirely rather than resolve a literal 'transparent'\" convention as WidgetLabel.backgroundColor in labels.tsx."
           },
+          "backgroundColorExpr": {
+            "type": "string",
+            "description": "Same colorExpr convention as ColorAppearance.colorExpr — overrides backgroundColor when set, falling back to it (and ultimately to fully transparent) when unset/unresolved."
+          },
           "backgroundOpacity": {
             "type": "number"
           },
@@ -1351,6 +1366,10 @@ export const MCP_SCHEMAS = {
           },
           "labelColor": {
             "type": "string"
+          },
+          "labelColorExpr": {
+            "type": "string",
+            "description": "Same colorExpr convention as ColorAppearance.colorExpr — overrides labelColor when set, falling back to it when unset/unresolved. Wired through as this tick's own WidgetLabel.textColorExpr (see renderTickSet in widgets/tickSet.tsx), so it reuses that field's own resolution (resolveTextColor) rather than a separate mechanism."
           },
           "labelFontFamily": {
             "type": "string"
@@ -1633,7 +1652,13 @@ export const MCP_SCHEMAS = {
           "squareColor": {
             "type": "string"
           },
+          "squareColorExpr": {
+            "type": "string"
+          },
           "squareBorderColor": {
+            "type": "string"
+          },
+          "squareBorderColorExpr": {
             "type": "string"
           },
           "circleSize": {
@@ -1646,7 +1671,13 @@ export const MCP_SCHEMAS = {
           "circleColor": {
             "type": "string"
           },
+          "circleColorExpr": {
+            "type": "string"
+          },
           "circleBorderColor": {
+            "type": "string"
+          },
+          "circleBorderColorExpr": {
             "type": "string"
           },
           "circleIndentCount": {
@@ -1694,6 +1725,9 @@ export const MCP_SCHEMAS = {
             "$ref": "#/definitions/DetentStyle"
           },
           "indicatorColor": {
+            "type": "string"
+          },
+          "indicatorColorExpr": {
             "type": "string"
           },
           "indicatorDistance": {
@@ -1812,6 +1846,10 @@ export const MCP_SCHEMAS = {
           "bezelColor": {
             "type": "string"
           },
+          "bezelColorExpr": {
+            "type": "string",
+            "description": "Same colorExpr convention as ColorAppearance.colorExpr — overrides bezelColor when set, falling back to it (and ultimately to `track`'s own color) when unset/unresolved."
+          },
           "bezelOpacity": {
             "type": "number"
           },
@@ -1882,6 +1920,9 @@ export const MCP_SCHEMAS = {
             "type": "number"
           },
           "borderColor": {
+            "type": "string"
+          },
+          "borderColorExpr": {
             "type": "string"
           },
           "borderRadius": {
@@ -1965,7 +2006,13 @@ export const MCP_SCHEMAS = {
           "squareColor": {
             "type": "string"
           },
+          "squareColorExpr": {
+            "type": "string"
+          },
           "squareBorderColor": {
+            "type": "string"
+          },
+          "squareBorderColorExpr": {
             "type": "string"
           },
           "circleSize": {
@@ -1978,7 +2025,13 @@ export const MCP_SCHEMAS = {
           "circleColor": {
             "type": "string"
           },
+          "circleColorExpr": {
+            "type": "string"
+          },
           "circleBorderColor": {
+            "type": "string"
+          },
+          "circleBorderColorExpr": {
             "type": "string"
           },
           "circleIndentCount": {
@@ -2026,6 +2079,9 @@ export const MCP_SCHEMAS = {
             "$ref": "#/definitions/DetentStyle"
           },
           "indicatorColor": {
+            "type": "string"
+          },
+          "indicatorColorExpr": {
             "type": "string"
           },
           "indicatorDistance": {
@@ -2471,7 +2527,13 @@ export const MCP_SCHEMAS = {
           "squareColor": {
             "type": "string"
           },
+          "squareColorExpr": {
+            "type": "string"
+          },
           "squareBorderColor": {
+            "type": "string"
+          },
+          "squareBorderColorExpr": {
             "type": "string"
           },
           "circleSize": {
@@ -2484,7 +2546,13 @@ export const MCP_SCHEMAS = {
           "circleColor": {
             "type": "string"
           },
+          "circleColorExpr": {
+            "type": "string"
+          },
           "circleBorderColor": {
+            "type": "string"
+          },
+          "circleBorderColorExpr": {
             "type": "string"
           },
           "circleIndentCount": {
@@ -2532,6 +2600,9 @@ export const MCP_SCHEMAS = {
             "$ref": "#/definitions/DetentStyle"
           },
           "indicatorColor": {
+            "type": "string"
+          },
+          "indicatorColorExpr": {
             "type": "string"
           },
           "indicatorDistance": {
@@ -2874,6 +2945,9 @@ export const MCP_SCHEMAS = {
             "type": "string",
             "description": "A second, concentric circle drawn on top of the bezel above — always present regardless of position count (unlike circleColor et al. below, which are the separate middle-position-only marker). Defaults to radius 0 (invisible) rather than a fixed fraction of bezelRadius, so an existing dashboard saved before this field existed doesn't suddenly grow a visible ring — it only appears once deliberately sized in the properties panel. Color/opacity default to `track`'s own (matching the bezel until overridden); border defaults to none. All in ToggleSwitchWidget.tsx."
           },
+          "innerBezelColorExpr": {
+            "type": "string"
+          },
           "innerBezelOpacity": {
             "type": "number"
           },
@@ -2881,6 +2955,9 @@ export const MCP_SCHEMAS = {
             "type": "number"
           },
           "innerBezelBorderColor": {
+            "type": "string"
+          },
+          "innerBezelBorderColorExpr": {
             "type": "string"
           },
           "innerBezelBorderWidth": {
@@ -2891,6 +2968,9 @@ export const MCP_SCHEMAS = {
             "description": "The lever's own length (from the pivot at the bezel's center out to its tip) and border — independent of the bezel's border above. Length defaults to LEVER_LENGTH, border to none (width 0), both in ToggleSwitchWidget.tsx."
           },
           "leverBorderColor": {
+            "type": "string"
+          },
+          "leverBorderColorExpr": {
             "type": "string"
           },
           "leverBorderWidth": {
@@ -2950,6 +3030,9 @@ export const MCP_SCHEMAS = {
             "type": "number"
           },
           "barBorderColor": {
+            "type": "string"
+          },
+          "barBorderColorExpr": {
             "type": "string"
           },
           "barBorderWidth": {
@@ -3484,7 +3567,24 @@ export const MCP_SCHEMAS = {
           },
           "lineWidth": {
             "type": "number",
-            "description": "The actual drawn thickness of the bar, vertically centered within h — deliberately separate from h so h can stay a comfortably large drag/click target (and rotation pivot box) while the visible line itself is thin. Falls back to h (i.e. the bar fills its own box, same as before this field existed) when unset."
+            "description": "The actual drawn thickness of the bar, vertically centered within h — deliberately separate from h so h can stay a comfortably large drag/click target (and rotation pivot box) while the visible line itself is thin. Falls back to h (i.e. the bar fills its own box, same as before this field existed) when unset. No longer clamped to h — a thickness bigger than h simply draws past the box's own top/bottom edges (h stays just the drag/click target and rotation pivot, not a ceiling on how thick the visible bar can be)."
+          },
+          "capStyle": {
+            "type": "string",
+            "enum": [
+              "butt",
+              "round",
+              "angled"
+            ],
+            "description": "How each end of the bar is drawn. 'butt' (default/unset): a plain rectangle, straight ends perpendicular to the bar — exactly today's look. 'round': both ends rounded into a semicircle (a CSS pill shape — border-radius half the drawn thickness), like a rounded-cap stroke. 'angled': each end cut at its own slant instead of square — see capAngleStart/capAngleEnd below — like a ribbon or a chevron-style divider."
+          },
+          "capAngleStart": {
+            "type": "number",
+            "description": "'angled' capStyle only. Degrees the start (left, pre-rotation) end's cut leans away from a straight perpendicular cut — the bar's TOP edge (only) shifts toward the end (right) by this much at the start corner, the bottom edge stays put; 0 is the same as 'butt'. Unset defaults to 45. Clamped to -80..80 wherever it's wired up (±90 would make the cut run parallel to the bar itself, drawing nothing). Independent of capAngleEnd, but both shift the top edge in the SAME direction (not mirrored toward each other) — equal start/end values shear the whole bar into a true parallelogram (both cuts parallel, like a candy-stripe or chevron-style divider), differing values give each end its own independent slant instead."
+          },
+          "capAngleEnd": {
+            "type": "number",
+            "description": "Same idea as capAngleStart, for the end (right, pre-rotation) end's cut — its own top corner shifts further right (past the bar's own end) for positive values, or pulls back short of it for negative."
           },
           "rotateAngle": {
             "type": "number"
@@ -3507,6 +3607,122 @@ export const MCP_SCHEMAS = {
         ],
         "additionalProperties": false,
         "description": "A straight decorative bar — w is its length, h its bounding-box height (drag/select hit target, and the ceiling lineWidth can't exceed). The editor's resize handle only ever drags length (see CanvasWidget.tsx), not h — for anything but perfectly horizontal, use rotateAngle rather than fighting with a 2D resize to get an angled line, same convention as ButtonWidget/RockerSwitchWidget's own rotateAngle (degrees, clockwise, 0 unrotated). No labels/events of its own — if you need those, use a Label or Button widget instead; this is purely a visual divider/rule."
+      },
+      "WindowWidget": {
+        "type": "object",
+        "properties": {
+          "visible": {
+            "type": "boolean"
+          },
+          "visibleExpr": {
+            "type": "string"
+          },
+          "groupId": {
+            "type": "string",
+            "description": "Move-only grouping (see the \"Widget grouping\" feature) — widgets sharing the same groupId move together as a unit when any one of them is dragged (see useWidgetDrag.ts/store.ts's selectWidget), and select together on a fresh click. At most one groupId per widget — no nested/ overlapping groups. Every Widget union member extends this interface, so this is the one shared spot that covers all grouped-capable widget types without threading a new field through each one individually. Undefined (the default, and every dashboard saved before this existed) means \"not in a group\" — ordinary single-widget select/drag, unchanged."
+          },
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "const": "window"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "w": {
+            "type": "number"
+          },
+          "h": {
+            "type": "number"
+          },
+          "subDeckId": {
+            "type": "string"
+          },
+          "backgroundColor": {
+            "type": "string"
+          },
+          "backgroundColorExpr": {
+            "type": "string"
+          },
+          "backgroundOpacity": {
+            "type": "number"
+          },
+          "radiusTopLeft": {
+            "type": "number"
+          },
+          "radiusTopRight": {
+            "type": "number"
+          },
+          "radiusBottomLeft": {
+            "type": "number"
+          },
+          "radiusBottomRight": {
+            "type": "number"
+          },
+          "borderWidthTop": {
+            "type": "number"
+          },
+          "borderWidthRight": {
+            "type": "number"
+          },
+          "borderWidthBottom": {
+            "type": "number"
+          },
+          "borderWidthLeft": {
+            "type": "number"
+          },
+          "borderColor": {
+            "type": "string"
+          },
+          "borderColorExpr": {
+            "type": "string"
+          },
+          "borderOpacity": {
+            "type": "number"
+          },
+          "contentOffsetX": {
+            "type": "number",
+            "description": "Pixel offset the inner content is shifted by (via CSS transform) before being clipped to this widget's own box — positive moves content LEFT (revealing more of what's further right), same sign convention as a plain CSS translateX. The expression's raw return value is multiplied by contentScaleX before use — see that field's own comment."
+          },
+          "contentOffsetXExpr": {
+            "type": "string",
+            "description": "Overrides contentOffsetX with a live expression when set, same override/fallback convention as every other *Expr field — e.g. a heading variable driving a compass tape's horizontal pan."
+          },
+          "contentOffsetY": {
+            "type": "number",
+            "description": "Same idea as contentOffsetX, vertically (positive moves content UP)."
+          },
+          "contentOffsetYExpr": {
+            "type": "string"
+          },
+          "contentScaleX": {
+            "type": "number",
+            "description": "Multiplies contentOffsetX/contentOffsetXExpr's resolved value before it's applied as a CSS pixel offset — lets the expression stay in whatever domain units make sense (e.g. plain degrees of heading) while this one field tunes how many pixels represent one of those units, instead of baking a magic pixel-per-unit multiplier into the expression text itself. Unset defaults to 1 (the expression's own return value IS the pixel offset, unscaled)."
+          },
+          "contentScaleY": {
+            "type": "number",
+            "description": "Same idea as contentScaleX, vertically."
+          },
+          "zIndex": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "x",
+          "y",
+          "w",
+          "h",
+          "subDeckId"
+        ],
+        "additionalProperties": false,
+        "description": "A fixed-size, styled viewport (background/border, same fields as BarGaugeWidget's own box style) that clips and pans a much larger inner content area — the SubDeck (see below) named by subDeckId, positioned in its own canvasWidth/canvasHeight coordinate space and shifted by contentOffsetX/Y before being clipped to this widget's own w/h. Because the inner content is a real SubDeck's own Widget[] (rendered the same way any sub-deck's widgets are, not a flattened image), nested labels/gauges stay live and fx-driven — e.g. a compass tape: a long strip of tick Line/Label widgets panned horizontally by a heading variable via contentOffsetXExpr, with contentScaleX tuning how many pixels one degree of heading moves.\n\nEditing the nested content reuses the exact same mechanism a full, navigable sub-deck screen uses to edit ITS OWN widgets (setEditingSubDeck in renderer/src/store.ts) — this widget's subDeckId just names a normal Dashboard.subDecks entry, minted automatically when the widget is created (see Palette.tsx) and filtered out of ScreenSwitcher.tsx's own list (it's not a real navigable screen, just borrowing the same storage/editing machinery). This is why there's no separate WindowContent type here at all — SubDeck already is one.\n\nv1 scope note: nested content renders live (fx-driven visuals included) for every widget type, but interactive controls (button/switch/adjuster/ encoder/dropdown) inside a window are NOT yet clickable/draggable there — only in a real (non-nested) placement. Wiring real interaction into a clipped+panned+scaled nested coordinate space is real additional work, deliberately deferred rather than half-built into this first pass."
       }
     }
   },
