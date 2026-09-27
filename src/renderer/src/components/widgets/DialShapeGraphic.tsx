@@ -1,5 +1,6 @@
 import type { DialShapeStyle } from '@shared/types'
 import { withOpacity } from '@shared/color'
+import { resolveExprColor, type VariableMap } from '@shared/expr'
 import { needlePoints, polarToCartesian, roundedPolygonPath, viewBoxToPixel } from './arcPath'
 
 // Box size (viewBox units) for each detent/indicator shape — 'tick'/
@@ -134,7 +135,7 @@ export interface ResolvedDialIndicator {
   borderRadius: number
 }
 
-export function resolveDialIndicator(style: DialShapeStyle, angle: number, shapeColor: string): ResolvedDialIndicator {
+export function resolveDialIndicator(style: DialShapeStyle, angle: number, shapeColor: string, variables: VariableMap): ResolvedDialIndicator {
   const dialShape = style.dialShape ?? 'needle'
   const dialDistance = style.dialDistance ?? 0
   const squareHeight = style.squareHeight ?? 24
@@ -143,6 +144,10 @@ export function resolveDialIndicator(style: DialShapeStyle, angle: number, shape
   const point = polarToCartesian(50, 50, dialDistance + indicatorDistance, angle)
   const shape = style.indicatorShape ?? 'circle'
   const baseSize = DETENT_SIZE[shape]
+  // Defaults to the dial shape's own color, so an untouched indicator reads
+  // as part of the shape rather than a separately-colored overlay.
+  const resolvedColor = resolveExprColor(style.indicatorColor ?? shapeColor, style.indicatorColorExpr, variables)
+  const resolvedBorderColor = resolveExprColor(style.indicatorStyle?.borderColor ?? 'transparent', style.indicatorStyle?.borderColorExpr, variables)
   return {
     shape,
     point,
@@ -150,10 +155,8 @@ export function resolveDialIndicator(style: DialShapeStyle, angle: number, shape
     height: style.indicatorStyle?.height ?? baseSize.height,
     borderWidth: style.indicatorStyle?.borderWidth ?? 0,
     borderRadius: style.indicatorStyle?.borderRadius ?? DEFAULT_DETENT_BORDER_RADIUS[shape] ?? 0,
-    // Defaults to the dial shape's own color, so an untouched indicator
-    // reads as part of the shape rather than a separately-colored overlay.
-    color: style.indicatorColor ?? shapeColor,
-    borderColor: style.indicatorStyle?.borderColor ?? 'transparent'
+    color: resolvedColor.color ?? shapeColor,
+    borderColor: resolvedBorderColor.color ?? 'transparent'
   }
 }
 
@@ -172,7 +175,8 @@ export function DialShapeGraphic({
   needleLength,
   needleHalfWidth,
   needleTipLength,
-  needleCenterRadius
+  needleCenterRadius,
+  variables
 }: {
   style: DialShapeStyle
   // The active pointer angle — DialSwitchWidget's needleAngle (derived from
@@ -190,6 +194,7 @@ export function DialShapeGraphic({
   needleHalfWidth: number
   needleTipLength: number
   needleCenterRadius: number
+  variables: VariableMap
 }): React.JSX.Element {
   const dialShape = style.dialShape ?? 'needle'
   // Nothing to draw at all — no shape, no indicator marker either (there's
@@ -207,12 +212,12 @@ export function DialShapeGraphic({
   const squareHeight = style.squareHeight ?? 24
   const squareBorderWidth = style.squareBorderWidth ?? 0
   const squareBorderRadius = style.squareBorderRadius ?? 2
-  const squareColor = style.squareColor ?? fillColor
-  const squareBorderColor = style.squareBorderColor ?? 'transparent'
+  const squareColor = resolveExprColor(style.squareColor ?? fillColor, style.squareColorExpr, variables).color ?? fillColor
+  const squareBorderColor = resolveExprColor(style.squareBorderColor ?? 'transparent', style.squareBorderColorExpr, variables).color ?? 'transparent'
   const circleSize = style.circleSize ?? 20
   const circleBorderWidth = style.circleBorderWidth ?? 0
-  const circleColor = style.circleColor ?? fillColor
-  const circleBorderColor = style.circleBorderColor ?? 'transparent'
+  const circleColor = resolveExprColor(style.circleColor ?? fillColor, style.circleColorExpr, variables).color ?? fillColor
+  const circleBorderColor = resolveExprColor(style.circleBorderColor ?? 'transparent', style.circleBorderColorExpr, variables).color ?? 'transparent'
   const circleIndentCount = style.circleIndentCount ?? 0
   const circleIndentSize = style.circleIndentSize ?? circleSize / 6
   const circleIndentColor = withOpacity(style.circleIndentColor ?? trackColor, style.circleIndentOpacity ?? 1)
@@ -221,7 +226,7 @@ export function DialShapeGraphic({
   const dialCenter = polarToCartesian(50, 50, dialDistance, angle)
 
   const shapeColor = dialShape === 'square' ? squareColor : circleColor
-  const indicator = resolveDialIndicator(style, angle, shapeColor)
+  const indicator = resolveDialIndicator(style, angle, shapeColor, variables)
   // A 'square' indicator can't be drawn as a plain SVG <rect> (no per-side
   // border width/radius) — the caller renders it as an HTML div instead
   // (using `indicator`'s own position/size, computed above), so this
@@ -307,17 +312,19 @@ export function SquareIndicatorOverlay({
   angle,
   shapeColor,
   w,
-  h
+  h,
+  variables
 }: {
   style: DialShapeStyle
   angle: number
   shapeColor: string
   w: number
   h: number
+  variables: VariableMap
 }): React.JSX.Element | null {
   const dialShape = style.dialShape ?? 'needle'
   if ((dialShape !== 'square' && dialShape !== 'circle') || (style.indicatorShape ?? 'circle') !== 'square') return null
-  const indicator = resolveDialIndicator(style, angle, shapeColor)
+  const indicator = resolveDialIndicator(style, angle, shapeColor, variables)
   const scale = Math.min(w, h) / 100
   const pixelPoint = viewBoxToPixel(indicator.point.x, indicator.point.y, w, h)
   const sb = style.indicatorSquareBorder

@@ -24,9 +24,11 @@ import type {
   MorphButtonWidget,
   RockerSwitchWidget,
   ScreenCaptureWidget,
+  SubDeck,
   ToggleSwitchWidget,
   Variable,
-  Widget
+  Widget,
+  WindowWidget
 } from '@shared/types'
 
 // $value/$index are synthesized from a widget's own trigger context (see
@@ -979,6 +981,8 @@ function CustomVariantsButton({
 export function Palette(): React.JSX.Element {
   const addWidget = useDashboardStore((s) => s.addWidget)
   const selectWidget = useDashboardStore((s) => s.selectWidget)
+  const dashboard = useDashboardStore((s) => s.dashboard)
+  const updateDashboardMeta = useDashboardStore((s) => s.updateDashboardMeta)
   const pasteWidgets = useDashboardStore((s) => s.pasteWidgets)
   const groupWidgets = useDashboardStore((s) => s.groupWidgets)
   const customVariants = useDashboardStore((s) => s.customVariants)
@@ -1461,6 +1465,37 @@ export function Palette(): React.JSX.Element {
     selectWidget(widget.id)
   }
 
+  function handleAddWindow(): void {
+    const pos = spawnPosition()
+    // Minted directly into the flat dashboard.subDecks array (not via the
+    // addSubDeck store action, which also navigates the editor into it
+    // immediately — this just adds the widget, same "add + select, no
+    // navigation surprise" convention every other palette item follows;
+    // double-clicking the widget on the canvas, or its own Properties panel
+    // button, is what enters it for editing). See WindowWidget.subDeckId's
+    // own comment in shared/types.ts for why this is a normal SubDeck
+    // rather than some separate embedded content type.
+    const subDeck: SubDeck = { id: nextId(), name: 'Window', widgets: [] }
+    updateDashboardMeta({ subDecks: [...(dashboard.subDecks ?? []), subDeck] })
+    const widget: WindowWidget = {
+      id: nextId(),
+      type: 'window',
+      x: pos.x,
+      y: pos.y,
+      w: 200,
+      h: 60,
+      subDeckId: subDeck.id,
+      backgroundColor: '#14161b',
+      borderColor: '#ffffff',
+      borderWidthTop: 1,
+      borderWidthRight: 1,
+      borderWidthBottom: 1,
+      borderWidthLeft: 1
+    }
+    addWidget(widget)
+    selectWidget(widget.id)
+  }
+
   function handleAddScreenCapture(): void {
     const pos = spawnPosition()
     const widget: ScreenCaptureWidget = {
@@ -1551,6 +1586,9 @@ export function Palette(): React.JSX.Element {
           + Line
         </button>
       )}
+      <button className="palette__item" onClick={handleAddWindow}>
+        + Window
+      </button>
       {morphVariants.length > 0 ? (
         <PaletteVariantButton<MorphButtonWidget>
           label="+ Morph button"

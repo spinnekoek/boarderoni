@@ -4,8 +4,9 @@ import { useEditorSettings, INITIAL_CAMERA } from '../settingsStore'
 import { useEditorShortcuts } from '../useEditorShortcuts'
 import { backgroundImageStyle, backgroundImageUrl } from '../background'
 import { morphFootprint } from '@shared/morph'
-import { resolveColor, toVariableMap } from '@shared/expr'
-import { getSubDeckWidgets } from '@shared/subDecks'
+import { resolveColor, resolveExprColor, toVariableMap } from '@shared/expr'
+import { allDeckWidgets, getSubDeckWidgets } from '@shared/subDecks'
+import type { Widget } from '@shared/types'
 import { CanvasWidget } from './CanvasWidget'
 import { MorphCanvasWidget } from './MorphCanvasWidget'
 import { ContextMenu } from './ContextMenu'
@@ -65,6 +66,27 @@ export function Canvas(): React.JSX.Element {
     [rootWidgets, subDecks, editingSubDeckId]
   )
   const editingSubDeckName = subDecks?.find((sd) => sd.id === editingSubDeckId)?.name
+  // A window widget's own nested content is stored as a normal
+  // Dashboard.subDecks entry (see WindowWidget.subDeckId's own comment in
+  // shared/types.ts) purely to reuse this same editing mechanism — but
+  // unlike a REAL sub-deck (which deliberately shares the parent deck's own
+  // background, per SubDeck's own comment), a window never actually shows
+  // the main deck's background when rendered for real — it only ever shows
+  // its own backgroundColor/backgroundColorExpr, clipped to its own box (see
+  // WindowWidgetContent). So while editing a window's contents specifically,
+  // the canvas background below previews THAT window's own resolved color
+  // instead of the main deck's, and skips the main deck's wallpaper image
+  // entirely — otherwise what you see while placing widgets wouldn't match
+  // what the window actually looks like once you back out.
+  const windowWidgetForEditingSubDeck = useMemo(
+    () =>
+      editingSubDeckId
+        ? allDeckWidgets({ widgets: rootWidgets, subDecks }).find(
+            (w): w is Extract<Widget, { type: 'window' }> => w.type === 'window' && w.subDeckId === editingSubDeckId
+          )
+        : undefined,
+    [rootWidgets, subDecks, editingSubDeckId]
+  )
   const backgroundColor = useDashboardStore((s) => s.dashboard.backgroundColor)
   const backgroundColorExpr = useDashboardStore((s) => s.dashboard.backgroundColorExpr)
   const backgroundImageVersion = useDashboardStore((s) => s.dashboard.backgroundImageVersion)
@@ -83,8 +105,10 @@ export function Canvas(): React.JSX.Element {
   useEditorShortcuts()
 
   const variableMap = useMemo(() => toVariableMap(variables ?? []), [variables])
-  const resolvedBackgroundColor =
-    resolveColor({ color: backgroundColor, colorExpr: backgroundColorExpr }, variableMap).color ?? backgroundColor
+  const resolvedBackgroundColor = windowWidgetForEditingSubDeck
+    ? (resolveExprColor(windowWidgetForEditingSubDeck.backgroundColor, windowWidgetForEditingSubDeck.backgroundColorExpr, variableMap).color ??
+      'transparent')
+    : (resolveColor({ color: backgroundColor, colorExpr: backgroundColorExpr }, variableMap).color ?? backgroundColor)
 
   const camera = useEditorSettings((s) => s.camera)
   const setCamera = useEditorSettings((s) => s.setCamera)
@@ -228,7 +252,14 @@ export function Canvas(): React.JSX.Element {
               width: canvasSize.width,
               height: canvasSize.height,
               backgroundColor: resolvedBackgroundColor,
-              ...(snapToGrid ? { backgroundSize: `${gridSize}px ${gridSize}px` } : { backgroundImage: 'none' })
+              // At gridSize 1 the dots tile every single pixel — however
+              // translucent (see .canvas-page's own comment in styles.css),
+              // that dense a tiling still reads as a visible wash over the
+              // whole page rather than a grid. Dropping the image entirely
+              // there is the actual fix for that case specifically, not
+              // just a fainter dot — same "no dots at all" treatment
+              // snapToGrid off already gets, just gated on grid size too.
+              ...(snapToGrid && gridSize > 1 ? { backgroundSize: `${gridSize}px ${gridSize}px` } : { backgroundImage: 'none' })
             }}
           />
           <div
@@ -245,7 +276,7 @@ export function Canvas(): React.JSX.Element {
               {activeDeviceLabel} — {activeDevice.width}×{activeDevice.height}
               {activeConnected && !activeConnected.connected ? ' (disconnected)' : ''}
             </span>
-            {backgroundImageVersion && deckId && (
+            {backgroundImageVersion && deckId && !windowWidgetForEditingSubDeck && (
               <div className="canvas-device-bounds__clip">
                 <div
                   className="dashboard-wallpaper"

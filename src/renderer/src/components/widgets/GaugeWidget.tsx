@@ -1,5 +1,5 @@
 import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
-import { resolveBooleanExpr, resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
+import { resolveBooleanExpr, resolveBorderColor, resolveColor, resolveExprColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { BarGaugeWidget, ArcGaugeWidget } from '@shared/types'
 import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabels } from './labels'
@@ -212,7 +212,8 @@ export function BarGaugeWidgetContent({ widget, variables }: { widget: BarGaugeW
   // Skips withOpacity entirely when unset rather than resolving a literal
   // 'transparent' through it — same reasoning as WidgetLabel.backgroundColor
   // in labels.tsx.
-  const backgroundColor = widget.backgroundColor ? withOpacity(widget.backgroundColor, widget.backgroundOpacity ?? 1) : 'transparent'
+  const resolvedBackground = resolveExprColor(widget.backgroundColor, widget.backgroundColorExpr, variables)
+  const backgroundColor = resolvedBackground.color ? withOpacity(resolvedBackground.color, resolvedBackground.opacity ?? widget.backgroundOpacity ?? 1) : 'transparent'
 
   const outerStyle: React.CSSProperties = {
     backgroundColor,
@@ -254,7 +255,8 @@ export function ArcGaugeWidgetContent({ widget, variables }: { widget: ArcGaugeW
   // Skips withOpacity entirely when unset rather than resolving a literal
   // 'transparent' through it — same reasoning as WidgetLabel.backgroundColor
   // in labels.tsx.
-  const backgroundColor = widget.backgroundColor ? withOpacity(widget.backgroundColor, widget.backgroundOpacity ?? 1) : 'transparent'
+  const resolvedBackground = resolveExprColor(widget.backgroundColor, widget.backgroundColorExpr, variables)
+  const backgroundColor = resolvedBackground.color ? withOpacity(resolvedBackground.color, resolvedBackground.opacity ?? widget.backgroundOpacity ?? 1) : 'transparent'
 
   const outerStyle: React.CSSProperties = {
     backgroundColor,

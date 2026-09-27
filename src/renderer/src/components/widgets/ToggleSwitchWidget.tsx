@@ -1,5 +1,5 @@
 import { DEFAULT_WIDGET_COLOR, darken, lighten, withOpacity } from '@shared/color'
-import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
+import { resolveBorderColor, resolveColor, resolveExprColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { SwitchPosition, ToggleSwitchWidget } from '@shared/types'
 import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabel, renderWidgetLabels } from './labels'
@@ -292,7 +292,7 @@ export function ToggleSwitchWidgetContent({
   const bezelShape = widget.bezelShape ?? 'circle'
   const leverLength = widget.leverLength ?? LEVER_LENGTH
   const leverBorderWidth = widget.leverBorderWidth ?? 0
-  const leverBorderColor = withOpacity(widget.leverBorderColor ?? 'transparent', 1)
+  const leverBorderColor = withOpacity(resolveExprColor(widget.leverBorderColor ?? 'transparent', widget.leverBorderColorExpr, variables).color ?? 'transparent', 1)
   const leverTipRadius = widget.leverTipRadius ?? LEVER_TIP_HALF_WIDTH
   const leverBaseRadius = widget.leverBaseRadius ?? LEVER_BASE_HALF_WIDTH
   const circleTopStyle = widget.circleTopStyle ?? 'rounded'
@@ -322,11 +322,19 @@ export function ToggleSwitchWidgetContent({
   // innerBezelColor with no visible cause. Defaults straight to 1 instead,
   // so setting a color actually shows it regardless of the bezel's own
   // opacity.
-  const innerBezelColor = withOpacity(widget.innerBezelColor ?? resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, widget.innerBezelOpacity ?? 1)
+  const innerBezelColor = withOpacity(
+    resolveExprColor(widget.innerBezelColor ?? resolvedTrack.color ?? DEFAULT_WIDGET_COLOR, widget.innerBezelColorExpr, variables).color ??
+      resolvedTrack.color ??
+      DEFAULT_WIDGET_COLOR,
+    widget.innerBezelOpacity ?? 1
+  )
   // 0 (invisible) by default — see its own comment in shared/types.ts for why.
   const innerBezelRadius = widget.innerBezelRadius ?? 0
   const innerBezelBorderWidth = widget.innerBezelBorderWidth ?? 0
-  const innerBezelBorderColor = withOpacity(widget.innerBezelBorderColor ?? 'transparent', 1)
+  const innerBezelBorderColor = withOpacity(
+    resolveExprColor(widget.innerBezelBorderColor ?? 'transparent', widget.innerBezelBorderColorExpr, variables).color ?? 'transparent',
+    1
+  )
   const leverShape = widget.leverShape ?? 'normal'
   const barWidth = widget.barWidth ?? BAR_WIDTH
   const barHeight = widget.barHeight ?? BAR_HEIGHT
@@ -335,7 +343,7 @@ export function ToggleSwitchWidgetContent({
     widget.barOpacity ?? resolvedFill.opacity ?? widget.fill.backgroundOpacity ?? 1
   )
   const barBorderWidth = widget.barBorderWidth ?? 0
-  const barBorderColor = withOpacity(widget.barBorderColor ?? 'transparent', 1)
+  const barBorderColor = withOpacity(resolveExprColor(widget.barBorderColor ?? 'transparent', widget.barBorderColorExpr, variables).color ?? 'transparent', 1)
   const barBorderRadius = widget.barBorderRadius ?? 0
   const resolvedGuard = resolveColor(widget.guard ?? {}, variables)
   const guardColor = withOpacity(resolvedGuard.color ?? '#c0392b', resolvedGuard.opacity ?? widget.guard?.backgroundOpacity ?? 1)

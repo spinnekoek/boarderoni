@@ -42,6 +42,7 @@ import { ToggleSwitchWidgetContent } from './widgets/ToggleSwitchWidget'
 import { DropdownWidgetContent } from './widgets/DropdownWidget'
 import { LabelWidgetContent } from './widgets/LabelWidget'
 import { LineWidgetContent } from './widgets/LineWidget'
+import { WindowWidgetContent } from './widgets/WindowWidget'
 import { useAdjusterDrag } from '../useAdjusterDrag'
 import { useMultiPressArbiter } from '../useMultiPressArbiter'
 import { useMorphSliderDrag } from '../useMorphSliderDrag'
@@ -627,6 +628,7 @@ const ClientWidget = memo(function ClientWidget({
   if (widget.type === 'switch-dial') return <ClientDialSwitch widget={widget} variables={variables} />
   if (widget.type === 'switch-toggle') return <ClientToggleSwitch widget={widget} variables={variables} />
   if (widget.type === 'dropdown') return <ClientDropdown widget={widget} variables={variables} />
+  if (widget.type === 'window') return <WindowWidgetContent widget={widget} variables={variables} deckId={deckId} />
   return <TriggerableClientWidget widget={widget} variables={variables} error={error} />
 }, clientWidgetPropsEqual)
 

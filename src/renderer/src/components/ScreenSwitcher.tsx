@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useDashboardStore } from '../store'
 import { useConfirmStore } from '../confirmStore'
 import { uniqueVariableName } from '../variableNaming'
+import { allDeckWidgets } from '@shared/subDecks'
 import type { SubDeck } from '@shared/types'
 
 // One row of the popover — a plain deck's own main view (name fixed, no
@@ -65,7 +66,23 @@ function ScreenRow({
 // add/rename/delete for the sub-deck list — everything SubDecksModal used
 // to need a separate dialog for, folded into one popover here instead.
 export function ScreenSwitcher(): React.JSX.Element {
-  const subDecks = useDashboardStore((s) => s.dashboard.subDecks) ?? []
+  const dashboard = useDashboardStore((s) => s.dashboard)
+  // Unfiltered — used for the "what am I currently editing" label, since
+  // that can legitimately be a window widget's own nested sub-deck (see
+  // windowSubDeckIds below), even though that one's hidden from the
+  // pick-a-screen LIST just below it.
+  const subDecks = dashboard.subDecks ?? []
+  // A window widget's own nested content is stored as a normal
+  // Dashboard.subDecks entry (see WindowWidget.subDeckId in shared/types.ts)
+  // purely to reuse this exact editing mechanism — it isn't a real,
+  // separately-navigable screen, so it's excluded from the switcher's own
+  // list. Entering/leaving it instead happens by double-clicking the window
+  // widget on the canvas (or its own Properties panel button).
+  const windowSubDeckIds = useMemo(
+    () => new Set(allDeckWidgets(dashboard).filter((w) => w.type === 'window').map((w) => w.subDeckId)),
+    [dashboard]
+  )
+  const visibleSubDecks = subDecks.filter((sd) => !windowSubDeckIds.has(sd.id))
   const editingSubDeckId = useDashboardStore((s) => s.editingSubDeckId)
   const setEditingSubDeck = useDashboardStore((s) => s.setEditingSubDeck)
   const addSubDeck = useDashboardStore((s) => s.addSubDeck)
@@ -134,7 +151,7 @@ export function ScreenSwitcher(): React.JSX.Element {
       {open && (
         <div className="screen-switcher__menu">
           <ScreenRow name="Main deck" active={editingSubDeckId === null} onSelect={() => switchTo(null)} />
-          {subDecks.map((subDeck) =>
+          {visibleSubDecks.map((subDeck) =>
             renamingId === subDeck.id ? (
               <input
                 key={subDeck.id}

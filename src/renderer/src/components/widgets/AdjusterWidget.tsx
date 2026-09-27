@@ -1,5 +1,5 @@
 import { DEFAULT_WIDGET_COLOR, withOpacity } from '@shared/color'
-import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
+import { resolveBorderColor, resolveColor, resolveExprColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { AdjusterKnobWidget, AdjusterSliderWidget } from '@shared/types'
 
 type AdjusterWidget = AdjusterSliderWidget | AdjusterKnobWidget
@@ -109,9 +109,15 @@ function AdjusterKnob({
   const startAngle = widget.startAngle ?? DEFAULT_START_ANGLE
   const endAngle = widget.endAngle ?? DEFAULT_END_ANGLE
   const handleAngle = startAngle + fraction * (endAngle - startAngle)
-  const shapeColor = (widget.dialShape ?? 'needle') === 'square' ? (widget.squareColor ?? fillColor) : (widget.circleColor ?? fillColor)
+  const shapeColor =
+    (widget.dialShape ?? 'needle') === 'square'
+      ? (resolveExprColor(widget.squareColor ?? fillColor, widget.squareColorExpr, variables).color ?? fillColor)
+      : (resolveExprColor(widget.circleColor ?? fillColor, widget.circleColorExpr, variables).color ?? fillColor)
   const bezelRadius = widget.bezelRadius ?? ARC_RADIUS - ARC_STROKE_WIDTH
-  const bezelColor = withOpacity(widget.bezelColor ?? trackBaseColor, widget.bezelOpacity ?? 1)
+  const bezelColor = withOpacity(
+    resolveExprColor(widget.bezelColor ?? trackBaseColor, widget.bezelColorExpr, variables).color ?? trackBaseColor,
+    widget.bezelOpacity ?? 1
+  )
   const bezelBorderWidth = widget.bezelBorderWidth ?? 0
   const innerBezelColor = withOpacity(widget.innerBezelColor ?? trackBaseColor, widget.innerBezelOpacity ?? 1)
   const innerBezelRadius = widget.innerBezelRadius ?? 0
@@ -169,9 +175,10 @@ function AdjusterKnob({
           needleHalfWidth={3}
           needleTipLength={12}
           needleCenterRadius={5}
+          variables={variables}
         />
       </svg>
-      <SquareIndicatorOverlay style={widget} angle={handleAngle} shapeColor={shapeColor} w={widget.w} h={widget.h} />
+      <SquareIndicatorOverlay style={widget} angle={handleAngle} shapeColor={shapeColor} w={widget.w} h={widget.h} variables={variables} />
     </>
   )
 }

@@ -1,5 +1,5 @@
 import { DEFAULT_WIDGET_COLOR, pickAutoActiveColor, withOpacity } from '@shared/color'
-import { resolveBorderColor, resolveColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
+import { resolveBorderColor, resolveColor, resolveExprColor, resolveNumericExpr, type VariableMap } from '@shared/expr'
 import type { DetentStyle, DialSwitchWidget } from '@shared/types'
 import { useEditorSettings } from '../../settingsStore'
 import { renderWidgetLabel, renderWidgetLabels } from './labels'
@@ -108,6 +108,7 @@ export function DialSwitchWidgetContent({
   // (which live outside that SVG and must do the scaling by hand).
   const detentBorderWidthVb = detentStyle?.borderWidth ?? 0
   const detentBorderRadiusVb = detentStyle?.borderRadius ?? defaultDetentBorderRadius ?? 0
+  const detentBorderColor = resolveExprColor(detentStyle?.borderColor, detentStyle?.borderColorExpr, variables).color
 
   // Precomputed once per position so both the (triangle-only) in-SVG marker
   // below and the plain-HTML marker/labels further down share the same
@@ -140,7 +141,10 @@ export function DialSwitchWidgetContent({
   // Passed to SquareIndicatorOverlay below — see its own doc comment for why
   // a 'square' indicator renders as an HTML div instead of joining
   // DialShapeGraphic's SVG output.
-  const shapeColor = (widget.dialShape ?? 'needle') === 'square' ? (widget.squareColor ?? needleColor) : (widget.circleColor ?? needleColor)
+  const shapeColor =
+    (widget.dialShape ?? 'needle') === 'square'
+      ? (resolveExprColor(widget.squareColor ?? needleColor, widget.squareColorExpr, variables).color ?? needleColor)
+      : (resolveExprColor(widget.circleColor ?? needleColor, widget.circleColorExpr, variables).color ?? needleColor)
 
   return (
     <div
@@ -173,7 +177,7 @@ export function DialSwitchWidgetContent({
                 className="deck-dial-switch__detent-svg"
                 d={roundedPolygonPath(points, detentBorderRadiusVb)}
                 fill={dotColor}
-                stroke={detentStyle?.borderColor}
+                stroke={detentBorderColor}
                 strokeWidth={detentBorderWidthVb}
                 transform={`rotate(${angle} ${dotVb.x} ${dotVb.y})`}
                 onClick={handleSelect}
@@ -206,7 +210,7 @@ export function DialSwitchWidgetContent({
                       borderRadius: detentBorderRadius,
                       borderWidth: detentBorderWidth,
                       borderStyle: detentBorderWidth > 0 ? ('solid' as const) : undefined,
-                      borderColor: detentStyle?.borderColor
+                      borderColor: detentBorderColor
                     }
                   : undefined)
               }}
@@ -242,9 +246,10 @@ export function DialSwitchWidgetContent({
           needleHalfWidth={2}
           needleTipLength={10}
           needleCenterRadius={4}
+          variables={variables}
         />
       </svg>
-      <SquareIndicatorOverlay style={widget} angle={needleAngle} shapeColor={shapeColor} w={widget.w} h={widget.h} />
+      <SquareIndicatorOverlay style={widget} angle={needleAngle} shapeColor={shapeColor} w={widget.w} h={widget.h} variables={variables} />
       {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
       </div>
     </div>
