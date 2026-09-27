@@ -23,7 +23,7 @@ import type { DeckRoom } from '../index'
 import type { AppSettings } from '../appSettings'
 import { getAppSettings } from '../appSettings'
 import { PLUGIN_TYPES, getPluginType } from '../../shared/plugins'
-import { findWidgetAnywhere, getSubDeckWidgets, setSubDeckWidgets } from '../../shared/subDecks'
+import { findSubDeck, findWidgetAnywhere, getSubDeckWidgets, setSubDeckWidgets } from '../../shared/subDecks'
 import { toVariableMap } from '../../shared/expr'
 // Sandboxed main-process-only evaluator, not shared/expr.ts's own plain
 // `new Function` version — see sandboxedExpr.ts's own top comment.
@@ -187,16 +187,113 @@ async function describeVariables(dashboard: Dashboard): Promise<Map<string, Vari
 // Tool.inputSchema must itself be `{type: 'object', properties, ...}` at the
 // top level — Widget/Plugin are discriminated unions, not objects, so
 // neither can BE a tool's whole inputSchema directly; every tool that takes
-// one embeds it as a single property instead. `definitions` has to live at
-// the wrapper's own root for the embedded $ref to resolve, so it's hoisted
-// up into the wrapper's own inputSchema rather than nested under the
-// property itself.
-function objectSchema(properties: Record<string, unknown>, required: string[], definitions?: Record<string, unknown>): Tool['inputSchema'] {
-  return { type: 'object', properties, required, ...(definitions ? { definitions } : {}) } as Tool['inputSchema']
+// one embeds it as a single property instead.
+function objectSchema(properties: Record<string, unknown>, required: string[]): Tool['inputSchema'] {
+  return { type: 'object', properties, required } as Tool['inputSchema']
 }
 
-function refProperty(named: { $ref: string; definitions: Record<string, unknown> }): { schema: object; definitions: Record<string, unknown> } {
-  return { schema: { $ref: named.$ref }, definitions: named.definitions as Record<string, unknown> }
+// scripts/generate-mcp-schemas.ts's ts-json-schema-generator output
+// (MCP_SCHEMAS) is a normal $ref + shared `definitions` map JSON Schema —
+// first tried as-is (`definitions` hoisted to the tool's own inputSchema
+// root), then with `definitions` renamed to the newer `$defs` keyword on the
+// theory that whatever's between an MCP client and this server only
+// understood that name. Neither survived: confirmed live that at least one
+// real client's own tool-calling path drops the sibling
+// definitions/$defs block entirely while passing the rest of the schema
+// through, so the $ref resolves to nothing on that side regardless of what
+// the shared map is named — the whole argument (create_global_action's
+// `globalAction`, send_action's `action`, ...) gets silently dropped before
+// the call is even made. The only representation that survives THAT is one
+// with no $ref (or definitions/$defs) anywhere: every reference resolved
+// and inlined directly into the property's own schema, which is what this
+// does. Recursive types (SequenceStep, via ConditionStep.whenTrue/
+// whenFalse: SequenceStep[]) can't be inlined to infinite depth — a type
+// already expanded once on the current branch gets a terminal placeholder
+// instead of expanding again, so one level of nesting (a condition inside a
+// condition) is fully spelled out but deeper than that isn't. A real gap
+// for a genuinely multi-level-nested global action, but it keeps the schema
+// finite for every client instead of using a reference shape that's already
+// been confirmed not to work for at least one.
+function inlineRefs(node: unknown, defs: Record<string, unknown>, stack: readonly string[]): unknown {
+  if (Array.isArray(node)) return node.map((n) => inlineRefs(n, defs, stack))
+  if (node && typeof node === 'object') {
+    const obj = node as Record<string, unknown>
+    if (typeof obj.$ref === 'string' && obj.$ref.startsWith('#/definitions/')) {
+      const typeName = obj.$ref.slice('#/definitions/'.length)
+      if (stack.includes(typeName)) {
+        return {
+          type: 'object',
+          description: `Same shape as ${typeName} used elsewhere in this same schema — not expanded again here to keep a recursive type's schema finite. Nesting one level deeper than shown is still accepted by the server even though this schema doesn't spell it out.`
+        }
+      }
+      const target = defs[typeName]
+      if (target === undefined) return node
+      return inlineRefs(target, defs, [...stack, typeName])
+    }
+    const result: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(obj)) {
+      // $schema/definitions are only meaningful on the original $ref+definitions
+      // pair being resolved here — once inlined, neither means anything on the
+      // (now self-contained) result, and definitions in particular would just
+      // reintroduce the very thing this function exists to get rid of.
+      if (key === 'definitions' || key === '$schema') continue
+      result[key] = inlineRefs(value, defs, stack)
+    }
+    return result
+  }
+  return node
+}
+
+function refProperty(named: { $ref: string; definitions: Record<string, unknown> }): { schema: object } {
+  return { schema: inlineRefs(named, named.definitions, []) as object }
+}
+
+// Walks a RAW (`#/definitions/...`-shaped, pre-inlining) definitions map,
+// stripping `id` out of `typeName`'s own `required` array — see
+// refPropertyWithOptionalId's own comment for why. Widget is a union of
+// every concrete widget type (ButtonWidget, ToggleSwitchWidget, ...) rather
+// than one plain object definition, so an `anyOf` has to be walked (each
+// variant has its own `id` in its own `required` array) instead of patching
+// one named definition directly.
+function stripIdFromRequired(
+  definitions: Record<string, { required?: string[]; anyOf?: { $ref: string }[] } | undefined>,
+  typeName: string
+): void {
+  const target = definitions[typeName]
+  if (!target) return
+  if (target.anyOf) {
+    for (const variant of target.anyOf) {
+      stripIdFromRequired(definitions, variant.$ref.replace('#/definitions/', ''))
+    }
+    return
+  }
+  if (target.required) {
+    definitions[typeName] = { ...target, required: target.required.filter((f) => f !== 'id') }
+  }
+}
+
+// Same as refProperty, but for a create_* tool's own top-level object
+// (Widget/Plugin/GlobalAction), whose handler always fills in a missing
+// `id` itself (randomUUID(), overridable by supplying one) — see
+// create_widget/create_event_source/create_global_action below. The
+// ts-json-schema-generator-derived schema has no way to know that (every
+// one of those types' own `id: string` field is genuinely non-optional
+// once stored), so it lists `id` as required same as every other field,
+// which forces a client that validates tool arguments against inputSchema
+// before calling (many do) to always fabricate one — and a client that
+// instead treats "required but I have nothing to put here" as reason not
+// to call the tool at all can't create one, which was reported as
+// create_global_action simply not working. This strips `id` out of just
+// the relevant definition(s) (or, for Widget, every variant in its own
+// anyOf) on a shallow clone, so nested types that DO need a caller-
+// supplied id (e.g. a SequenceStep's own `id`, which nothing
+// auto-generates) are untouched, and the shared MCP_SCHEMAS definitions
+// object itself is never mutated. Done BEFORE inlining (inlineRefs has
+// already thrown the definitions map away by the time it returns).
+function refPropertyWithOptionalId(named: { $ref: string; definitions: Record<string, unknown> }, typeName: string): { schema: object } {
+  const definitions = { ...named.definitions } as Record<string, { required?: string[]; anyOf?: { $ref: string }[] } | undefined>
+  stripIdFromRequired(definitions, typeName)
+  return { schema: inlineRefs(named, definitions as Record<string, unknown>, []) as object }
 }
 
 const DECK_ID_PROP = { type: 'string', description: 'The deck id, as returned by list_decks.' }
@@ -261,9 +358,9 @@ function requireEditorWindowOnDeck(deps: McpDeps, deckId: string): BrowserWindow
 }
 
 function buildTools(): ToolDef[] {
-  const widgetRef = refProperty(MCP_SCHEMAS.Widget)
-  const pluginRef = refProperty(MCP_SCHEMAS.Plugin)
-  const globalActionRef = refProperty(MCP_SCHEMAS.GlobalAction)
+  const widgetRef = refPropertyWithOptionalId(MCP_SCHEMAS.Widget, 'Widget')
+  const pluginRef = refPropertyWithOptionalId(MCP_SCHEMAS.Plugin, 'Plugin')
+  const globalActionRef = refPropertyWithOptionalId(MCP_SCHEMAS.GlobalAction, 'GlobalAction')
   const actionRef = refProperty(MCP_SCHEMAS.WidgetAction)
   const stepRef = refProperty(MCP_SCHEMAS.SequenceStep)
 
@@ -296,10 +393,100 @@ function buildTools(): ToolDef[] {
     {
       tool: {
         name: 'get_dashboard',
-        description: "Get a deck's full current dashboard (widgets, variables, event sources, sub-decks).",
-        inputSchema: objectSchema({ deckId: DECK_ID_PROP }, ['deckId'])
+        description:
+          "Get a deck's full current dashboard (widgets, variables, event sources, sub-decks) — can be large for a deck with many widgets; use list_widgets first if you just need widget ids/types/labels. Pass `subDeckId` (an id from this deck's own `dashboard.subDecks`) to get just that one sub-deck's own {id, name, widgets, gridSize, canvasWidth, canvasHeight} instead of the whole deck — a sub-deck id is only ever valid alongside the deckId that contains it, NOT as a deckId of its own (sub-decks are not separate decks and getOrLoadRoom/other tools can't address them directly).",
+        inputSchema: objectSchema(
+          { deckId: DECK_ID_PROP, subDeckId: { type: 'string', description: 'Optional — an id from dashboard.subDecks, to get just that sub-deck instead of the whole dashboard.' } },
+          ['deckId']
+        )
       },
-      handler: (deps, args) => textResult(requireRoom(deps, args.deckId).dashboard)
+      handler: (deps, args) => {
+        const room = requireRoom(deps, args.deckId)
+        const subDeckId = optionalString(args, 'subDeckId')
+        if (!subDeckId) return textResult(room.dashboard)
+        const subDeck = findSubDeck(room.dashboard, subDeckId)
+        if (!subDeck) throw new McpToolError(`Unknown sub-deck: ${subDeckId}`)
+        return textResult(subDeck)
+      }
+    },
+    {
+      tool: {
+        name: 'update_dashboard',
+        description:
+          "Patch a deck's own top-level appearance/layout fields: backgroundColor, backgroundColorExpr, backgroundFit ('cover'|'contain'|'stretch'|'tile'|'none'), backgroundAnchor ('top-left'|'top-center'|'top-right'|'center-left'|'center'|'center-right'|'bottom-left'|'bottom-center'|'bottom-right'), gridSize, canvasWidth, canvasHeight — the main deck's own view, not any sub-deck's (sub-decks have no MCP tool for these yet). Everything else on a deck lives elsewhere: widgets (create_widget/update_widget/delete_widget), event sources (create_event_source/update_event_source/delete_event_source), global actions (create_global_action/update_global_action/delete_global_action), variables (set_variable), the deck's display name (rename_deck). The background IMAGE itself has no MCP tool (no upload path exists here) — only backgroundFit/backgroundAnchor, which affect how whatever image is already set gets displayed. Any other key in `patch` is silently ignored rather than erroring.",
+        inputSchema: objectSchema(
+          {
+            deckId: DECK_ID_PROP,
+            patch: {
+              type: 'object',
+              description: 'Partial: backgroundColor, backgroundColorExpr, backgroundFit, backgroundAnchor, gridSize, canvasWidth, canvasHeight.',
+              additionalProperties: true
+            }
+          },
+          ['deckId', 'patch']
+        )
+      },
+      handler: (deps, args) => {
+        const room = requireRoom(deps, args.deckId)
+        const patch = args.patch
+        if (!patch || typeof patch !== 'object') throw new McpToolError('patch must be an object')
+        const patchObj = patch as Record<string, unknown>
+        const allowedKeys = ['backgroundColor', 'backgroundColorExpr', 'backgroundFit', 'backgroundAnchor', 'gridSize', 'canvasWidth', 'canvasHeight'] as const
+        const filtered: Record<string, unknown> = {}
+        for (const key of allowedKeys) {
+          if (key in patchObj) filtered[key] = patchObj[key]
+        }
+        const updated = { ...room.dashboard, ...filtered } as Dashboard
+        deps.applyDashboardUpdate(room, updated, true)
+        return textResult(Object.fromEntries(allowedKeys.map((key) => [key, updated[key]])))
+      }
+    },
+    {
+      tool: {
+        name: 'list_widgets',
+        description:
+          "List a deck's widgets as lightweight summaries ({id, type, label, subDeckId, subDeckName}) — main deck plus every sub-deck, flattened into one array, unless narrowed with `subDeckId` (main deck only) or `type`. Use this instead of get_dashboard when you just need to find/count/identify widgets (e.g. \"how many switch-toggle widgets\") — get_dashboard's full widget objects (styles, positions, actions, every *Expr field) can be large enough to overflow a client's context on a deck with many widgets. `subDeckId` here is null for a main-deck widget, or the owning sub-deck's id (also usable as get_dashboard's own `subDeckId` to fetch that sub-deck directly) — pass `subDeckId: ''` to list only the main deck's own widgets.",
+        inputSchema: objectSchema(
+          {
+            deckId: DECK_ID_PROP,
+            subDeckId: { type: 'string', description: "Optional — restrict to one view: '' for the main deck, or a sub-deck id. Omit to list every view's widgets." },
+            type: { type: 'string', description: "Optional — restrict to one widget type, e.g. 'switch-toggle'." }
+          },
+          ['deckId']
+        )
+      },
+      handler: (deps, args) => {
+        const room = requireRoom(deps, args.deckId)
+        const dashboard = room.dashboard
+        const subDeckId = optionalString(args, 'subDeckId')
+        const type = optionalString(args, 'type')
+
+        let entries: { widget: Widget; subDeckId: string | null; subDeckName: string | null }[]
+        if (subDeckId === undefined) {
+          entries = [
+            ...dashboard.widgets.map((widget) => ({ widget, subDeckId: null, subDeckName: null })),
+            ...(dashboard.subDecks ?? []).flatMap((sd) => sd.widgets.map((widget) => ({ widget, subDeckId: sd.id, subDeckName: sd.name })))
+          ]
+        } else if (subDeckId === '') {
+          entries = dashboard.widgets.map((widget) => ({ widget, subDeckId: null, subDeckName: null }))
+        } else {
+          const subDeck = findSubDeck(dashboard, subDeckId)
+          if (!subDeck) throw new McpToolError(`Unknown sub-deck: ${subDeckId}`)
+          entries = subDeck.widgets.map((widget) => ({ widget, subDeckId: subDeck.id, subDeckName: subDeck.name }))
+        }
+
+        if (type) entries = entries.filter((e) => e.widget.type === type)
+
+        return textResult(
+          entries.map((e) => ({
+            id: e.widget.id,
+            type: e.widget.type,
+            label: 'label' in e.widget ? (e.widget.label?.text ?? e.widget.label?.textExpr) : undefined,
+            subDeckId: e.subDeckId,
+            subDeckName: e.subDeckName
+          }))
+        )
+      }
     },
     {
       tool: {
@@ -379,7 +566,7 @@ function buildTools(): ToolDef[] {
         name: 'send_action',
         description:
           `Run one action against a deck right now, with no widget needed as a vehicle for it — the case trigger_action can't cover, since that one only runs an action sequence already sitting on some existing widget's event. Meant for a client that reads state via list_variables/get_action_log and then decides what to do next — e.g. "read the current COMM1 channel, then send the DCS command to change it" — without first having to create_widget a throwaway button just to attach that action to. Takes the same WidgetAction union create_widget/update_widget accept for a widget event or switch position's own action steps: send-dcs-command, update-state, call-rest, set-windows-audio, play-sound, navigate-subdeck, open-overlay, close-overlay, keypress, or none (\`kind\` selects which). ${DCS_COMMAND_SEMANTICS} ${UPDATE_STATE_SEMANTICS} ${CALL_REST_SEMANTICS} navigate-subdeck/open-overlay/close-overlay have no real triggering client to route their reply to — that reply (if any) comes back in this call's own result instead of visibly affecting anything. play-sound with target 'client' or 'both' has the exact same gap: the client half of it is a sound:play message with nowhere real to go, so it silently lands inertly in this call's own result instead of playing on any device — only target 'server'/'both' actually produces audible sound (on the machine running Boarderoni itself), since that half routes to the desktop editor's own socket regardless of who triggered it. For more than one action — e.g. a press then a release with a real pause in between, like holding a spring-loaded switch — use send_actions instead: pacing that with repeated send_action calls plus your own sleep between them is not equivalent, since the deck (and anything watching it) sees each call as a separate, fully independent event rather than one held gesture.`,
-        inputSchema: objectSchema({ deckId: DECK_ID_PROP, action: actionRef.schema }, ['deckId', 'action'], actionRef.definitions)
+        inputSchema: objectSchema({ deckId: DECK_ID_PROP, action: actionRef.schema }, ['deckId', 'action'])
       },
       handler: async (deps, args) => {
         const room = requireRoom(deps, args.deckId)
@@ -393,11 +580,7 @@ function buildTools(): ToolDef[] {
         name: 'send_actions',
         description:
           `Run a whole sequence of steps against a deck right now, in order — send_action for more than one step. Each step is a delay ({"kind":"delay","id":...,"delayMs":...}), an action ({"kind":"action","id":...,"action":<WidgetAction, see send_action for the union>}), or a condition ({"kind":"condition","id":...,"condition":<expression>,"whenTrue":[...],"whenFalse":[...]}) — the exact SequenceStep union a widget event's own stored sequence is made of (see create_widget/update_widget's \`events\`), run through the same engine: a delay step is a real awaited pause server-side, not something to approximate by pacing separate send_action calls with your own sleep in between. \`id\` on each step only needs to be unique within its own steps array (a fresh uuid is fine) — nothing persists it. Stops at the first step that throws (including inside whichever condition branch was taken) and reports which one in the error, same as a stored sequence failing partway; steps before it already ran and are not undone.`,
-        inputSchema: objectSchema(
-          { deckId: DECK_ID_PROP, steps: { type: 'array', items: stepRef.schema, minItems: 1 } },
-          ['deckId', 'steps'],
-          stepRef.definitions
-        )
+        inputSchema: objectSchema({ deckId: DECK_ID_PROP, steps: { type: 'array', items: stepRef.schema, minItems: 1 } }, ['deckId', 'steps'])
       },
       handler: async (deps, args) => {
         const room = requireRoom(deps, args.deckId)
@@ -428,8 +611,7 @@ function buildTools(): ToolDef[] {
         description: `Add a new widget to a deck (or one of its sub-decks). widget.id is generated if omitted. Every *Expr field (colorExpr, borderColorExpr, textExpr, valueExpr, visibleExpr, activeStateExpr, etc.) is an expression — ${EXPRESSION_SEMANTICS} ${LABEL_TEXT_SEMANTICS} ${DCS_COMMAND_SEMANTICS} ${UPDATE_STATE_SEMANTICS} ${CALL_REST_SEMANTICS}`,
         inputSchema: objectSchema(
           { deckId: DECK_ID_PROP, subDeckId: { type: 'string', description: 'Omit for the main deck.' }, widget: widgetRef.schema },
-          ['deckId', 'widget'],
-          widgetRef.definitions
+          ['deckId', 'widget']
         )
       },
       handler: (deps, args) => {
@@ -499,7 +681,7 @@ function buildTools(): ToolDef[] {
       tool: {
         name: 'create_global_action',
         description: `Add a global action to a deck. \`watch\` lists the variable names that re-check the rule (like a useEffect dependency array — a variable the condition reads but that isn't listed here will NOT re-check it). \`trigger: 'change'\` fires only when the condition flips false->true; 'always' fires on every watched change while it's true. globalAction.id is generated if omitted. \`condition\` is an expression — ${EXPRESSION_SEMANTICS}`,
-        inputSchema: objectSchema({ deckId: DECK_ID_PROP, globalAction: globalActionRef.schema }, ['deckId', 'globalAction'], globalActionRef.definitions)
+        inputSchema: objectSchema({ deckId: DECK_ID_PROP, globalAction: globalActionRef.schema }, ['deckId', 'globalAction'])
       },
       handler: (deps, args) => {
         const room = requireRoom(deps, args.deckId)
@@ -700,7 +882,7 @@ function buildTools(): ToolDef[] {
         name: 'create_event_source',
         description:
           "Add a new event source (plugin instance) to a deck. plugin.id is generated if omitted. Call list_plugin_types first: each mapping's own `field` must match a key from that plugin `kind`'s own `fields` there (or list_dcs_bios_fields for 'dcsbios', whose fields depend on `config.aircraft` and so aren't listed statically), and each `config` key/type/constraint listed there applies to this plugin instance's own `config` object. A 'windowsAudio' instance's `config.deviceName` should come from list_windows_audio_devices; a 'dcsbios' instance's `config.aircraft` from list_dcs_bios_aircraft; a 'screenCapture' instance's `config.displayId` from list_displays.",
-        inputSchema: objectSchema({ deckId: DECK_ID_PROP, plugin: pluginRef.schema }, ['deckId', 'plugin'], pluginRef.definitions)
+        inputSchema: objectSchema({ deckId: DECK_ID_PROP, plugin: pluginRef.schema }, ['deckId', 'plugin'])
       },
       handler: (deps, args) => {
         const room = requireRoom(deps, args.deckId)
