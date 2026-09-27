@@ -13,8 +13,8 @@ android {
         applicationId = "com.boarderoni.mobile"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.1.0-alpha.4"
+        versionCode = 5
+        versionName = "0.1.0-alpha.5"
     }
 
     // CI provides these via ANDROID_KEYSTORE_PATH (a decoded file, see
