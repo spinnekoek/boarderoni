@@ -56,6 +56,7 @@ import { useDropdownDrag } from '../useDropdownDrag'
 import { DeviceSettingsModal } from './DeviceSettingsModal'
 import { ToastStack } from './ToastStack'
 import { useSettingsGesture } from '../useSettingsGesture'
+import { useMultiTouchGuard } from '../useMultiTouchGuard'
 
 // How long the WebSocket can stay disconnected before falling back to the
 // native Android searching/found-connect screen — see the effect below for
@@ -782,6 +783,7 @@ export function ClientCanvas(): React.JSX.Element {
   }, [connected])
 
   const { settingsOpen, closeSettings, handleTouchStart, handleTouchEnd } = useSettingsGesture()
+  const touchGuard = useMultiTouchGuard()
 
   return (
     <div
@@ -790,6 +792,7 @@ export function ClientCanvas(): React.JSX.Element {
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
+      {...touchGuard}
     >
       <LetterboxedCanvas canvasWidth={canvasSize.width} canvasHeight={canvasSize.height} onScaleChange={setMainScale}>
         {backgroundImageVersion && deckId && (

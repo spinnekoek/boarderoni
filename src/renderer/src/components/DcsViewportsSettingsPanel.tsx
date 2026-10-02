@@ -115,6 +115,19 @@ export function DcsViewportsSettingsPanel(): React.JSX.Element {
         </p>
       )}
 
+      {status?.rwrPatches?.map((p) => (
+        <p key={p.key} className={`properties__hint${p.state === 'patched' ? '' : ' dcsbios-settings__error'}`}>
+          {p.label} export:{' '}
+          {p.state === 'patched'
+            ? 'game file patched (original backed up as .boarderoni.bak). Re-applied on every Save — DCS updates revert it.'
+            : p.state === 'unpatched'
+              ? 'game file not patched yet — Save to apply.'
+              : p.state === 'missing'
+                ? `can't patch — ${p.detail ?? 'file not found'}`
+                : `patch failed — ${p.detail ?? 'unknown error'}`}
+        </p>
+      ))}
+
       <label className="dcsbios-settings__field">
         <span>Virtual Display Driver install folder</span>
         <input

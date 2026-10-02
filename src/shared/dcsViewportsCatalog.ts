@@ -3,15 +3,21 @@
 // wiki.hoggitworld.com/view/Exporting_MFCD_Displays and the DCS-Helios-MFD
 // project's FA-18C MonitorSetup config) — `luaWriter.ts` uses these ids
 // verbatim as lua table names, and DCS looks them up by this exact string.
-// Hornet-only for now: it needs no core-game-file edits to export these
-// (some other modules require an extra dofile/ViewportHandling.lua injected
-// into the module's own cockpit init, which this deliberately avoids).
-// Adding another aircraft later is just another entry here.
+// The MFCDs need no core-game-file edits to export. Components that DO
+// (the RWR scopes) carry an `initFile`: the module's own indicator init
+// script, which main/dcsViewports/rwrPatcher.ts patches (with a one-time
+// backup) to call try_find_assigned_viewport(<id>). Adding another aircraft
+// later is just another entry here.
 import type { ScreenRegion } from './types'
 
 export interface DcsViewportComponent {
   id: string
   label: string
+  // Path (forward slashes) relative to the DCS install folder of the init
+  // script that must be patched for DCS to honor this viewport name.
+  initFile?: string
+  // Skips the MFCD-bezel crop applied to captures (see resolveComponentRegion).
+  noBezelInset?: boolean
 }
 
 export interface DcsAircraftProfile {
@@ -25,7 +31,13 @@ export const DCS_AIRCRAFT_CATALOG: Record<string, DcsAircraftProfile> = {
     components: [
       { id: 'LEFT_MFCD', label: 'Left DDI' },
       { id: 'RIGHT_MFCD', label: 'Right DDI' },
-      { id: 'CENTER_MFCD', label: 'AMPCD' }
+      { id: 'CENTER_MFCD', label: 'AMPCD' },
+      {
+        id: 'RWR_FA18C',
+        label: 'RWR (ALR-67)',
+        initFile: 'Mods/aircraft/FA-18C/Cockpit/Scripts/TEWS/indicator/RWR_ALR67_init.lua',
+        noBezelInset: true
+      }
     ]
   }
 }

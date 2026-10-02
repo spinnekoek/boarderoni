@@ -20,50 +20,68 @@ function soundUrl(sound: CustomSound): string {
   return `http://${host}:${SERVER_PORT}/sounds/${sound.id}?${contentAuthParams()}`
 }
 
-// Every Audio element currently playing, so nothing is garbage-collected
-// mid-playback — an element with no reference held can be collected while
-// still audible in some engines, cutting the sound off. Removed on end/error.
-const playing = new Set<HTMLAudioElement>()
+// One AudioContext for the whole renderer, created lazily on first playback
+// (constructing one before any user gesture throws/warns on some browsers).
+// Suspended-until-resumed is handled in playSound below, the same
+// autoplay-gate reasoning the old HTMLAudioElement version had.
+let audioCtx: AudioContext | null = null
+function getAudioCtx(): AudioContext {
+  if (!audioCtx) audioCtx = new AudioContext()
+  return audioCtx
+}
+
+// Decoded PCM per sound id, fetched and decoded exactly once no matter how
+// many times it's played. This is the actual fix for presses "bursting":
+// the old version did `new Audio(url)` on every single play, so a rapid
+// sequence of presses kicked off that many independent fetch+decode
+// pipelines, each with its own (similar) latency — they tended to finish
+// decoding and start audible playback at nearly the same moment instead of
+// staying spaced out like the presses that triggered them. A cached,
+// pre-decoded buffer turns playback into a synchronous
+// AudioBufferSourceNode.start() with no per-play I/O or decode latency to
+// bunch up.
+const bufferCache = new Map<string, Promise<AudioBuffer>>()
+
+function getBuffer(sound: CustomSound): Promise<AudioBuffer> {
+  const cached = bufferCache.get(sound.id)
+  if (cached) return cached
+  const promise = fetch(soundUrl(sound))
+    .then((res) => res.arrayBuffer())
+    .then((data) => getAudioCtx().decodeAudioData(data))
+  // A failed fetch/decode must not permanently poison the cache — the next
+  // play attempt (e.g. after the server comes back, or the sound is
+  // re-uploaded) should retry from scratch rather than rejecting forever.
+  promise.catch(() => bufferCache.delete(sound.id))
+  bufferCache.set(sound.id, promise)
+  return promise
+}
 
 export function playSound(sound: CustomSound, volume: number, startAtMs: number): void {
-  const audio = new Audio(soundUrl(sound))
-  audio.volume = Math.min(1, Math.max(0, volume))
-  playing.add(audio)
+  const ctx = getAudioCtx()
+  // Same autoplay-gate reasoning the old version's audio.play().catch had:
+  // a context created (or left suspended) with nobody having interacted
+  // yet should still work on the desktop editor (autoplayPolicy:
+  // 'no-user-gesture-required'), and resume() is a no-op if already running.
+  void ctx.resume().catch(() => {})
 
-  function release(): void {
-    playing.delete(audio)
-  }
-  audio.addEventListener('ended', release)
-  audio.addEventListener('error', release)
+  void getBuffer(sound)
+    .then((buffer) => {
+      const offsetSeconds = startAtMs > 0 ? startAtMs / 1000 : 0
+      // Guard against an offset past the end of the file, same as the old
+      // version's currentTime-past-duration guard — starting at/after the
+      // buffer's own duration would throw.
+      if (offsetSeconds >= buffer.duration) return
 
-  // currentTime can only be set once the browser knows the duration, so
-  // seeking has to wait for metadata rather than happening up front —
-  // setting it on a fresh element is silently ignored. This is what makes
-  // "start at ms" work for skipping the dead air at the front of a sample.
-  function start(): void {
-    if (startAtMs > 0) {
-      const seconds = startAtMs / 1000
-      // Guard against an offset past the end of the file, which would
-      // otherwise either throw or start at a clamped position and play
-      // nothing audible.
-      if (Number.isFinite(audio.duration) && seconds >= audio.duration) {
-        release()
-        return
-      }
-      audio.currentTime = seconds
-    }
-    // Rejects when the browser blocks autoplay. The desktop window sets
-    // autoplayPolicy: 'no-user-gesture-required' (see createEditorWindow) so
-    // a sound fired by a rule, with nobody touching the machine, still
-    // plays; a client in a real browser has usually had a tap by the
-    // time any action fires. Logged rather than thrown — a silent failure
-    // here should never take down whatever else the sequence was doing.
-    void audio.play().catch((err) => {
-      console.warn('[boarderoni] sound playback blocked', err)
-      release()
+      const gain = ctx.createGain()
+      gain.gain.value = Math.min(1, Math.max(0, volume))
+      gain.connect(ctx.destination)
+
+      const source = ctx.createBufferSource()
+      source.buffer = buffer
+      source.connect(gain)
+      source.start(0, offsetSeconds)
     })
-  }
-
-  if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) start()
-  else audio.addEventListener('loadedmetadata', start, { once: true })
+    .catch((err) => {
+      console.warn('[boarderoni] sound playback blocked', err)
+    })
 }

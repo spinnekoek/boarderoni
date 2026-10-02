@@ -2,8 +2,9 @@
 // same split as dcsBios/connectionManager.ts vs. its call sites.
 import type { ScreenRegion } from '../../shared/types'
 import type { DcsViewportsSettings, DcsViewportsStatus } from '../../shared/dcsViewportsTypes'
-import { computeComponentSlot } from '../../shared/dcsViewportsCatalog'
+import { computeComponentSlot, DCS_AIRCRAFT_CATALOG } from '../../shared/dcsViewportsCatalog'
 import { ensureVirtualDisplayReady, VIRTUAL_DISPLAY_RESOLUTION } from './driver'
+import { applyRwrPatches, checkRwrPatches } from './rwrPatcher'
 import { boarderoniLuaPath, getVirtualDesktopBounds, writeBoarderoniLua } from './luaWriter'
 import {
   getSettings as getStoredSettings,
@@ -22,7 +23,8 @@ let cachedStatus: DcsViewportsStatus = {
   bounds: null,
   luaWritten: false,
   luaPath: null,
-  recommendedGameResolution: null
+  recommendedGameResolution: null,
+  rwrPatches: []
 }
 const statusHandlers = new Set<(status: DcsViewportsStatus) => void>()
 
@@ -49,7 +51,7 @@ export function onStatusChange(handler: (status: DcsViewportsStatus) => void): (
 // (which can shift — e.g. the elevated PnP toggle in driver.ts renumbers
 // the device). Called on plugin enable, on settings Save, and once at
 // startup if already enabled (see main/index.ts).
-export async function refreshStatus(): Promise<DcsViewportsStatus> {
+export async function refreshStatus(applyPatches = false): Promise<DcsViewportsStatus> {
   const settings = getStoredSettings()
   const driverAndDisplay = await ensureVirtualDisplayReady(settings.vddInstallDir, VIRTUAL_DISPLAY_RESOLUTION.width, VIRTUAL_DISPLAY_RESOLUTION.height)
   const luaPath = settings.savedGamesDir ? boarderoniLuaPath(settings.savedGamesDir) : null
@@ -68,14 +70,16 @@ export async function refreshStatus(): Promise<DcsViewportsStatus> {
   // settings panel (it's a resolution, not a position).
   const desktopBounds = driverAndDisplay.bounds ? getVirtualDesktopBounds() : null
   const recommendedGameResolution = desktopBounds ? { width: desktopBounds.width, height: desktopBounds.height } : null
-  const status: DcsViewportsStatus = { ...driverAndDisplay, luaWritten, luaPath, recommendedGameResolution }
+  // Independent of the virtual display: patching only needs the install dir.
+  const rwrPatches = applyPatches ? applyRwrPatches(settings.dcsInstallDir) : checkRwrPatches(settings.dcsInstallDir)
+  const status: DcsViewportsStatus = { ...driverAndDisplay, luaWritten, luaPath, recommendedGameResolution, rwrPatches }
   setStatus(status)
   return status
 }
 
 export async function updateSettings(patch: Partial<DcsViewportsSettings>): Promise<DcsViewportsSettings> {
   const next = updateStoredSettings(patch)
-  await refreshStatus()
+  await refreshStatus(true)
   return next
 }
 
@@ -106,8 +110,9 @@ export function resolveComponentRegion(componentKey: string | undefined): { regi
   if (!aircraftId || !componentId) return null
   const slot = computeComponentSlot(cachedStatus.bounds, aircraftId, componentId)
   if (!slot) return null
-  const insetX = Math.round(slot.width * BEZEL_INSET_RATIO)
-  const insetY = Math.round(slot.height * BEZEL_INSET_RATIO)
+  const noInset = DCS_AIRCRAFT_CATALOG[aircraftId]?.components.find((c) => c.id === componentId)?.noBezelInset
+  const insetX = noInset ? 0 : Math.round(slot.width * BEZEL_INSET_RATIO)
+  const insetY = noInset ? 0 : Math.round(slot.height * BEZEL_INSET_RATIO)
   const region: ScreenRegion = {
     x: slot.x + insetX,
     y: slot.y + insetY,

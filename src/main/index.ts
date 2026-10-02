@@ -315,13 +315,11 @@ function migrateToggleSwitchGuardEvent(widget: ToggleSwitchWidget): ToggleSwitch
   return { ...widget, events: { ...widget.events, guardToggle: events.guardToggle ?? [] } }
 }
 
-// fireWhileDragging now defaults on for every toggle switch, including ones
-// saved before it existed (or before it was flipped on) — not just freshly
-// created ones (see Palette.tsx's handleAddToggleSwitch). Unconditional
-// rather than an `?? true` backfill: any existing false is itself pre-
-// default, from before this migration existed, not a deliberate opt-out.
+// fireWhileDragging defaults on for toggle switches saved before it existed
+// (undefined), but an explicit false is the user's own opt-out (Properties →
+// "Fire while dragging") and must survive a reload.
 function migrateToggleSwitchFireWhileDragging(widget: ToggleSwitchWidget): ToggleSwitchWidget {
-  if (widget.fireWhileDragging === true) return widget
+  if (widget.fireWhileDragging !== undefined) return widget
   return { ...widget, fireWhileDragging: true }
 }
 
@@ -329,7 +327,7 @@ function migrateToggleSwitchFireWhileDragging(widget: ToggleSwitchWidget): Toggl
 // DialSwitchWidget's own fireWhileDragging (see its own comment in
 // shared/types.ts).
 function migrateDialSwitchFireWhileDragging(widget: DialSwitchWidget): DialSwitchWidget {
-  if (widget.fireWhileDragging === true) return widget
+  if (widget.fireWhileDragging !== undefined) return widget
   return { ...widget, fireWhileDragging: true }
 }
 
@@ -2836,7 +2834,7 @@ async function applyAppSettingsPatch(patch: Partial<AppSettings>): Promise<AppSe
   const isDcsViewportsEnabled = settings.enabledPlugins.includes('dcsViewports')
   if (isDcsViewportsEnabled && !wasDcsViewportsEnabled) {
     try {
-      await refreshDcsViewportsStatus()
+      await refreshDcsViewportsStatus(true)
     } catch (err) {
       console.error('[boarderoni] dcsViewports enable-time refresh failed', err)
     }
