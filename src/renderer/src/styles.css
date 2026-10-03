@@ -3422,6 +3422,12 @@ button.deck-morph-cell:focus-visible {
 	min-height: 0;
 }
 
+/* .properties__hint's -4px top margin pokes out of the scroll container's
+   top edge when the hint is the first child, clipping its text. */
+.device-modal__body > .properties__hint:first-child {
+	margin-top: 0;
+}
+
 .device-modal__field {
 	display: flex;
 	flex-direction: column;

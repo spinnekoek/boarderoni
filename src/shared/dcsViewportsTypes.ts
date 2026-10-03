@@ -37,4 +37,15 @@ export interface DcsViewportsStatus {
   // the exact number instead of them having to work it out by hand. Null
   // until the virtual display is ready, same as bounds.
   recommendedGameResolution: { width: number; height: number } | null
+  // One entry per cataloged component that needs a game-file patch (RWRs).
+  rwrPatches: RwrPatchStatus[]
+}
+
+// 'unpatched' only appears from a read-only check; Save applies patches, so
+// after a refresh a present file is 'patched' or 'error'.
+export interface RwrPatchStatus {
+  key: string
+  label: string
+  state: 'patched' | 'unpatched' | 'missing' | 'error'
+  detail?: string
 }

@@ -235,11 +235,14 @@ export function useAdjusterDrag(
     if (!widget.valueExpr) return
     const restValue = resolveNumericExpr(widget.valueExpr, variables)
     if (restValue === undefined) return
-    if (Math.abs(restValue - dragValueRef.current) <= RECONCILE_EPSILON) {
+    // Scaled to the range: a 0..65535 knob sends a fractional value but
+    // DCS-BIOS reads back an integer, which never lands within a fixed 0.01.
+    const tolerance = Math.max(RECONCILE_EPSILON, Math.abs(widget.max - widget.min) * 0.001)
+    if (Math.abs(restValue - dragValueRef.current) <= tolerance) {
       dragValueRef.current = null
       setDragFraction(undefined)
     }
-  }, [variables, widget.valueExpr])
+  }, [variables, widget.valueExpr, widget.min, widget.max])
 
   // Caps outbound triggers to ~once per frame regardless of pointermove
   // event rate — pointermove can fire far faster than the WS round trip
