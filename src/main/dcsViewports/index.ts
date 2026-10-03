@@ -110,13 +110,15 @@ export function resolveComponentRegion(componentKey: string | undefined): { regi
   if (!aircraftId || !componentId) return null
   const slot = computeComponentSlot(cachedStatus.bounds, aircraftId, componentId)
   if (!slot) return null
-  const noInset = DCS_AIRCRAFT_CATALOG[aircraftId]?.components.find((c) => c.id === componentId)?.noBezelInset
+  const component = DCS_AIRCRAFT_CATALOG[aircraftId]?.components.find((c) => c.id === componentId)
+  const noInset = component?.noBezelInset
   const insetX = noInset ? 0 : Math.round(slot.width * BEZEL_INSET_RATIO)
   const insetY = noInset ? 0 : Math.round(slot.height * BEZEL_INSET_RATIO)
+  const extraLeft = component?.leftInsetPx ?? 0
   const region: ScreenRegion = {
-    x: slot.x + insetX,
+    x: slot.x + insetX + extraLeft,
     y: slot.y + insetY,
-    width: slot.width - insetX * 2,
+    width: slot.width - insetX * 2 - extraLeft,
     height: slot.height - insetY * 2
   }
   return { region, displayId: cachedStatus.displayId }

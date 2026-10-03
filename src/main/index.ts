@@ -918,14 +918,17 @@ function applyDcsViewportCrop(region: ScreenRegion, widget: DcsViewportWidget): 
   const right = clampCropPercent(widget.cropRight)
   const bottom = clampCropPercent(widget.cropBottom)
   const left = clampCropPercent(widget.cropLeft)
-  if (top === 0 && right === 0 && bottom === 0 && left === 0) return region
+  const nudgeX = Math.round(widget.nudgeX ?? 0)
+  const nudgeY = Math.round(widget.nudgeY ?? 0)
+  if (top === 0 && right === 0 && bottom === 0 && left === 0 && nudgeX === 0 && nudgeY === 0) return region
   const insetLeft = Math.round((region.width * left) / 100)
   const insetRight = Math.round((region.width * right) / 100)
   const insetTop = Math.round((region.height * top) / 100)
   const insetBottom = Math.round((region.height * bottom) / 100)
+  // Moving the image right means capturing from further left, hence the minus.
   return {
-    x: region.x + insetLeft,
-    y: region.y + insetTop,
+    x: region.x + insetLeft - nudgeX,
+    y: region.y + insetTop - nudgeY,
     width: Math.max(1, region.width - insetLeft - insetRight),
     height: Math.max(1, region.height - insetTop - insetBottom)
   }

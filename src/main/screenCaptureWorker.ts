@@ -64,17 +64,30 @@ async function handle(payload: ScreenCaptureWorkerRequest): Promise<ScreenCaptur
   // relate for THIS monitor specifically, not an assumed scale factor.
   const scaleX = image.width / displayBounds.width
   const scaleY = image.height / displayBounds.height
-  const x = Math.max(0, Math.min(image.width - 1, Math.round((region.x - displayBounds.x) * scaleX)))
-  const y = Math.max(0, Math.min(image.height - 1, Math.round((region.y - displayBounds.y) * scaleY)))
-  const width = Math.max(1, Math.min(image.width - x, Math.round(region.width * scaleX)))
-  const height = Math.max(1, Math.min(image.height - y, Math.round(region.height * scaleY)))
+  const wantX = Math.round((region.x - displayBounds.x) * scaleX)
+  const wantY = Math.round((region.y - displayBounds.y) * scaleY)
+  const wantW = Math.max(1, Math.round(region.width * scaleX))
+  const wantH = Math.max(1, Math.round(region.height * scaleY))
+  const x = Math.max(0, Math.min(image.width - 1, wantX))
+  const y = Math.max(0, Math.min(image.height - 1, wantY))
+  const width = Math.max(1, Math.min(image.width - x, wantX + wantW - x))
+  const height = Math.max(1, Math.min(image.height - y, wantY + wantH - y))
 
   const cropped = image.cropSync(x, y, width, height)
   const raw = cropped.toRawSync()
   // node-screenshots' own toJpeg has no quality knob — routed through sharp
   // (already a dependency) for that, same as the old sharpen-only path did,
   // just unconditionally now.
-  const encoder = sharp(raw, { raw: { width: cropped.width, height: cropped.height, channels: 4 } })
+  let encoder = sharp(raw, { raw: { width: cropped.width, height: cropped.height, channels: 4 } })
+  // A region partly off the display (e.g. a DCS viewport nudged past the edge
+  // of its slot) keeps its full size, padded with black, so the shift is real.
+  const padLeft = x - wantX
+  const padTop = y - wantY
+  const padRight = Math.max(0, wantW - cropped.width - padLeft)
+  const padBottom = Math.max(0, wantH - cropped.height - padTop)
+  if (padLeft > 0 || padTop > 0 || padRight > 0 || padBottom > 0) {
+    encoder = encoder.extend({ left: padLeft, top: padTop, right: padRight, bottom: padBottom, background: { r: 0, g: 0, b: 0, alpha: 1 } })
+  }
   if (sharpen) encoder.sharpen()
   const jpeg = await encoder.jpeg({ quality }).toBuffer()
   return { jpeg }

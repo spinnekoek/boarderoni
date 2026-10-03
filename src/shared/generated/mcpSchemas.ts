@@ -3413,6 +3413,13 @@ export const MCP_SCHEMAS = {
           "cropLeft": {
             "type": "number"
           },
+          "nudgeX": {
+            "type": "number",
+            "description": "Shifts the displayed image by this many source pixels (positive = right / down) without resizing it, by sliding the captured region the other way. For when DCS's export isn't centered in its slot. Unset = 0."
+          },
+          "nudgeY": {
+            "type": "number"
+          },
           "streamMode": {
             "type": "string",
             "enum": [

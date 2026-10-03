@@ -2299,6 +2299,13 @@ export interface DcsViewportWidget extends WidgetVisibility {
   cropRight?: number
   cropBottom?: number
   cropLeft?: number
+  /**
+   * Shifts the displayed image by this many source pixels (positive = right /
+   * down) without resizing it, by sliding the captured region the other way.
+   * For when DCS's export isn't centered in its slot. Unset = 0.
+   */
+  nudgeX?: number
+  nudgeY?: number
   streamMode?: 'poll' | 'mjpeg'
   /**
    * When not explicitly false, the widget loads showing a "tap to start

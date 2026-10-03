@@ -18,6 +18,11 @@ export interface DcsViewportComponent {
   initFile?: string
   // Skips the MFCD-bezel crop applied to captures (see resolveComponentRegion).
   noBezelInset?: boolean
+  // Extra capture crop (px) on the left edge only, for components whose
+  // texture carries a stray strip of the neighbouring viewport there.
+  leftInsetPx?: number
+  // Square slot edge in px; defaults to the even-split size shared by the rest.
+  size?: number
 }
 
 export interface DcsAircraftProfile {
@@ -35,8 +40,13 @@ export const DCS_AIRCRAFT_CATALOG: Record<string, DcsAircraftProfile> = {
       {
         id: 'RWR_FA18C',
         label: 'RWR (ALR-67)',
-        initFile: 'Mods/aircraft/FA-18C/Cockpit/Scripts/TEWS/indicator/RWR_ALR67_init.lua',
-        noBezelInset: true
+        // The BAKE init, not RWR_ALR67_init.lua: the shipped config.lua has
+        // bakeIndicators = true, and ED's own MFCDs call
+        // try_find_assigned_viewport from their *_bake_init.lua in that mode.
+        initFile: 'Mods/aircraft/FA-18C/Cockpit/Scripts/TEWS/indicator/BAKE/RWR_ALR67_bake_init.lua',
+        noBezelInset: true,
+        leftInsetPx: 6,
+        size: 320
       }
     ]
   }
@@ -56,16 +66,22 @@ export function findComponent(aircraft: string, componentId: string): DcsViewpor
 // fill the full display height, which would distort the instrument's
 // aspect ratio. The virtual display is never actually seen, so the leftover
 // space below the row is simply left black; that's fine.
+// Black gutter between neighbouring slots so edge bleed/rounding from one
+// instrument's render never shows up in the next one's capture.
+const SLOT_GAP = 8
+
 export function computeAircraftSlots(virtualDisplayBounds: ScreenRegion, aircraft: string): Record<string, ScreenRegion> {
   const profile = DCS_AIRCRAFT_CATALOG[aircraft]
   if (!profile || profile.components.length === 0) return {}
   const count = profile.components.length
-  const squareSize = Math.floor(Math.min(virtualDisplayBounds.width / count, virtualDisplayBounds.height))
+  const defaultSize = Math.floor(Math.min((virtualDisplayBounds.width - SLOT_GAP * (count - 1)) / count, virtualDisplayBounds.height))
   const slots: Record<string, ScreenRegion> = {}
-  profile.components.forEach((component, index) => {
-    const x = virtualDisplayBounds.x + index * squareSize
-    slots[component.id] = { x, y: virtualDisplayBounds.y, width: squareSize, height: squareSize }
-  })
+  let x = virtualDisplayBounds.x
+  for (const component of profile.components) {
+    const size = Math.min(component.size ?? defaultSize, virtualDisplayBounds.height)
+    slots[component.id] = { x, y: virtualDisplayBounds.y, width: size, height: size }
+    x += size + SLOT_GAP
+  }
   return slots
 }
 

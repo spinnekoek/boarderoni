@@ -8159,6 +8159,32 @@ export function PropertiesPanel(): React.JSX.Element {
               />
             </label>
           </div>
+
+          <span className="properties__section-label">Nudge</span>
+          <span className="properties__hint-inline">
+            Slides the image in source pixels without resizing it — positive moves it right / down. Use it if DCS's
+            export isn't centered in its slot.
+          </span>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>X (px)</span>
+              <input
+                type="number"
+                step={1}
+                value={dv.nudgeX ?? 0}
+                onChange={(e) => patchDcsViewport({ nudgeX: Number(e.target.value) || 0 })}
+              />
+            </label>
+            <label className="properties__field">
+              <span>Y (px)</span>
+              <input
+                type="number"
+                step={1}
+                value={dv.nudgeY ?? 0}
+                onChange={(e) => patchDcsViewport({ nudgeY: Number(e.target.value) || 0 })}
+              />
+            </label>
+          </div>
         </PropertiesSection>
 
         <PropertiesSection title="Stream">
