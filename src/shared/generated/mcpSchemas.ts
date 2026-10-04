@@ -1661,6 +1661,22 @@ export const MCP_SCHEMAS = {
           "squareBorderColorExpr": {
             "type": "string"
           },
+          "squareGlowColor": {
+            "type": "string"
+          },
+          "squareGlowColorExpr": {
+            "type": "string"
+          },
+          "squareGlowSize": {
+            "type": "number"
+          },
+          "shapeLabels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/WidgetLabel"
+            },
+            "description": "Text written on the square/circle shape; rotates with it."
+          },
           "circleSize": {
             "type": "number",
             "description": "'circle' dialShape only."
@@ -1805,6 +1821,18 @@ export const MCP_SCHEMAS = {
                 "items": {
                   "$ref": "#/definitions/SequenceStep"
                 }
+              },
+              "pull": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/SequenceStep"
+                }
+              },
+              "push": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/SequenceStep"
+                }
               }
             },
             "required": [
@@ -1816,6 +1844,9 @@ export const MCP_SCHEMAS = {
             ],
             "additionalProperties": false,
             "description": "Same press/release model as ButtonWidget, plus 'move' — fires continuously (throttled) while dragging, with the live position exposed as `variables.$value` same as press/release get for their own moment (initial touch position for press, final settled position for release). doublePress/triplePress follow the exact same optIN-by-being-non-empty convention as ButtonWidget.events' own (see its comment) — arbitrating the initial touch-down doesn't affect the continuous 'move' stream or 'release' at all, only whether that first touch reports itself as press/doublePress/triplePress."
+          },
+          "pull": {
+            "$ref": "#/definitions/PullConfig"
           },
           "fill": {
             "$ref": "#/definitions/ColorAppearance"
@@ -1963,6 +1994,45 @@ export const MCP_SCHEMAS = {
         "additionalProperties": false,
         "description": "Independent per-side border width / per-corner border radius for a square-shaped indicator — same box-model shape as the per-side fields Dropdown/RockerSwitch widgets already use (see SidesInputGrid/ CornersInputGrid in PropertiesPanel.tsx). Only meaningful when the field it's attached to (indicatorSquareBorder) is present AND that indicator's shape is 'square' — an SVG <rect> can't express per-side stroke-width or per-corner radius on its own, so a 'square' indicator renders as a plain HTML div using real CSS border-*-width/border-radius instead, which is what this type's fields map onto directly. Any side/corner left unset falls back to the owning DetentStyle's own scalar borderWidth/borderRadius (and ultimately to DetentShapeEditor's per-shape default), so leaving this entirely unset looks identical to the old single-scalar behavior."
       },
+      "PullConfig": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right"
+            ]
+          },
+          "amount": {
+            "type": "number"
+          },
+          "turnWhen": {
+            "type": "string",
+            "enum": [
+              "pulled",
+              "pushed",
+              "either"
+            ]
+          },
+          "pulledExpr": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "direction",
+          "amount",
+          "turnWhen"
+        ],
+        "additionalProperties": false,
+        "description": "Optional pull-out/push-in behavior for DialSwitchWidget and AdjusterKnobWidget (e.g. the F/A-18 wing fold handle: pull it out, turn it, push it back in). Off unless `enabled` is true — an absent `pull` behaves exactly like before it existed. Dragging along `direction` pulls the whole widget out by `amount` px; dragging back the opposite way pushes it in. `pulledExpr` (fx) drives pulled/pushed from a variable, same precedence as ToggleSwitchWidget.guardOpenExpr over its local tap state. Dials only support it in 'drag' interactionMode."
+      },
       "EncoderWidget": {
         "type": "object",
         "properties": {
@@ -2014,6 +2084,22 @@ export const MCP_SCHEMAS = {
           },
           "squareBorderColorExpr": {
             "type": "string"
+          },
+          "squareGlowColor": {
+            "type": "string"
+          },
+          "squareGlowColorExpr": {
+            "type": "string"
+          },
+          "squareGlowSize": {
+            "type": "number"
+          },
+          "shapeLabels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/WidgetLabel"
+            },
+            "description": "Text written on the square/circle shape; rotates with it."
           },
           "circleSize": {
             "type": "number",
@@ -2536,6 +2622,22 @@ export const MCP_SCHEMAS = {
           "squareBorderColorExpr": {
             "type": "string"
           },
+          "squareGlowColor": {
+            "type": "string"
+          },
+          "squareGlowColorExpr": {
+            "type": "string"
+          },
+          "squareGlowSize": {
+            "type": "number"
+          },
+          "shapeLabels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/WidgetLabel"
+            },
+            "description": "Text written on the square/circle shape; rotates with it."
+          },
           "circleSize": {
             "type": "number",
             "description": "'circle' dialShape only."
@@ -2703,6 +2805,18 @@ export const MCP_SCHEMAS = {
                 "items": {
                   "$ref": "#/definitions/SequenceStep"
                 }
+              },
+              "pull": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/SequenceStep"
+                }
+              },
+              "push": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/SequenceStep"
+                }
               }
             },
             "required": [
@@ -2716,6 +2830,9 @@ export const MCP_SCHEMAS = {
             ],
             "additionalProperties": false,
             "description": "Root-level, alongside (not instead of) each position's own onSelect — see RockerSwitchWidget.events' own comment for press/release/ positionChange. increment/decrement are DialSwitchWidget-only (the one switch type that's actually rotary) — same 'Turn CW'/'Turn CCW' vocabulary EncoderWidget already uses, fired when a selection lands on a higher/lower position index than whichever was active before it, in ADDITION to that selection's own onSelect/positionChange — see useSwitchPosition.ts. doublePress/triplePress: same optIN-by-being-non-empty convention as ButtonWidget.events' own (see its comment) — a tap is only ever held back to arbitrate single/double/triple when at least one of these two actually has steps, so a dial switch with neither configured keeps firing press the instant it's pressed, zero added latency."
+          },
+          "pull": {
+            "$ref": "#/definitions/PullConfig"
           },
           "startAngle": {
             "type": "number"

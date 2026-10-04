@@ -49,7 +49,8 @@ export function DialSwitchWidgetContent({
   onPointerDown,
   onPointerMove,
   onPointerUp,
-  applyRotation = true
+  applyRotation = true,
+  pullStyle
 }: {
   widget: DialSwitchWidget
   variables: VariableMap
@@ -64,6 +65,8 @@ export function DialSwitchWidgetContent({
   // rotates the outer selection/resize wrapper itself and passes false here
   // to avoid rotating twice.
   applyRotation?: boolean
+  // Slides the dial itself (face, detents, indicator) while labels stay put.
+  pullStyle?: React.CSSProperties
 }): React.JSX.Element {
   const debugMode = useEditorSettings((s) => s.debugMode)
   const resolvedTrack = resolveColor(widget.track, variables)
@@ -160,8 +163,12 @@ export function DialSwitchWidgetContent({
           layer" choice ButtonWidget/AdjusterWidget/ToggleSwitchWidget's own
           rotateAngle makes. */}
       <div className="deck-dial-switch__rotated" style={applyRotation && rotateAngle ? { transform: `rotate(${rotateAngle}deg)` } : undefined}>
+      <div style={pullStyle ?? { position: 'absolute', inset: 0 }}>
       <svg className="deck-dial-switch__dial" viewBox="0 0 100 100">
         <circle cx={50} cy={50} r={45} fill={trackColor} stroke={borderColor} strokeWidth={2} />
+      </svg>
+      </div>
+      <svg className="deck-dial-switch__dial" viewBox="0 0 100 100">
         {detentShape === 'triangle' &&
           positionMarkers.map(({ position, angle, dotVb, dotColor, handleSelect }) => {
             const halfW = baseDetentSize.width / 2
@@ -217,17 +224,9 @@ export function DialSwitchWidgetContent({
               onClick={handleSelect}
             />
           )}
-          {(position.labels ?? []).map((positionLabel) => {
-            const labelVb = labelAnchorPoint(dotVb, angle, detentRadius, positionLabel.labelDistance ?? LABEL_OFFSET, positionLabel.labelAnchor)
-            const label = viewBoxToPixel(labelVb.x, labelVb.y, widget.w, widget.h)
-            return (
-              <div key={positionLabel.id} className="deck-dial-switch__detent-label" style={{ left: label.x, top: label.y }} onClick={handleSelect}>
-                {renderWidgetLabel(positionLabel, trackColor, variables, debugMode)}
-              </div>
-            )
-          })}
         </div>
       ))}
+      <div style={pullStyle ?? { position: "absolute", inset: 0 }}>
       {/* Needle/square/circle dial-shape indicator, layered above every
           detent marker (drawn above, both in DOM order and — for the
           triangle/track svg above — the separate layer) so the pointer
@@ -250,6 +249,18 @@ export function DialSwitchWidgetContent({
         />
       </svg>
       <SquareIndicatorOverlay style={widget} angle={needleAngle} shapeColor={shapeColor} w={widget.w} h={widget.h} variables={variables} />
+      </div>
+      {positionMarkers.map(({ position, angle, dotVb, handleSelect }) =>
+        (position.labels ?? []).map((positionLabel) => {
+          const labelVb = labelAnchorPoint(dotVb, angle, detentRadius, positionLabel.labelDistance ?? LABEL_OFFSET, positionLabel.labelAnchor)
+          const label = viewBoxToPixel(labelVb.x, labelVb.y, widget.w, widget.h)
+          return (
+            <div key={positionLabel.id} className="deck-dial-switch__detent-label" style={{ left: label.x, top: label.y }} onClick={handleSelect}>
+              {renderWidgetLabel(positionLabel, trackColor, variables, debugMode)}
+            </div>
+          )
+        })
+      )}
       {renderWidgetLabels(widget.labels, trackColor, variables, debugMode)}
       </div>
     </div>

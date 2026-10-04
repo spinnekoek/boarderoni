@@ -1,6 +1,7 @@
 import type { DialShapeStyle } from '@shared/types'
 import { withOpacity } from '@shared/color'
 import { resolveExprColor, type VariableMap } from '@shared/expr'
+import { renderWidgetLabels } from './labels'
 import { needlePoints, polarToCartesian, roundedPolygonPath, viewBoxToPixel } from './arcPath'
 
 // Box size (viewBox units) for each detent/indicator shape — 'tick'/
@@ -214,6 +215,9 @@ export function DialShapeGraphic({
   const squareBorderRadius = style.squareBorderRadius ?? 2
   const squareColor = resolveExprColor(style.squareColor ?? fillColor, style.squareColorExpr, variables).color ?? fillColor
   const squareBorderColor = resolveExprColor(style.squareBorderColor ?? 'transparent', style.squareBorderColorExpr, variables).color ?? 'transparent'
+  const squareGlowColor = resolveExprColor(style.squareGlowColor, style.squareGlowColorExpr, variables).color
+  const squareGlowSize = style.squareGlowSize ?? 6
+  const squareGlow = squareGlowColor && squareGlowSize > 0 ? `drop-shadow(0 0 ${squareGlowSize / 2}px ${squareGlowColor}) drop-shadow(0 0 ${squareGlowSize}px ${squareGlowColor})` : undefined
   const circleSize = style.circleSize ?? 20
   const circleBorderWidth = style.circleBorderWidth ?? 0
   const circleColor = resolveExprColor(style.circleColor ?? fillColor, style.circleColorExpr, variables).color ?? fillColor
@@ -224,6 +228,16 @@ export function DialShapeGraphic({
   const circleIndentDistance = style.circleIndentDistance ?? circleSize / 2
   const circleIndentShape = style.circleIndentShape ?? 'circle'
   const dialCenter = polarToCartesian(50, 50, dialDistance, angle)
+  // Labels fill a box the size of the shape, so they sit on it and turn with it.
+  const renderShapeLabels = (cx: number, cy: number, w: number, h: number): React.JSX.Element | null =>
+    style.shapeLabels && style.shapeLabels.length > 0 ? (
+      <foreignObject x={cx - w / 2} y={cy - h / 2} width={w} height={h} style={{ overflow: 'visible', pointerEvents: 'none' }}>
+        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+          {renderWidgetLabels(style.shapeLabels, shapeColorForLabels, variables)}
+        </div>
+      </foreignObject>
+    ) : null
+  const shapeColorForLabels = dialShape === 'square' ? squareColor : circleColor
 
   const shapeColor = dialShape === 'square' ? squareColor : circleColor
   const indicator = resolveDialIndicator(style, angle, shapeColor, variables)
@@ -245,7 +259,7 @@ export function DialShapeGraphic({
         // Unrotated, the rect's top edge points up (angle 0) — same
         // convention as the tick/triangle detents — so rotating the whole
         // group by `angle` makes that edge point at the active detent.
-        <g transform={`rotate(${angle} 50 50) translate(0 ${-dialDistance})`}>
+        <g transform={`rotate(${angle} 50 50) translate(0 ${-dialDistance})`} style={squareGlow ? { filter: squareGlow } : undefined}>
           <rect
             x={50 - squareWidth / 2}
             y={50 - squareHeight / 2}
@@ -256,11 +270,13 @@ export function DialShapeGraphic({
             stroke={squareBorderColor}
             strokeWidth={squareBorderWidth}
           />
+          {renderShapeLabels(50, 50, squareWidth, squareHeight)}
         </g>
       )}
       {dialShape === 'circle' && (
         <>
           <circle cx={dialCenter.x} cy={dialCenter.y} r={circleSize / 2} fill={circleColor} stroke={circleBorderColor} strokeWidth={circleBorderWidth} />
+          <g transform={`rotate(${angle} ${dialCenter.x} ${dialCenter.y})`}>{renderShapeLabels(dialCenter.x, dialCenter.y, circleSize, circleSize)}</g>
           {Array.from({ length: circleIndentCount }, (_, i) => {
             const indentAngle = angle + (i * 360) / circleIndentCount
             const indentPoint = polarToCartesian(dialCenter.x, dialCenter.y, circleIndentDistance, indentAngle)

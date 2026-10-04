@@ -229,12 +229,23 @@ export function useAdjusterDrag(
   // all (nothing to reconcile against — the widget has no live rest
   // position to hand back to, so staying at the last-dragged spot is
   // already correct).
+  const prevRestRef = useRef<number | undefined>(undefined)
   useEffect(() => {
+    const restValue = widget.valueExpr ? resolveNumericExpr(widget.valueExpr, variables) : undefined
+    const changed = prevRestRef.current !== undefined && restValue !== undefined && restValue !== prevRestRef.current
+    prevRestRef.current = restValue
     if (draggingRef.current) return
     if (dragValueRef.current === null) return
     if (!widget.valueExpr) return
-    const restValue = resolveNumericExpr(widget.valueExpr, variables)
     if (restValue === undefined) return
+    // The live value moved after the gesture ended (our own echo, or the game
+    // resetting it): hand control back even if it was quantized away from
+    // what we sent, otherwise the knob stays stuck at the dragged spot.
+    if (changed) {
+      dragValueRef.current = null
+      setDragFraction(undefined)
+      return
+    }
     // Scaled to the range: a 0..65535 knob sends a fractional value but
     // DCS-BIOS reads back an integer, which never lands within a fixed 0.01.
     const tolerance = Math.max(RECONCILE_EPSILON, Math.abs(widget.max - widget.min) * 0.001)
