@@ -177,13 +177,22 @@ function RuleEditor({
   )
 }
 
+// Survives the modal closing, so reopening lands on the same rule.
+let lastSelectedId: string | null = null
+
 export function GlobalActionsModal({ onClose }: { onClose: () => void }): React.JSX.Element {
   const globalActions = useDashboardStore((s) => s.dashboard.globalActions) ?? []
   const updateDashboardMeta = useDashboardStore((s) => s.updateDashboardMeta)
   const confirm = useConfirmStore((s) => s.confirm)
   useEscapeToClose(onClose)
 
-  const [selectedId, setSelectedId] = useState<string | null>(globalActions[0]?.id ?? null)
+  const [selectedId, setSelectedIdState] = useState<string | null>(
+    globalActions.find((r) => r.id === lastSelectedId)?.id ?? globalActions[0]?.id ?? null
+  )
+  function setSelectedId(id: string | null): void {
+    lastSelectedId = id
+    setSelectedIdState(id)
+  }
 
   // Same "fetch once if null" shape PropertiesPanel uses for its own copy of
   // this — the modal can be the first thing opened in a session, so it can't

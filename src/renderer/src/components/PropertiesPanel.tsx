@@ -37,6 +37,7 @@ import type {
   DetentStyle,
   DialShapeStyle,
   DialSwitchWidget,
+  PullConfig,
   DropdownWidget,
   EncoderTickSet,
   EncoderWidget,
@@ -960,6 +961,7 @@ function DialShapeFields({
   track: ColorAppearance
   needleColorLabel: string
 }): React.JSX.Element {
+  const confirm = useConfirmStore((s) => s.confirm)
   const isFillExpr = fill.colorExpr !== undefined
   const dialShape = value.dialShape ?? 'needle'
 
@@ -1072,6 +1074,32 @@ function DialShapeFields({
                 onClearExpr={() => onChange({ squareColorExpr: undefined })}
               />
             </div>
+            <div className="properties__field">
+              <span>Square glow color</span>
+              <ColorPickerButton
+                value={value.squareGlowColor ?? DEFAULT_WIDGET_COLOR}
+                onChange={(color) => onChange({ squareGlowColor: color, squareGlowColorExpr: undefined })}
+                auto={value.squareGlowColor === undefined}
+                onAuto={() => onChange({ squareGlowColor: undefined })}
+                isExpr={value.squareGlowColorExpr !== undefined}
+                exprValue={value.squareGlowColorExpr ?? ''}
+                onExprChange={(code) => onChange({ squareGlowColorExpr: code })}
+                onEnterExpr={() => onChange({ squareGlowColorExpr: value.squareGlowColorExpr ?? '' })}
+                onClearExpr={() => onChange({ squareGlowColorExpr: undefined })}
+              />
+            </div>
+            <label className="properties__field">
+              <span>Square glow size</span>
+              <input
+                type="number"
+                min={0}
+                value={value.squareGlowSize ?? 6}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) onChange({ squareGlowSize: Math.max(0, n) })
+                }}
+              />
+            </label>
             <div className="properties__field">
               <span>Square border color</span>
               <ColorPickerButton
@@ -1209,7 +1237,33 @@ function DialShapeFields({
             <p className="properties__hint">Auto matches the dial face/track color, so a notch reads as the face showing through. Pick a color to give it its own look instead.</p>
           </>
         )}
+
+        {(dialShape === 'square' || dialShape === 'circle') && (
+          <PropertiesSection title="Shape labels" badge={(value.shapeLabels ?? []).length}>
+            {(value.shapeLabels ?? []).map((label) => (
+              <PropertiesSection key={label.id} title={labelSectionTitle(label)} sectionKey={label.id}>
+                <LabelFields
+                  label={label}
+                  backgroundColor={(dialShape === 'square' ? value.squareColor : value.circleColor) ?? fill.color ?? DEFAULT_WIDGET_COLOR}
+                  onChange={(fields) => onChange({ shapeLabels: (value.shapeLabels ?? []).map((l) => (l.id === label.id ? { ...l, ...fields } : l)) })}
+                  onRemove={async () => {
+                    const ok = await confirm('Remove this label? This cannot be undone.', { confirmLabel: 'Remove' })
+                    if (ok) onChange({ shapeLabels: (value.shapeLabels ?? []).filter((l) => l.id !== label.id) })
+                  }}
+                />
+              </PropertiesSection>
+            ))}
+            <button
+              type="button"
+              className="properties__file-button"
+              onClick={() => onChange({ shapeLabels: [...(value.shapeLabels ?? []), { id: nextId(), text: 'Label', align: 'center', verticalAlign: 'center' }] })}
+            >
+              + Add label
+            </button>
+          </PropertiesSection>
+        )}
       </PropertiesSection>
+
 
       {(dialShape === 'square' || dialShape === 'circle') && (
         <PropertiesSection title="Indicator">
@@ -2371,8 +2425,8 @@ function PlaySoundActionEditor({
           type="button"
           className="properties__file-button"
           disabled={!selected}
-          title={selected ? 'Play it here, with this sound’s own start offset applied' : 'Pick a sound first'}
-          onClick={() => selected && playSound(selected, 1, selected.startAtMs ?? 0)}
+          title={selected ? 'Play it here at the volume set below, with this sound’s own start offset applied' : 'Pick a sound first'}
+          onClick={() => selected && playSound(selected, (showServer ? action.serverVolume : action.clientVolume) / 100, selected.startAtMs ?? 0)}
         >
           ▶ Play
         </button>
@@ -2933,6 +2987,95 @@ function SwitchPositionsEditor({
         </button>
       </PropertiesSection>
     </>
+  )
+}
+
+// Pull-out/push-in settings shared by the dial switch and the knob — see
+// PullConfig in shared/types.ts. Everything past the checkbox only shows once
+// it's on, so the default panel looks the same as before this existed.
+const DEFAULT_PULL: PullConfig = { enabled: true, direction: 'down', amount: 12, turnWhen: 'pulled' }
+const PULLED_EXPR_PLACEHOLDER = 'return variables.WING_FOLD_PULL === 1;'
+
+function PullSection({
+  pull,
+  onChange,
+  needsDragMode
+}: {
+  pull: PullConfig | undefined
+  onChange: (pull: PullConfig | undefined) => void
+  needsDragMode?: boolean
+}): React.JSX.Element {
+  const enabled = pull?.enabled ?? false
+  const patch = (fields: Partial<PullConfig>): void => onChange({ ...(pull ?? DEFAULT_PULL), ...fields })
+  const isExpr = pull?.pulledExpr !== undefined
+  return (
+    <PropertiesSection title="Pull">
+      <label className="properties__checkbox">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => (e.target.checked ? onChange({ ...(pull ?? DEFAULT_PULL), enabled: true }) : onChange(pull ? { ...pull, enabled: false } : undefined))}
+        />
+        Pullable
+      </label>
+      <p className="properties__hint">
+        Double-click to pull it out, double-click again to push it back in. Off by default.
+        {needsDragMode ? " Needs the Interaction setting to be 'Press and drag toward a position'." : ''}
+      </p>
+      {enabled && pull && (
+        <>
+          <div className="properties__grid2">
+            <label className="properties__field">
+              <span>Pull direction</span>
+              <select value={pull.direction} onChange={(e) => patch({ direction: e.target.value as PullConfig['direction'] })}>
+                <option value="up">Up</option>
+                <option value="down">Down</option>
+                <option value="left">Left</option>
+                <option value="right">Right</option>
+              </select>
+            </label>
+            <label className="properties__field">
+              <span>Pull amount (px)</span>
+              <input
+                type="number"
+                min={0}
+                value={pull.amount}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isNaN(n)) patch({ amount: Math.max(0, n) })
+                }}
+              />
+            </label>
+          </div>
+          <label className="properties__field">
+            <span>Can turn when</span>
+            <select value={pull.turnWhen} onChange={(e) => patch({ turnWhen: e.target.value as PullConfig['turnWhen'] })}>
+              <option value="pulled">Pulled out</option>
+              <option value="pushed">Pushed in</option>
+              <option value="either">Either</option>
+            </select>
+          </label>
+          <label className="properties__field">
+            <span>Pulled when</span>
+            <div className="properties__file-row">
+              <span className="properties__hint-inline">{isExpr ? 'Using expression below' : 'Local double-click (starts pushed in)'}</span>
+              {isExpr ? (
+                <button type="button" className="color-picker-button__clear" title="Go back to local double-click control" onClick={() => patch({ pulledExpr: undefined })}>
+                  ×
+                </button>
+              ) : (
+                <button type="button" className="color-picker-button__fx" title="Drive pulled/pushed from an expression" onClick={() => patch({ pulledExpr: '' })}>
+                  ƒx
+                </button>
+              )}
+            </div>
+          </label>
+          {isExpr && (
+            <ExpressionField label="Expression" value={pull.pulledExpr ?? ''} onChange={(code) => patch({ pulledExpr: code })} placeholder={PULLED_EXPR_PLACEHOLDER} />
+          )}
+        </>
+      )}
+    </PropertiesSection>
   )
 }
 
@@ -5637,7 +5780,9 @@ export function PropertiesPanel(): React.JSX.Element {
           </button>
         </PropertiesSection>
 
-        <PropertiesSection title="Actions" badge={5}>
+        <PullSection pull={adjuster.pull} onChange={(pull) => patchAdjuster({ pull })} />
+
+        <PropertiesSection title="Actions" badge={adjuster.pull?.enabled ? 5 : 3}>
           <EventSequenceEditor
             title="Press"
             steps={adjuster.events.press}
@@ -5651,22 +5796,6 @@ export function PropertiesPanel(): React.JSX.Element {
             dcsBiosActionEnabled={dcsBiosActionEnabled}
           />
           <EventSequenceEditor
-            title="Double press"
-            steps={adjuster.events.doublePress ?? []}
-            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, doublePress: steps } })}
-            dcsBiosActionEnabled={dcsBiosActionEnabled}
-          />
-          <EventSequenceEditor
-            title="Triple press"
-            steps={adjuster.events.triplePress ?? []}
-            onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, triplePress: steps } })}
-            dcsBiosActionEnabled={dcsBiosActionEnabled}
-          />
-          <p className="properties__hint">
-            Double/Triple press only engage the double/triple-tap window at all once either has any steps — with both empty, Press
-            fires the instant the drag starts, same as always.
-          </p>
-          <EventSequenceEditor
             title="Move (while dragging)"
             steps={adjuster.events.move}
             onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, move: steps } })}
@@ -5677,6 +5806,25 @@ export function PropertiesPanel(): React.JSX.Element {
             {adjuster.max}). Press/Release fire once each, at the start/end of a drag gesture, with the same{' '}
             <code>variables.$value</code> available.
           </p>
+          {adjuster.pull?.enabled && (
+            <>
+              <EventSequenceEditor
+                title="Pull out"
+                steps={adjuster.events.pull ?? []}
+                onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, pull: steps } })}
+                dcsBiosActionEnabled={dcsBiosActionEnabled}
+              />
+              <EventSequenceEditor
+                title="Push in"
+                steps={adjuster.events.push ?? []}
+                onChange={(steps) => patchAdjuster({ events: { ...adjuster.events, push: steps } })}
+                dcsBiosActionEnabled={dcsBiosActionEnabled}
+              />
+              <p className="properties__hint">
+                Pull out fires with <code>variables.$value</code> 1, Push in with 0.
+              </p>
+            </>
+          )}
         </PropertiesSection>
 
         <PropertiesSection title="Layout">
@@ -7350,6 +7498,8 @@ export function PropertiesPanel(): React.JSX.Element {
           )}
         </PropertiesSection>
 
+        <PullSection pull={sw.pull} onChange={(pull) => patchSwitch({ pull })} needsDragMode={sw.interactionMode !== 'drag'} />
+
         <PropertiesSection title="Detents">
           <DetentShapeEditor
             shape={sw.detentShape ?? 'circle'}
@@ -7504,6 +7654,24 @@ export function PropertiesPanel(): React.JSX.Element {
               hint: "Runs on every selection, alongside that position's own action below — variables.$value is the position's name, variables.$index its position, so one shared sequence can still tell which fired it.",
               variableHint: 'variables.$value'
             },
+            ...(sw.pull?.enabled
+              ? [
+                  {
+                    title: 'Pull out',
+                    steps: sw.events.pull ?? [],
+                    onChange: (steps: SequenceStep[]) => patchSwitch({ events: { ...sw.events, pull: steps } }),
+                    hint: 'Fires when the dial is pulled out — variables.$value is 1.',
+                    variableHint: 'variables.$value'
+                  },
+                  {
+                    title: 'Push in',
+                    steps: sw.events.push ?? [],
+                    onChange: (steps: SequenceStep[]) => patchSwitch({ events: { ...sw.events, push: steps } }),
+                    hint: 'Fires when the dial is pushed back in — variables.$value is 0.',
+                    variableHint: 'variables.$value'
+                  }
+                ]
+              : []),
             {
               title: 'Turn CW (increment)',
               steps: sw.events.increment,
@@ -7517,17 +7685,6 @@ export function PropertiesPanel(): React.JSX.Element {
               onChange: (steps) => patchSwitch({ events: { ...sw.events, decrement: steps } }),
               hint: 'Fires when turning the dial lands on a lower position index than whichever was active before — variables.$value/$index are the landed-on position’s name/index, same as Position Change.',
               variableHint: 'variables.$value'
-            },
-            {
-              title: 'Double press',
-              steps: sw.events.doublePress ?? [],
-              onChange: (steps) => patchSwitch({ events: { ...sw.events, doublePress: steps } }),
-              hint: 'Only engages the double/triple-tap window at all once this or Triple press has any steps — with both empty, Press fires the instant it’s pressed, same as always.'
-            },
-            {
-              title: 'Triple press',
-              steps: sw.events.triplePress ?? [],
-              onChange: (steps) => patchSwitch({ events: { ...sw.events, triplePress: steps } })
             }
           ]}
         />

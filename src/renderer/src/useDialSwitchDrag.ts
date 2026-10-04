@@ -58,7 +58,8 @@ function nearestPositionIndex(widget: DialSwitchWidget, pointerAngle: number): n
 export function useDialSwitchDrag(
   widget: DialSwitchWidget,
   select: (index: number) => void,
-  variables: VariableMap
+  variables: VariableMap,
+  activeIndex?: number
 ): {
   dragIndex: number | undefined
   handlePointerDown: (e: React.PointerEvent) => void
@@ -100,7 +101,9 @@ export function useDialSwitchDrag(
 
   function handlePointerDown(e: React.PointerEvent): void {
     draggingRef.current = true
-    lastFiredIndexRef.current = null
+    // Grabbing the dial where it already sits shouldn't re-fire that
+    // position (it'd play its sound/actions again just for touching it).
+    lastFiredIndexRef.current = activeIndex ?? null
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {

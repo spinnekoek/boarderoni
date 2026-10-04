@@ -14,7 +14,9 @@ export const EVENT_LABELS: Record<WidgetEventKind, string> = {
   // total Record over WidgetEventKind.
   select: 'Select',
   positionChange: 'Position Change',
-  guardToggle: 'Guard Press'
+  guardToggle: 'Guard Press',
+  pull: 'Pull out',
+  push: 'Push in'
 }
 
 // Which WidgetEventKind values apply to this widget's type, in display/
@@ -47,6 +49,7 @@ export function getEventSteps(widget: EventfulWidget, event: WidgetEventKind): S
       : undefined
   }
   if (event === 'select') return undefined
+  if (event === 'pull' || event === 'push') return widget.type === 'adjuster-knob' ? (widget.events[event] ?? []) : undefined
   return widget.events[event]
 }
 

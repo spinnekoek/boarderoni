@@ -385,6 +385,26 @@ export type WidgetEventKind =
   | 'select'
   | 'positionChange'
   | 'guardToggle'
+  | 'pull'
+  | 'push'
+
+/**
+ * Optional pull-out/push-in behavior for DialSwitchWidget and
+ * AdjusterKnobWidget (e.g. the F/A-18 wing fold handle: pull it out, turn it,
+ * push it back in). Off unless `enabled` is true — an absent `pull` behaves
+ * exactly like before it existed. Dragging along `direction` pulls the whole
+ * widget out by `amount` px; dragging back the opposite way pushes it in.
+ * `pulledExpr` (fx) drives pulled/pushed from a variable, same precedence as
+ * ToggleSwitchWidget.guardOpenExpr over its local tap state. Dials only
+ * support it in 'drag' interactionMode.
+ */
+export interface PullConfig {
+  enabled: boolean
+  direction: 'up' | 'down' | 'left' | 'right'
+  amount: number
+  turnWhen: 'pulled' | 'pushed' | 'either'
+  pulledExpr?: string
+}
 
 // x/y/w/h are absolute CSS pixels on the dashboard canvas — not grid units.
 // A widget is always rendered at exactly this pixel size on every client, no
@@ -1147,7 +1167,11 @@ export interface AdjusterKnobWidget extends DialShapeStyle, WidgetVisibility {
     move: SequenceStep[]
     doublePress: SequenceStep[]
     triplePress: SequenceStep[]
+    // Only used while `pull` is enabled — see PullConfig.
+    pull?: SequenceStep[]
+    push?: SequenceStep[]
   }
+  pull?: PullConfig
   fill: ColorAppearance
   track: ColorAppearance
   labels: WidgetLabel[]
@@ -1901,6 +1925,14 @@ export interface DialShapeStyle {
   squareColorExpr?: string
   squareBorderColor?: string
   squareBorderColorExpr?: string
+  // Soft glow around the square. No glow while the color is unset (or the
+  // expression resolves to nothing); size is in the same 0-100 viewBox units
+  // as squareWidth.
+  squareGlowColor?: string
+  squareGlowColorExpr?: string
+  squareGlowSize?: number
+  /** Text written on the square/circle shape; rotates with it. */
+  shapeLabels?: WidgetLabel[]
   /**
    * 'circle' dialShape only.
    */
@@ -2049,7 +2081,11 @@ export interface DialSwitchWidget extends SwitchWidgetBase, DialShapeStyle, Widg
     decrement: SequenceStep[]
     doublePress: SequenceStep[]
     triplePress: SequenceStep[]
+    // Only used while `pull` is enabled — see PullConfig.
+    pull?: SequenceStep[]
+    push?: SequenceStep[]
   }
+  pull?: PullConfig
   startAngle?: number // degrees, default 135
   endAngle?: number // degrees, default 405
   /**

@@ -3240,6 +3240,11 @@ async function triggerAction(
     // ButtonWidget's own (see its events comment) — the client-side arbiter
     // (useMultiPressArbiter) already decided single vs double vs triple
     // before this ever arrives, so this is just "run whichever one it is."
+    if (widget.type === 'switch-dial' && (event === 'pull' || event === 'push')) {
+      await runSequence(room, widget.events[event] ?? [], numericTrigger(value), final, ws, widgetId, event)
+      return
+    }
+
     if (widget.type === 'switch-dial' && (event === 'doublePress' || event === 'triplePress')) {
       await runSequence(room, widget.events[event], numericTrigger(value), final, ws, widgetId, event)
       return

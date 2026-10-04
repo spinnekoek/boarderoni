@@ -50,6 +50,7 @@ import { useEncoderDrag } from '../useEncoderDrag'
 import { useSwitchPosition } from '../useSwitchPosition'
 import { useSwitchGuard } from '../useSwitchGuard'
 import { useDialSwitchDrag } from '../useDialSwitchDrag'
+import { usePull, pullStyle } from '../usePull'
 import { useToggleSwitchDrag } from '../useToggleSwitchDrag'
 import { isMiddlePosition as isMiddleTogglePosition, momentarySpringBackIndex } from './widgets/ToggleSwitchWidget'
 import { useDropdownDrag } from '../useDropdownDrag'
@@ -76,17 +77,20 @@ function ClientAdjuster({
   variables: VariableMap
 }): React.JSX.Element {
   const { dragFraction, handlePointerDown, handlePointerMove, handlePointerUp } = useAdjusterDrag(widget, variables)
-  return (
+  const pullState = usePull(widget.id, widget.type === 'adjuster-knob' ? widget.pull : undefined, variables)
+  const handlers = pullState.wrap({ down: handlePointerDown, move: handlePointerMove, up: handlePointerUp })
+  const content = (
     <AdjusterWidgetContent
       widget={widget}
       variables={variables}
       interactive
       dragFraction={dragFraction}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
+      onPointerDown={handlers.down}
+      onPointerMove={handlers.move}
+      onPointerUp={handlers.up}
     />
   )
+  return pullState.enabled ? <div style={pullStyle(pullState.offset)}>{content}</div> : content
 }
 
 // Owns the drag hook — same split reasoning as ClientAdjuster above, so
@@ -250,7 +254,7 @@ function ClientDialSwitch({ widget, variables }: { widget: DialSwitchWidget; var
   // just satisfies the hook's shared, nullable-for-Rocker return type.
   const { activeIndex: rawActiveIndex, select } = useSwitchPosition(widget, variables)
   const activeIndex = rawActiveIndex ?? 0
-  const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useDialSwitchDrag(widget, select, variables)
+  const { dragIndex, handlePointerDown, handlePointerMove, handlePointerUp } = useDialSwitchDrag(widget, select, variables, activeIndex)
   const triggerWidget = useDashboardStore((s) => s.triggerWidget)
   // ?? [] guards a dashboard saved before these existed — see
   // ButtonWidget.events' own comment in shared/types.ts for the convention.
@@ -258,8 +262,10 @@ function ClientDialSwitch({ widget, variables }: { widget: DialSwitchWidget; var
   const hasTriplePress = (widget.events.triplePress ?? []).length > 0
   const multiPressEnabled = hasDoublePress || hasTriplePress
   const { registerTap } = useMultiPressArbiter(widget.id, hasDoublePress, hasTriplePress)
+  const pullState = usePull(widget.id, widget.pull, variables, widget.interactionMode === 'drag')
+  const pullHandlers = pullState.wrap({ down: handlePointerDown, move: handlePointerMove, up: handlePointerUp })
 
-  const content =
+  const dialContent =
     widget.interactionMode === 'drag' ? (
       <DialSwitchWidgetContent
         widget={widget}
@@ -267,13 +273,15 @@ function ClientDialSwitch({ widget, variables }: { widget: DialSwitchWidget; var
         interactive
         activeIndex={activeIndex}
         dragIndex={dragIndex}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
+        onPointerDown={pullHandlers.down}
+        onPointerMove={pullHandlers.move}
+        onPointerUp={pullHandlers.up}
+        pullStyle={pullState.enabled ? pullStyle(pullState.offset) : undefined}
       />
     ) : (
       <DialSwitchWidgetContent widget={widget} variables={variables} interactive activeIndex={activeIndex} onSelect={select} />
     )
+  const content = dialContent
 
   // Root-level press/release (see DialSwitchWidget.events' own doc comment)
   // — layered on top of, not replacing, the tap/drag handling above (same
